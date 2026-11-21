@@ -131,10 +131,10 @@ const findUserByEmail = async (email) => {
 const findUserByUsername = async (username) => {
     const query = `
         SELECT * FROM users
-        WHERE username = ?
+        WHERE username = ? OR email = ?
     `;
 
-    const [rows] = await db.execute(query, [username]);
+    const [rows] = await db.execute(query, [username, username]);
     return rows[0];
 };
 

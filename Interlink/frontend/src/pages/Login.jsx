@@ -45,7 +45,7 @@ export default function Login() {
             if (error.response?.data?.status === "DEVICE_MISMATCH") {
                 toast.error("Unauthorized device. Contact admin.");
             } else {
-                toast.error(error.response?.data?.message || "Login failed");
+                toast.error(error.response?.data?.message || (error.code === "ERR_NETWORK" ? "Cannot connect to server. Check backend." : error.message) || "Login failed");
             }
         } finally {
             setLoading(false);
