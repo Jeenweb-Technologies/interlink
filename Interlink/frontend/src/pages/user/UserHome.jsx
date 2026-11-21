@@ -1,6 +1,5 @@
 import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import Navbar from "../../components/Navbar";
 import { usePermission } from "../../context/PermissionContext";
 
 export default function UserHome() {
@@ -14,27 +13,24 @@ export default function UserHome() {
     const canViewReport = isAdmin || hasPermission("activity_report", "read");
 
     return (
-        <div className="flex flex-col min-h-screen bg-slate-50 font-sans text-slate-900">
-            <Navbar title="CRM Dashboard" />
-
-            <main className="flex-1 w-full max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-                {/* Welcome Banner */}
-                <div className="relative overflow-hidden bg-gradient-to-r from-[#0052cc] to-[#0a2540] rounded-3xl p-8 sm:p-12 shadow-xl text-white mb-10 transition-all hover:shadow-2xl">
-                    <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-                    
-                    <div className="relative z-10 max-w-2xl">
-                        <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-semibold bg-white/10 text-sky-200 border border-white/10 mb-4 backdrop-blur-sm">
-                            Platform Status: Active
-                        </span>
-                        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2">
-                            Welcome back, {user.name || "User"}!
-                        </h1>
-                        <p className="text-sky-100 text-sm sm:text-base leading-relaxed">
-                            Access the WHMCS administration suite. Use the navigation menu at the top or the quick action cards below to manage accounts, configure roles, and inspect security logs.
-                        </p>
-                    </div>
+        <div className="w-full max-w-7xl mx-auto py-8 sm:py-10 px-4 sm:px-6 lg:px-8">
+            {/* Welcome Banner */}
+            <div className="relative overflow-hidden bg-gradient-to-r from-[#0052cc] to-[#0a2540] rounded-3xl p-8 sm:p-12 shadow-xl text-white mb-10 transition-all hover:shadow-2xl">
+                <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+                
+                <div className="relative z-10 max-w-2xl">
+                    <span className="inline-flex items-center px-3.5 py-1 rounded-full text-xs font-semibold bg-white/10 text-sky-200 border border-white/10 mb-4 backdrop-blur-sm">
+                        Platform Status: Active
+                    </span>
+                    <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2">
+                        Welcome back, {user.name || "User"}!
+                    </h1>
+                    <p className="text-sky-100 text-sm sm:text-base leading-relaxed">
+                        Access the Interlink enterprise management suite. Use the sidebar navigation on the left or the quick action cards below to manage accounts, configure roles, and inspect security logs.
+                    </p>
                 </div>
+            </div>
 
                 {/* Quick Action Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -156,7 +152,6 @@ export default function UserHome() {
                         </div>
                     )}
                 </div>
-            </main>
         </div>
     );
 }

@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import { loginUser } from "../api/authApi";
 import { getDeviceId } from "../utils/device";
 import jwlogo from "../assets/jwLogo.jpeg";
+import InterlinkLogo from "../components/InterlinkLogo";
 
 
 export default function Login() {
@@ -61,28 +62,67 @@ export default function Login() {
             <div className="absolute top-[25%] left-[75%] -translate-x-1/2 -translate-y-1/2 w-[40%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none z-0" />
             <div className="absolute bottom-[25%] left-[65%] -translate-x-1/2 -translate-y-1/2 w-[35%] h-[45%] bg-sky-600/10 rounded-full blur-[120px] pointer-events-none z-0" />
 
-            {/* Left Column: WHMCS Dashboard Mockup */}
+            {/* Left Column: Interlink Enterprise Showcase */}
             <div className="hidden md:flex md:w-1/2 h-full relative overflow-hidden select-none bg-transparent flex-col justify-center items-center p-8 z-10">
                 
-                {/* Server Icon illustration */}
-                <div className="w-full flex justify-center items-center max-h-[60%] z-10 relative -top-12">
-                    <img
-                        src="/whmcs_server_icon.png"
-                        alt="WHMCS Server Infrastructure"
-                        className="w-[75%] h-auto object-contain transition-transform duration-[6000ms] hover:scale-103 ease-out drop-shadow-[0_15px_40px_rgba(0,86,207,0.25)] rounded-2xl"
-                    />
+                {/* Tech showcase card */}
+                <div className="w-full max-w-lg flex flex-col items-center justify-center z-10 relative -top-6">
+                    <div className="w-full bg-slate-900/60 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)] relative overflow-hidden group hover:border-blue-500/30 transition-all duration-500">
+                        {/* Background radial glow inside card */}
+                        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl" />
+                        
+                        {/* Header of showcase */}
+                        <div className="flex items-center justify-between border-b border-slate-800/70 pb-4 mb-5">
+                            <div className="flex items-center gap-2">
+                                <span className="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+                                <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                                <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                                <span className="text-xs font-semibold text-slate-400 ml-2">Interlink Security Core</span>
+                            </div>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                TLS 1.3 Active
+                            </span>
+                        </div>
+
+                        {/* Central Visual Hub */}
+                        <div className="py-6 flex flex-col items-center justify-center relative">
+                            <div className="relative mb-4">
+                                <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl animate-pulse"></div>
+                                <InterlinkLogo size="xl" showText={false} light={true} />
+                            </div>
+
+                            <p className="text-sm font-bold text-white tracking-wide mt-1">Interlink Access Engine</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Automated Identity & Device Governance</p>
+                        </div>
+
+                        {/* Status items grid */}
+                        <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-slate-800/70 text-center">
+                            <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
+                                <div className="text-[10px] text-slate-400 font-medium">Device Guard</div>
+                                <div className="text-xs font-bold text-emerald-400 mt-0.5">Enforced</div>
+                            </div>
+                            <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
+                                <div className="text-[10px] text-slate-400 font-medium">Role Matrix</div>
+                                <div className="text-xs font-bold text-blue-400 mt-0.5">Granular</div>
+                            </div>
+                            <div className="bg-slate-950/50 p-2.5 rounded-xl border border-slate-800/60">
+                                <div className="text-[10px] text-slate-400 font-medium">Audit Trail</div>
+                                <div className="text-xs font-bold text-sky-400 mt-0.5">Real-time</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 {/* Floating Brand Text */}
                 <div className="absolute bottom-6 left-12 z-20 max-w-md">
                     <h1 className="text-3xl lg:text-4xl font-extrabold text-white leading-tight tracking-tight">
-                        Billing & Provisioning,<br />
+                        Enterprise Security,<br />
                         <span className="bg-gradient-to-r from-blue-400 via-sky-400 to-teal-400 bg-clip-text text-transparent">
-                            Fully Automated.
+                            Unified & Automated.
                         </span>
                     </h1>
                     <p className="mt-3 text-slate-400 text-xs leading-relaxed max-w-sm">
-                        Manage web hosting services, domain registrations, automated billing, operations, and support desk relationships in one powerful portal.
+                        Manage identity governance, authorized device approvals, granular role permissions, and compliance audit logs in one powerful portal.
                     </p>
                 </div>
             </div>
@@ -97,16 +137,12 @@ export default function Login() {
                 <div className="w-full max-w-md mx-auto z-10 flex flex-col justify-center flex-grow py-3">
                     {/* Logo & Heading */}
                     <div className="flex flex-col items-center mb-6">
-                        <div className="flex items-center gap-2 mb-2 select-none">
-                            <span className="text-4xl font-black tracking-tighter bg-gradient-to-r from-blue-500 via-sky-500 to-teal-400 bg-clip-text text-transparent">
-                                WHMCS
-                            </span>
-                        </div>
+                        <InterlinkLogo size="lg" light={true} className="mb-2" />
                         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-center">
                             Welcome Back
                         </h2>
                         <p className="text-slate-400 text-xs mt-1 text-center">
-                            Sign in to your administration dashboard
+                            Sign in to your Interlink workspace
                         </p>
                     </div>
 

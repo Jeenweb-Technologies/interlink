@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import Navbar from "../components/Navbar";
 import { updateProfile } from "../api/authApi";
 
 export default function Profile() {
@@ -48,10 +47,7 @@ export default function Profile() {
   };
 
   return (
-    <div className="flex-1 bg-slate-50 font-sans text-slate-900">
-      <Navbar title="Update Profile" />
-
-      <main className="mx-auto py-12 px-4 sm:px-6 lg:px-8">
+    <div className="w-full max-w-4xl mx-auto py-8 sm:py-10 px-4 sm:px-6 lg:px-8">
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-slate-900">Your Profile</h2>
@@ -128,7 +124,6 @@ export default function Profile() {
             </div>
           </form>
         </div>
-      </main>
     </div>
   );
 }

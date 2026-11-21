@@ -12,6 +12,7 @@ import CreateUserType from "./pages/admin/user/CreateUserType";
 import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
 import ProtectedRoute from "./components/ProtectedRoute";
+import DashboardLayout from "./components/DashboardLayout";
 
 export default function AppRoutes() {
     return (
@@ -31,50 +32,53 @@ export default function AppRoutes() {
                 element={<PendingApproval />}
             />
 
+            {/* Authenticated routes wrapped with ProtectedRoute and DashboardLayout */}
             <Route element={<ProtectedRoute />}>
-                <Route
-                    path="/user/home"
-                    element={<UserHome />}
-                />
-                <Route
-                    path="/profile"
-                    element={<Profile />}
-                />
-            </Route>
+                <Route element={<DashboardLayout />}>
+                    <Route
+                        path="/user/home"
+                        element={<UserHome />}
+                    />
+                    <Route
+                        path="/profile"
+                        element={<Profile />}
+                    />
 
-            <Route element={<ProtectedRoute allowedRole="admin" requiredMasters={["user_master", "device_approval"]} requiredAction="read" />}>
-                <Route
-                    path="/admin/dashboard"
-                    element={<AdminDashboard />}
-                />
-            </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMasters={["user_master", "device_approval"]} requiredAction="read" />}>
+                        <Route
+                            path="/admin/dashboard"
+                            element={<AdminDashboard />}
+                        />
+                    </Route>
 
-            <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="activity_report" requiredAction="read" />}>
-                <Route
-                    path="/admin/report"
-                    element={<ActivityReport />}
-                />
-            </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="activity_report" requiredAction="read" />}>
+                        <Route
+                            path="/admin/report"
+                            element={<ActivityReport />}
+                        />
+                    </Route>
 
-            <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_master" requiredAction="write" />}>
-                <Route
-                    path="/admin/users/create"
-                    element={<CreateUser />}
-                />
-            </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_master" requiredAction="write" />}>
+                        <Route
+                            path="/admin/users/create"
+                            element={<CreateUser />}
+                        />
+                    </Route>
 
-            <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_type" requiredAction="read" />}>
-                <Route
-                    path="/admin/user-types"
-                    element={<UserGroupMaster />}
-                />
-            </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_type" requiredAction="read" />}>
+                        <Route
+                            path="/admin/user-types"
+                            element={<UserGroupMaster />}
+                        />
+                    </Route>
 
-            <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_type" requiredAction="write" />}>
-                <Route
-                    path="/admin/user-types/create"
-                    element={<CreateUserType />}
-                />
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="user_type" requiredAction="write" />}>
+                        <Route
+                            path="/admin/user-types/create"
+                            element={<CreateUserType />}
+                        />
+                    </Route>
+                </Route>
             </Route>
         </Routes>
     );

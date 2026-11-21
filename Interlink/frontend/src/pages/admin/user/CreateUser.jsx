@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import Navbar from "../../../components/Navbar";
 import { createUserByAdmin } from "../../../api/authApi";
 import { getUserTypes } from "../../../api/userTypeMasterApi";
 import { useNavigate } from "react-router-dom";
@@ -64,10 +63,7 @@ export default function CreateUser() {
     };
 
     return (
-        <div className="flex-1 bg-slate-50 font-sans text-slate-900">
-            <Navbar title="CRM Admin" />
-
-            <main className=" mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        <div className="w-full max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 <div className="mb-6 flex items-center justify-between">
                     <div>
                         <h1 className="text-2xl font-bold text-slate-900">Create New User</h1>
@@ -202,7 +198,6 @@ export default function CreateUser() {
                         </div>
                     </form>
                 </div>
-            </main>
         </div>
     );
 }

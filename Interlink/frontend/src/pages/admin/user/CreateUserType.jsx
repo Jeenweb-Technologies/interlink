@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import Navbar from "../../../components/Navbar";
 import { createUserType } from "../../../api/userTypeMasterApi";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
@@ -152,10 +151,7 @@ export default function CreateUserType() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%)", fontFamily: "'Inter',sans-serif" }}>
-      <Navbar title="CRM Admin" />
-
-      <main className="flex-1 flex flex-col w-full max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
@@ -408,7 +404,6 @@ export default function CreateUserType() {
             </button>
           </div>
         </form>
-      </main>
     </div>
   );
 }
