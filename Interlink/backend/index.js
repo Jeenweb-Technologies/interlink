@@ -23,6 +23,9 @@ const app = express();
 
 const allowedOrigins = [
     "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:3000",
     "https://crm.jasminmobile.com",
     "http://crm.jasminmobile.com",
     "https://www.crm.jasminmobile.com",
@@ -31,7 +34,12 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 app.use(cors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+        if (!origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization", "X-HTTP-Method-Override", "x-device-id", "device-id"],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
