@@ -23,16 +23,9 @@ const app = express();
 
 const allowedOrigins = [
     "http://localhost:5173",
-<<<<<<< HEAD
-=======
     "http://localhost:5174",
     "http://localhost:5175",
     "http://localhost:3000",
-    "https://crm.jasminmobile.com",
-    "http://crm.jasminmobile.com",
-    "https://www.crm.jasminmobile.com",
-    "http://www.crm.jasminmobile.com",
->>>>>>> 4701fe54a7ea792c59683872602a9fe3505fe6c6
     process.env.FRONTEND_URL
 ].filter(Boolean);
 
