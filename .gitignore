@@ -1,11 +1,20 @@
-# Root Git Ignore
+# Ignore reference documents and root archives at project root
+/*.pdf
+/*.docx
+/*.zip
+/*.jpg
+/*.jpeg
+/*.png
+
+# Ignore dependencies and build artifacts
 node_modules/
-*.env
-*.env.*
-!*.env.example
-*.zip
 dist/
 build/
 uploads/
 .DS_Store
 *.log
+
+# Ignore environment files except examples
+*.env
+*.env.*
+!*.env.example
