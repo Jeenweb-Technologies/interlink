@@ -7,7 +7,8 @@ export default function TaskCreateDrawer({
     onClose,
     onCreated,
     metadata = { projects: [], users: [], labels: [], statuses: [], priorities: [] },
-    existingTasks = []
+    existingTasks = [],
+    defaultProjectId = null
 }) {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
@@ -31,7 +32,7 @@ export default function TaskCreateDrawer({
             // Reset form
             setTitle("");
             setDescription("");
-            setProjectId(metadata.projects?.[0]?.id || "");
+            setProjectId(defaultProjectId || metadata.projects?.[0]?.id || "");
             setPriority("medium");
             setStatus("todo");
             setSelectedAssignees([]);

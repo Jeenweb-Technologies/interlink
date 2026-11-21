@@ -102,6 +102,8 @@ export function TopBar({ onMenuClick = () => {} }) {
 
     const getPageTitle = (path) => {
         if (path === "/user/home") return { title: "User Dashboard", category: "Overview" };
+        if (path.startsWith("/projects")) return { title: "Projects & Portfolio", category: "Governance" };
+        if (path.startsWith("/tasks")) return { title: "Task Management", category: "Productivity" };
         if (path === "/admin/dashboard") return { title: "User Master", category: "Masters" };
         if (path === "/admin/users/create") return { title: "Create User", category: "Masters" };
         if (path === "/admin/user-types") return { title: "User Types Master", category: "Masters" };
@@ -355,6 +357,25 @@ export default function Sidebar({
                                 </span>
                                 {!isCollapsed && (
                                     <span className="truncate">User Dashboard</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/projects")}
+                                title={isCollapsed ? "Projects & Initiatives" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/projects")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/projects") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                }`}>
+                                    <i className="fa-solid fa-diagram-project"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Projects &amp; Portfolio</span>
                                 )}
                             </button>
 

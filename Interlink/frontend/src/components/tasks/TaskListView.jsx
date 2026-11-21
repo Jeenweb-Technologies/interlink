@@ -15,7 +15,8 @@ export default function TaskListView({
     onSelectAll,
     onOpenDetail,
     onBulkAction,
-    onOpenCreate = () => {}
+    onOpenCreate = () => {},
+    title = null
 }) {
     // "View By" state (renamed from group by, icon removed)
     const [viewBy, setViewBy] = useState("none"); // 'none' | 'status' | 'priority' | 'project'
@@ -205,7 +206,7 @@ export default function TaskListView({
                 <i className="fa-solid fa-list-check"></i>
             </span>
             <span className="text-2xl font-bold text-[#17365D] tracking-tight">
-                Task Management
+                {title || "Task Management"}
             </span>
         </span>
     );
