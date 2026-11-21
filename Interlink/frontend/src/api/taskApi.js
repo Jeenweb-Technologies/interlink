@@ -87,3 +87,7 @@ export const discardTimer = async () => {
 export const logManualTime = async (taskId, data) => {
     return apiClient.post(`/tasks/${taskId}/time/manual`, data);
 };
+
+export const deleteTimeEntry = async (entryId) => {
+    return apiClient.delete(`/tasks/time-entries/${entryId}`);
+};

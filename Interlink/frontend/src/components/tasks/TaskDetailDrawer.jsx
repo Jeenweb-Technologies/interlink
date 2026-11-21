@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
 import { useTaskTimer } from "../../context/TaskTimerContext";
 import {
@@ -9,6 +9,7 @@ import {
     addChecklistItem,
     toggleChecklistItem,
     logManualTime,
+    deleteTimeEntry,
     addDependency,
     deleteDependency
 } from "../../api/taskApi";
@@ -28,7 +29,21 @@ export default function TaskDetailDrawer({
     // Form inputs
     const [commentText, setCommentText] = useState("");
     const [newChecklistText, setNewChecklistText] = useState("");
-    const [manualMinutes, setManualMinutes] = useState("");
+
+    // Manual time log inputs (exact work date and time interval)
+    const [showManualLogger, setShowManualLogger] = useState(false);
+    const [manualDate, setManualDate] = useState(() => new Date().toISOString().split("T")[0]);
+    const [manualStartTime, setManualStartTime] = useState("09:00");
+    const [manualEndTime, setManualEndTime] = useState("10:00");
+
+    // Live calculated duration for the manual interval
+    const manualCalculatedMinutes = useMemo(() => {
+        if (!manualDate || !manualStartTime || !manualEndTime) return 0;
+        const start = new Date(`${manualDate}T${manualStartTime}`);
+        const end = new Date(`${manualDate}T${manualEndTime}`);
+        const diff = Math.round((end - start) / 60000);
+        return diff > 0 ? diff : 0;
+    }, [manualDate, manualStartTime, manualEndTime]);
 
     // Global Task Timer Context
     const {
@@ -152,17 +167,38 @@ export default function TaskDetailDrawer({
 
     const handleLogManualTime = async (e) => {
         e.preventDefault();
-        const mins = parseInt(manualMinutes);
-        if (!mins || mins <= 0) return toast.error("Enter valid minutes");
+        if (!manualDate || !manualStartTime || !manualEndTime) {
+            return toast.error("Please provide date, start time, and end time");
+        }
+        const startIso = `${manualDate}T${manualStartTime}:00`;
+        const endIso = `${manualDate}T${manualEndTime}:00`;
+        if (new Date(endIso) <= new Date(startIso)) {
+            return toast.error("End time must be after start time");
+        }
 
         try {
-            await logManualTime(task.id, { duration_minutes: mins });
-            setManualMinutes("");
-            toast.success(`Logged ${mins} minutes`);
+            const res = await logManualTime(task.id, {
+                start_time: startIso,
+                end_time: endIso
+            });
+            toast.success(res.data?.message || "Time entry logged successfully");
+            setShowManualLogger(false);
             fetchDetail(task.id);
             if (onUpdated) onUpdated();
         } catch (err) {
-            toast.error("Failed to log manual time");
+            toast.error(err.response?.data?.message || "Failed to log manual time");
+        }
+    };
+
+    const handleDeleteTimeEntry = async (entryId) => {
+        if (!window.confirm("Remove this logged time interval?")) return;
+        try {
+            await deleteTimeEntry(entryId);
+            toast.success("Time entry deleted");
+            fetchDetail(task.id);
+            if (onUpdated) onUpdated();
+        } catch (err) {
+            toast.error("Failed to delete time entry");
         }
     };
 
@@ -317,8 +353,17 @@ export default function TaskDetailDrawer({
                                 <div className="flex items-center gap-2">
                                     <TaskPriorityBadge priority={task.priority} />
                                     {task.project_code && (
-                                        <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200">
-                                            {task.project_code}
+                                        <span
+                                            className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200 flex items-center gap-1.5"
+                                            title={`${task.project_name || 'Project'} • Total Project Logged: ${task.project_total_logged_hours || 0} hrs`}
+                                        >
+                                            <i className="fa-solid fa-folder-tree text-slate-400"></i>
+                                            <span>{task.project_code}</span>
+                                            {task.project_total_logged_hours > 0 && (
+                                                <span className="text-[10px] text-emerald-600 font-mono font-bold">
+                                                    ({task.project_total_logged_hours}h)
+                                                </span>
+                                            )}
                                         </span>
                                     )}
                                 </div>
@@ -466,22 +511,154 @@ export default function TaskDetailDrawer({
                                     )}
                                 </div>
 
-                                {/* Manual time entry form */}
-                                <form onSubmit={handleLogManualTime} className="flex items-center gap-2">
-                                    <input
-                                        type="number"
-                                        placeholder="Mins (e.g. 60)"
-                                        value={manualMinutes}
-                                        onChange={(e) => setManualMinutes(e.target.value)}
-                                        className="w-24 px-2 py-1 text-xs border border-slate-200 rounded-md focus:outline-hidden focus:border-[#2878C7]"
-                                    />
-                                    <button
-                                        type="submit"
-                                        className="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md cursor-pointer"
-                                    >
-                                        + Log Time
-                                    </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowManualLogger(!showManualLogger)}
+                                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
+                                        showManualLogger 
+                                            ? "border-[#2878C7] bg-blue-50 text-[#2878C7]" 
+                                            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                                    }`}
+                                >
+                                    <i className="fa-regular fa-clock"></i>
+                                    <span>{showManualLogger ? "Close Form" : "+ Log Exact Time"}</span>
+                                </button>
+                            </div>
+
+                            {/* Manual time entry with exact Date, Start Time & End Time */}
+                            {showManualLogger && (
+                                <form onSubmit={handleLogManualTime} className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3 animate-in fade-in duration-150">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold text-[#17365D] uppercase tracking-wide">
+                                            Log Exact Work Date & Time
+                                        </span>
+                                        {manualCalculatedMinutes > 0 && (
+                                            <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                                Duration: {Math.floor(manualCalculatedMinutes / 60)}h {manualCalculatedMinutes % 60}m ({manualCalculatedMinutes} mins)
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                                Work Date
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={manualDate}
+                                                onChange={(e) => setManualDate(e.target.value)}
+                                                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-hidden focus:border-[#2878C7]"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                                Start Time (From)
+                                            </label>
+                                            <input
+                                                type="time"
+                                                value={manualStartTime}
+                                                onChange={(e) => setManualStartTime(e.target.value)}
+                                                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-hidden focus:border-[#2878C7]"
+                                                required
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                                End Time (To)
+                                            </label>
+                                            <input
+                                                type="time"
+                                                value={manualEndTime}
+                                                onChange={(e) => setManualEndTime(e.target.value)}
+                                                className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-hidden focus:border-[#2878C7]"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-end gap-2 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowManualLogger(false)}
+                                            className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg font-medium cursor-pointer"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={manualCalculatedMinutes <= 0}
+                                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-[#17365D] hover:bg-[#102642] rounded-lg shadow-sm cursor-pointer disabled:opacity-50"
+                                        >
+                                            Save Time Interval
+                                        </button>
+                                    </div>
                                 </form>
+                            )}
+
+                            {/* Logged Work Intervals Audit Table */}
+                            <div className="pt-2 border-t border-slate-100 space-y-2">
+                                <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                    <span>Logged Work Intervals ({task.time_entries?.length || 0})</span>
+                                    <span className="text-[11px] font-normal normal-case text-slate-400">Exact date & time history</span>
+                                </div>
+
+                                {task.time_entries?.length === 0 ? (
+                                    <p className="text-xs text-slate-400 italic py-2">
+                                        No time intervals logged yet. Use the stopwatch or manual log above.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                        {task.time_entries?.map((entry) => {
+                                            const startDt = entry.start_time ? new Date(entry.start_time) : null;
+                                            const endDt = entry.end_time ? new Date(entry.end_time) : null;
+                                            const dateStr = startDt ? startDt.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+                                            const timeRange = (startDt && endDt) 
+                                                ? `${startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${endDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                                : (startDt ? `Started at ${startDt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—');
+                                            const hrs = (Number(entry.duration_minutes) / 60).toFixed(2);
+
+                                            return (
+                                                <div
+                                                    key={entry.id}
+                                                    className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs hover:bg-slate-100/70 transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className="w-6 h-6 rounded-full bg-[#17365D] text-white flex items-center justify-center font-bold text-[10px] shrink-0">
+                                                            {(entry.user_name || 'U')[0].toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-[#17212F]">{dateStr}</span>
+                                                                <span className="text-slate-500 font-mono text-[11px]">{timeRange}</span>
+                                                            </div>
+                                                            <span className="text-[10px] text-slate-400">
+                                                                Logged by {entry.user_name || 'User'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-2.5">
+                                                        <span className="font-mono font-bold text-[#10B981] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs">
+                                                            {hrs}h ({entry.duration_minutes}m)
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteTimeEntry(entry.id)}
+                                                            className="text-slate-400 hover:text-red-500 p-1 cursor-pointer transition-colors"
+                                                            title="Delete time entry"
+                                                        >
+                                                            <i className="fa-solid fa-xmark text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         </div>
 

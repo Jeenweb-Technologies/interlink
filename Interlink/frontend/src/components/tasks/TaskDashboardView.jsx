@@ -11,6 +11,7 @@ export default function TaskDashboardView({
     const statuses = dashboardData?.statuses || [];
     const workload = dashboardData?.workload || [];
     const blockedStream = dashboardData?.blocked_stream || [];
+    const projectDurations = dashboardData?.project_durations || [];
 
     const totalTasks = parseInt(metrics.total) || 0;
 
@@ -190,6 +191,134 @@ export default function TaskDashboardView({
                     </div>
                 </div>
             )}
+
+            {/* Project Completion & Time Duration Log */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/80">
+                    <div className="flex items-center gap-2.5">
+                        <span className="w-7 h-7 rounded-lg bg-emerald-50 text-[#10B981] flex items-center justify-center text-sm shadow-2xs">
+                            <i className="fa-solid fa-business-time"></i>
+                        </span>
+                        <div>
+                            <h3 className="text-xs font-bold text-[#17212F] uppercase tracking-wider">
+                                Project Completion & Time Duration Log
+                            </h3>
+                            <p className="text-[11px] text-slate-500">
+                                Total logged durations, completion cycle times, and task execution hours across projects
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                        <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 flex items-center gap-1.5 shadow-2xs">
+                            <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                            <span>{metrics.completed_projects_count || 0} Completed</span>
+                        </span>
+                        <span className="px-2.5 py-1 bg-blue-50 text-blue-800 rounded-lg border border-blue-200 flex items-center gap-1.5 shadow-2xs">
+                            <i className="fa-solid fa-hourglass-half text-blue-600"></i>
+                            <span>Avg Duration: {metrics.avg_project_duration_days || "0.0"} Days</span>
+                        </span>
+                        <span className="px-2.5 py-1 bg-slate-100 text-slate-800 rounded-lg border border-slate-200 flex items-center gap-1.5 shadow-2xs">
+                            <i className="fa-solid fa-clock text-slate-600"></i>
+                            <span>{metrics.total_project_hours_logged || "0.0"}h Logged</span>
+                        </span>
+                    </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-[#17365D] text-white">
+                            <tr>
+                                <th className="py-2.5 px-4 font-semibold uppercase tracking-wider">Project</th>
+                                <th className="py-2.5 px-3 font-semibold uppercase tracking-wider">Status</th>
+                                <th className="py-2.5 px-3 font-semibold uppercase tracking-wider">Tasks Done</th>
+                                <th className="py-2.5 px-3 font-semibold uppercase tracking-wider">Timeline Dates</th>
+                                <th className="py-2.5 px-3 font-semibold uppercase tracking-wider">Completion Duration</th>
+                                <th className="py-2.5 px-4 font-semibold uppercase tracking-wider">Total Time Logged</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                            {projectDurations.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="py-6 text-center text-slate-400 italic">
+                                        No project duration data available.
+                                    </td>
+                                </tr>
+                            ) : (
+                                projectDurations.map((proj) => {
+                                    const isCompleted = proj.status === 'completed';
+                                    const totalTasks = Number(proj.total_tasks) || 0;
+                                    const completedTasks = Number(proj.completed_tasks) || 0;
+                                    const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                                    const totalHours = parseFloat(proj.total_logged_hours) || parseFloat(proj.total_actual_hours) || 0;
+                                    const estHours = parseFloat(proj.total_estimated_hours) || 0;
+                                    const durationDays = proj.actual_completion_duration_days !== null 
+                                        ? `${parseFloat(proj.actual_completion_duration_days)} Days` 
+                                        : (proj.start_date ? `${Math.max(0, Math.round((new Date() - new Date(proj.start_date)) / 86400000))} Days (ongoing)` : '—');
+
+                                    return (
+                                        <tr key={proj.id} className="hover:bg-slate-50/70 transition-colors">
+                                            <td className="py-3 px-4">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono font-bold text-[#17365D] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        {proj.code}
+                                                    </span>
+                                                    <span className="font-bold text-[#17212F] truncate max-w-[200px]" title={proj.name}>
+                                                        {proj.name}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold border capitalize ${
+                                                    isCompleted 
+                                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                                                }`}>
+                                                    {proj.status}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <div className="space-y-1 min-w-[100px]">
+                                                    <div className="flex justify-between text-[11px] font-semibold text-slate-600">
+                                                        <span>{completedTasks}/{totalTasks}</span>
+                                                        <span>{pct}%</span>
+                                                    </div>
+                                                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full ${pct === 100 ? 'bg-[#10B981]' : 'bg-[#2878C7]'}`}
+                                                            style={{ width: `${pct}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-3 text-slate-600">
+                                                <div>
+                                                    <span className="block font-medium">{proj.start_date ? new Date(proj.start_date).toLocaleDateString() : '—'}</span>
+                                                    <span className="text-[10px] text-slate-400">
+                                                        {isCompleted && proj.completed_at ? `Completed: ${new Date(proj.completed_at).toLocaleDateString()}` : `Target: ${proj.end_date ? new Date(proj.end_date).toLocaleDateString() : '—'}`}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-3">
+                                                <span className={`inline-flex items-center gap-1.5 font-mono font-bold text-xs ${
+                                                    isCompleted ? 'text-[#10B981]' : 'text-slate-700'
+                                                }`}>
+                                                    <i className={`fa-solid ${isCompleted ? 'fa-flag-checkered text-[#10B981]' : 'fa-stopwatch text-slate-400'}`}></i>
+                                                    <span>{durationDays}</span>
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-4 font-mono">
+                                                <strong className="text-[#10B981] font-bold">{totalHours.toFixed(2)}h</strong>
+                                                <span className="text-slate-400 text-[11px]"> / {estHours.toFixed(2)}h est</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
             {/* Team Workload & Allocation Heatmap */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">

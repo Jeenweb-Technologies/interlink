@@ -87,6 +87,50 @@ const cascadeSuccessorDates = async (predecessorId, shiftDays) => {
     }
 };
 
+// Helper: Synchronize project total logged hours and record completion duration if all tasks done
+const syncProjectDurationAndCompletion = async (projectId) => {
+    if (!projectId) return;
+    try {
+        // 1. Recalculate total logged hours for this project from all tasks
+        await db.execute(`
+            UPDATE projects
+            SET total_logged_hours = (
+                SELECT COALESCE(SUM(t.actual_hours), 0)
+                FROM tasks t
+                WHERE t.project_id = ? AND t.deleted_at IS NULL
+            )
+            WHERE id = ?
+        `, [projectId, projectId]);
+
+        // 2. Check if all tasks for this project are completed
+        const [taskStats] = await db.execute(`
+            SELECT 
+                COUNT(*) as total_tasks,
+                SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done_tasks
+            FROM tasks
+            WHERE project_id = ? AND deleted_at IS NULL
+        `, [projectId]);
+
+        const { total_tasks = 0, done_tasks = 0 } = taskStats[0] || {};
+        if (total_tasks > 0 && Number(total_tasks) === Number(done_tasks)) {
+            // All tasks completed: automatically log completion timestamp and duration in days
+            await db.execute(`
+                UPDATE projects
+                SET 
+                    status = 'completed',
+                    completed_at = COALESCE(completed_at, NOW()),
+                    actual_completion_duration_days = COALESCE(
+                        actual_completion_duration_days,
+                        DATEDIFF(COALESCE(completed_at, NOW()), COALESCE(start_date, created_at))
+                    )
+                WHERE id = ? AND (status != 'completed' OR completed_at IS NULL)
+            `, [projectId]);
+        }
+    } catch (err) {
+        console.error("Error syncing project duration and completion:", err);
+    }
+};
+
 // GET /api/tasks - List tasks with filtering, search, sorting & dependency blockers
 exports.getTasks = async (req, res) => {
     try {
@@ -266,6 +310,8 @@ exports.getTaskById = async (req, res) => {
                 t.*,
                 p.name AS project_name,
                 p.code AS project_code,
+                p.status AS project_status,
+                p.total_logged_hours AS project_total_logged_hours,
                 u.name AS owner_name,
                 u.email AS owner_email
             FROM tasks t
@@ -571,6 +617,9 @@ exports.updateTask = async (req, res) => {
             shiftDays = Math.round(diffTime / (1000 * 3600 * 24));
         }
 
+        const isMarkingDone = status === 'done' && prev.status !== 'done';
+        const isReopening = status && status !== 'done' && prev.status === 'done';
+
         await db.execute(`
             UPDATE tasks SET
                 title = COALESCE(?, title),
@@ -583,7 +632,12 @@ exports.updateTask = async (req, res) => {
                 document_id = ?,
                 start_date = ?,
                 due_date = ?,
-                estimated_hours = COALESCE(?, estimated_hours)
+                estimated_hours = COALESCE(?, estimated_hours),
+                completed_at = CASE 
+                    WHEN ? = 1 THEN NOW() 
+                    WHEN ? = 1 THEN NULL 
+                    ELSE completed_at 
+                END
             WHERE id = ?
         `, [
             title !== undefined ? title : null,
@@ -597,6 +651,8 @@ exports.updateTask = async (req, res) => {
             start_date !== undefined ? start_date : prev.start_date,
             due_date !== undefined ? due_date : prev.due_date,
             estimated_hours !== undefined ? estimated_hours : null,
+            isMarkingDone ? 1 : 0,
+            isReopening ? 1 : 0,
             id
         ]);
 
@@ -639,6 +695,12 @@ exports.updateTask = async (req, res) => {
             INSERT INTO task_activities (task_id, user_id, action, description)
             VALUES (?, ?, 'updated', ?)
         `, [id, userId, desc]);
+
+        // Automatically synchronize project duration and completion if all tasks completed
+        const effectiveProjectId = project_id !== undefined ? project_id : prev.project_id;
+        if (effectiveProjectId) {
+            await syncProjectDurationAndCompletion(effectiveProjectId);
+        }
 
         res.status(200).json({ success: true, message: "Task updated successfully." });
     } catch (error) {
@@ -754,14 +816,48 @@ exports.getDashboardMetrics = async (req, res) => {
             LIMIT 5
         `);
 
+        // Project Durations & Logged Hours (Tracking time durations in which projects completed)
+        const [projectDurations] = await db.execute(`
+            SELECT 
+                p.id,
+                p.code,
+                p.name,
+                p.status,
+                p.start_date,
+                p.end_date,
+                p.completed_at,
+                p.actual_completion_duration_days,
+                COALESCE(p.total_logged_hours, 0) AS total_logged_hours,
+                COUNT(t.id) AS total_tasks,
+                SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS completed_tasks,
+                COALESCE(SUM(t.estimated_hours), 0) AS total_estimated_hours,
+                COALESCE(SUM(t.actual_hours), 0) AS total_actual_hours
+            FROM projects p
+            LEFT JOIN tasks t ON p.id = t.project_id AND t.deleted_at IS NULL
+            WHERE p.deleted_at IS NULL
+            GROUP BY p.id
+            ORDER BY (p.status = 'completed') DESC, p.id ASC
+        `);
+
+        const completedProjects = projectDurations.filter(p => p.status === 'completed');
+        const totalDurationDays = completedProjects.reduce((acc, p) => acc + (parseFloat(p.actual_completion_duration_days) || 0), 0);
+        const avgCompletionDays = completedProjects.length > 0 ? (totalDurationDays / completedProjects.length).toFixed(1) : "0.0";
+        const totalProjectHoursLogged = projectDurations.reduce((acc, p) => acc + (parseFloat(p.total_logged_hours) || parseFloat(p.total_actual_hours) || 0), 0).toFixed(1);
+
         res.status(200).json({
             success: true,
             data: {
-                metrics: counts[0] || {},
+                metrics: {
+                    ...(counts[0] || {}),
+                    completed_projects_count: completedProjects.length,
+                    avg_project_duration_days: avgCompletionDays,
+                    total_project_hours_logged: totalProjectHoursLogged
+                },
                 priorities,
                 statuses,
                 workload,
-                blocked_stream: blockedStream
+                blocked_stream: blockedStream,
+                project_durations: projectDurations
             }
         });
     } catch (error) {
@@ -986,6 +1082,12 @@ exports.stopTimer = async (req, res) => {
             WHERE id = ?
         `, [entry.task_id, entry.task_id]);
 
+        // Sync project logged duration
+        const [taskRow] = await db.execute("SELECT project_id FROM tasks WHERE id = ?", [entry.task_id]);
+        if (taskRow.length > 0 && taskRow[0].project_id) {
+            await syncProjectDurationAndCompletion(taskRow[0].project_id);
+        }
+
         res.status(200).json({ success: true, message: `Logged ${diffMinutes} minutes.`, duration_minutes: diffMinutes });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -996,17 +1098,51 @@ exports.stopTimer = async (req, res) => {
 exports.logManualTime = async (req, res) => {
     try {
         const { id } = req.params;
-        const { duration_minutes, notes = '', is_billable = true, entry_date = new Date() } = req.body;
+        const {
+            start_time,
+            end_time,
+            duration_minutes,
+            entry_date,
+            notes = '',
+            is_billable = true
+        } = req.body;
         const userId = req.user ? req.user.id : 1;
 
-        if (!duration_minutes || duration_minutes <= 0) {
+        let finalStart = null;
+        let finalEnd = null;
+        let finalDurationMinutes = 0;
+
+        if (start_time && end_time) {
+            finalStart = new Date(start_time);
+            finalEnd = new Date(end_time);
+            if (isNaN(finalStart.getTime()) || isNaN(finalEnd.getTime())) {
+                return res.status(400).json({ success: false, message: "Invalid start or end date/time." });
+            }
+            if (finalEnd <= finalStart) {
+                return res.status(400).json({ success: false, message: "End time must be after start time." });
+            }
+            finalDurationMinutes = Math.max(1, Math.round((finalEnd.getTime() - finalStart.getTime()) / 60000));
+        } else if (start_time && duration_minutes) {
+            finalStart = new Date(start_time);
+            finalDurationMinutes = parseInt(duration_minutes);
+            finalEnd = new Date(finalStart.getTime() + finalDurationMinutes * 60000);
+        } else if (duration_minutes) {
+            finalDurationMinutes = parseInt(duration_minutes);
+            const baseDate = entry_date ? new Date(entry_date) : new Date();
+            finalEnd = baseDate;
+            finalStart = new Date(baseDate.getTime() - finalDurationMinutes * 60000);
+        } else {
+            return res.status(400).json({ success: false, message: "Please specify start time, end time, or duration in minutes." });
+        }
+
+        if (finalDurationMinutes <= 0) {
             return res.status(400).json({ success: false, message: "Duration must be greater than 0 minutes." });
         }
 
         await db.execute(`
             INSERT INTO task_time_entries (tenant_id, task_id, user_id, start_time, end_time, duration_minutes, is_billable, notes)
-            VALUES (1, ?, ?, ?, DATE_ADD(?, INTERVAL ? MINUTE), ?, ?, ?)
-        `, [id, userId, entry_date, entry_date, duration_minutes, duration_minutes, is_billable ? 1 : 0, notes]);
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        `, [id, userId, finalStart, finalEnd, finalDurationMinutes, is_billable ? 1 : 0, notes]);
 
         // Update actual_hours on task
         await db.execute(`
@@ -1019,7 +1155,56 @@ exports.logManualTime = async (req, res) => {
             WHERE id = ?
         `, [id, id]);
 
-        res.status(201).json({ success: true, message: "Manual time entry logged successfully." });
+        // Sync project logged duration
+        const [manualTaskRow] = await db.execute("SELECT project_id FROM tasks WHERE id = ?", [id]);
+        if (manualTaskRow.length > 0 && manualTaskRow[0].project_id) {
+            await syncProjectDurationAndCompletion(manualTaskRow[0].project_id);
+        }
+
+        res.status(201).json({
+            success: true,
+            message: `Logged ${finalDurationMinutes} minutes (${finalStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${finalEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).`,
+            data: {
+                start_time: finalStart,
+                end_time: finalEnd,
+                duration_minutes: finalDurationMinutes
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Time Tracking: DELETE /api/tasks/time-entries/:id
+exports.deleteTimeEntry = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [entryRows] = await db.execute("SELECT task_id FROM task_time_entries WHERE id = ?", [id]);
+        if (entryRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Time entry not found." });
+        }
+
+        const taskId = entryRows[0].task_id;
+        await db.execute("DELETE FROM task_time_entries WHERE id = ?", [id]);
+
+        // Recalculate task actual_hours
+        await db.execute(`
+            UPDATE tasks
+            SET actual_hours = (
+                SELECT COALESCE(SUM(duration_minutes) / 60.0, 0)
+                FROM task_time_entries
+                WHERE task_id = ?
+            )
+            WHERE id = ?
+        `, [taskId, taskId]);
+
+        // Recalculate project total_logged_hours
+        const [taskRow] = await db.execute("SELECT project_id FROM tasks WHERE id = ?", [taskId]);
+        if (taskRow.length > 0 && taskRow[0].project_id) {
+            await syncProjectDurationAndCompletion(taskRow[0].project_id);
+        }
+
+        res.json({ success: true, message: "Time entry removed successfully." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

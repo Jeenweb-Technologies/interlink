@@ -390,6 +390,12 @@ exports.updateProject = async (req, res) => {
         if (is_budget_approved !== undefined) { updates.push("is_budget_approved = ?"); params.push(is_budget_approved ? 1 : 0); }
         if (actual_cost !== undefined) { updates.push("actual_cost = ?"); params.push(actual_cost); }
         if (progress_percentage !== undefined) { updates.push("progress_percentage = ?"); params.push(progress_percentage); }
+        if (status === 'completed') {
+            updates.push("completed_at = COALESCE(completed_at, NOW())");
+            updates.push("actual_completion_duration_days = COALESCE(actual_completion_duration_days, DATEDIFF(COALESCE(completed_at, NOW()), COALESCE(start_date, created_at)))");
+            updates.push("total_logged_hours = (SELECT COALESCE(SUM(actual_hours), 0) FROM tasks WHERE project_id = ? AND deleted_at IS NULL)");
+            params.push(id);
+        }
 
         if (updates.length === 0) {
             return res.status(400).json({ success: false, message: "No valid fields to update" });

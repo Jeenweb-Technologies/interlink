@@ -19,6 +19,7 @@ router.delete("/dependencies/:id", taskController.deleteDependency);
 router.get("/time/active", taskController.getActiveTimer);
 router.delete("/time/discard", taskController.discardTimer);
 router.post("/time/stop", taskController.stopTimer);
+router.delete("/time-entries/:id", taskController.deleteTimeEntry);
 router.put("/checklists/:id/toggle", taskController.toggleChecklistItem);
 
 // Base Task CRUD

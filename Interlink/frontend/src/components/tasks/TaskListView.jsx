@@ -135,9 +135,16 @@ export default function TaskListView({
             label: "Project",
             minWidth: "110px",
             render: (row) => (
-                <span className="text-slate-600 font-medium text-xs">
-                    {row.project_code || "—"}
-                </span>
+                <div className="flex flex-col">
+                    <span className="text-[#17365D] font-mono font-bold text-xs">
+                        {row.project_code || "—"}
+                    </span>
+                    {row.project_name && (
+                        <span className="text-[10px] text-slate-400 truncate max-w-[120px]" title={row.project_name}>
+                            {row.project_name}
+                        </span>
+                    )}
+                </div>
             )
         },
         {

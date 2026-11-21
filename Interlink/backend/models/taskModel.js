@@ -1,5 +1,24 @@
 const db = require("../config/db.js");
 
+// Safe column addition helper
+const ensureColumn = async (tableName, columnName, columnDef) => {
+    try {
+        const [rows] = await db.execute(`
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+              AND TABLE_NAME = ? 
+              AND COLUMN_NAME = ?
+        `, [tableName, columnName]);
+
+        if (rows.length === 0) {
+            await db.execute(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${columnDef}`);
+        }
+    } catch (err) {
+        console.error(`Error ensuring column ${columnName} in ${tableName}:`, err.message);
+    }
+};
+
 const createTaskTables = async () => {
     // 0. Projects table (if not exists) for project association
     await db.execute(`
@@ -38,6 +57,7 @@ const createTaskTables = async () => {
             due_date DATETIME NULL,
             estimated_hours DECIMAL(6,2) DEFAULT 0.00,
             actual_hours DECIMAL(6,2) DEFAULT 0.00,
+            completed_at DATETIME NULL,
             is_recurring BOOLEAN DEFAULT FALSE,
             recurrence_rule JSON NULL,
             parent_task_id INT NULL,
@@ -245,6 +265,12 @@ const createTaskTables = async () => {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Ensure project duration and task completion columns exist
+    await ensureColumn("tasks", "completed_at", "DATETIME NULL");
+    await ensureColumn("projects", "completed_at", "DATETIME NULL");
+    await ensureColumn("projects", "actual_completion_duration_days", "DECIMAL(6,1) NULL");
+    await ensureColumn("projects", "total_logged_hours", "DECIMAL(8,2) DEFAULT 0.00");
 
     // Seed default labels and sample project if empty
     await seedInitialMetadata();

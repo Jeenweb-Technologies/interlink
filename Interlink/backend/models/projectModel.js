@@ -67,6 +67,9 @@ const createProjectTables = async () => {
     await ensureColumn("projects", "is_budget_approved", "BOOLEAN DEFAULT FALSE");
     await ensureColumn("projects", "actual_cost", "DECIMAL(12,2) DEFAULT 0.00");
     await ensureColumn("projects", "progress_percentage", "DECIMAL(5,2) DEFAULT 0.00");
+    await ensureColumn("projects", "completed_at", "DATETIME NULL");
+    await ensureColumn("projects", "actual_completion_duration_days", "DECIMAL(6,1) NULL");
+    await ensureColumn("projects", "total_logged_hours", "DECIMAL(8,2) DEFAULT 0.00");
     await ensureColumn("projects", "deleted_at", "TIMESTAMP NULL");
 
     // 2. Project Members & Resource Allocation
