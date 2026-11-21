@@ -12,7 +12,7 @@ import CreateUserType from "./pages/admin/user/CreateUserType";
 import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
 import ProtectedRoute from "./components/ProtectedRoute";
-import DashboardLayout from "./components/DashboardLayout";
+import { DashboardLayout } from "./components/Sidebar";
 
 export default function AppRoutes() {
     return (

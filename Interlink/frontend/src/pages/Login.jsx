@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 import { loginUser } from "../api/authApi";
 import { getDeviceId } from "../utils/device";
 import jwlogo from "../assets/jwLogo.jpeg";
-import InterlinkLogo from "../components/InterlinkLogo";
+import { InterlinkLogo } from "../components/Sidebar";
 
 
 export default function Login() {
