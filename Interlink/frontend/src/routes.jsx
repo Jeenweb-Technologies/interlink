@@ -4,6 +4,8 @@ import Login from "./pages/Login";
 import RegisterOrg from "./pages/RegisterOrg";
 import DeviceRegistration from "./pages/DeviceRegistration";
 import PendingApproval from "./pages/PendingApproval";
+import OrgPendingApproval from "./pages/OrgPendingApproval";
+import DeveloperPanel from "./pages/admin/DeveloperPanel";
 
 import UserHome from "./pages/user/UserHome";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -45,6 +47,11 @@ export default function AppRoutes() {
             <Route
                 path="/pending-approval"
                 element={<PendingApproval />}
+            />
+
+            <Route
+                path="/org-pending"
+                element={<OrgPendingApproval />}
             />
 
             {/* Authenticated routes wrapped with ProtectedRoute and DashboardLayout */}
@@ -110,6 +117,18 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/user-types/create"
                             element={<CreateUserType />}
+                        />
+                    </Route>
+
+                    {/* Developer / Super Admin Console */}
+                    <Route element={<ProtectedRoute allowedRole={["super_admin", "super admin", "developer"]} />}>
+                        <Route
+                            path="/developer"
+                            element={<DeveloperPanel />}
+                        />
+                        <Route
+                            path="/admin/developer"
+                            element={<DeveloperPanel />}
                         />
                     </Route>
                 </Route>

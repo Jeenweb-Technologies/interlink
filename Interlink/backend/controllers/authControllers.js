@@ -44,19 +44,53 @@ const login = async (req, res) => {
             });
         }
 
-        if (user.active === 0 || user.active === false) {
-            return res.status(403).json({
-                success: false,
-                message: "Your account is deactivated. Please contact an administrator."
-            });
-        }
-
         // Compare Password
         const isPasswordCorrect = await bcrypt.compare(password, user.password);
         if (!isPasswordCorrect) {
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
+            });
+        }
+
+        // ================= ORGANIZATION STATUS GUARD =================
+        // Check organization approval status (unless platform developer / superadmin)
+        const isDeveloper = user.role === "super_admin" || user.role === "super admin" || user.role === "developer";
+        if (!isDeveloper && user.organization_id) {
+            const [orgRows] = await db.execute(
+                "SELECT name, status FROM organizations WHERE id = ?",
+                [user.organization_id]
+            );
+            const org = orgRows[0];
+            if (org) {
+                if (org.status === 'pending') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_PENDING_APPROVAL",
+                        message: `The registration for "${org.name}" is awaiting developer approval. You will be able to log in once approved.`
+                    });
+                }
+                if (org.status === 'rejected') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_REJECTED",
+                        message: `The registration request for "${org.name}" was declined. Please contact support.`
+                    });
+                }
+                if (org.status === 'suspended') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_SUSPENDED",
+                        message: `Organization "${org.name}" has been suspended by the platform administrator.`
+                    });
+                }
+            }
+        }
+
+        if (user.active === 0 || user.active === false) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is deactivated. Please contact an administrator."
             });
         }
 
@@ -423,11 +457,11 @@ const registerOrganization = async (req, res) => {
             });
         }
 
-        // 1. Create Organization
+        // 1. Create Organization (Default status: pending)
         let orgId;
         try {
             const [orgResult] = await db.execute(
-                "INSERT INTO organizations (name, email) VALUES (?, ?)",
+                "INSERT INTO organizations (name, email, status) VALUES (?, ?, 'pending')",
                 [orgName.trim(), email.trim()]
             );
             orgId = orgResult.insertId;
@@ -439,6 +473,7 @@ const registerOrganization = async (req, res) => {
                 );
                 orgId = orgResult.insertId;
                 db.execute("ALTER TABLE organizations ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
+                db.execute("ALTER TABLE organizations ADD COLUMN status VARCHAR(50) DEFAULT 'pending'").catch(() => {});
             } else {
                 throw orgErr;
             }
@@ -467,14 +502,14 @@ const registerOrganization = async (req, res) => {
             }
         }
 
-        // 3. Create Admin User
+        // 3. Create Admin User (Created with active=0 until developer approves org)
         const hashedPassword = await bcrypt.hash(password, 10);
         const [userResult] = await db.execute(`
             INSERT INTO users (
                 name, username, email, password, role,
                 organization_id, company_id,
                 mob_no, device_verification_required, active
-            ) VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, 0, 1)
+            ) VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, 0, 0)
         `, [
             name.trim(),
             finalUsername,
@@ -494,37 +529,20 @@ const registerOrganization = async (req, res) => {
                 finalUsername,
                 "WEB_REGISTER",
                 "organizations",
-                "CREATE",
+                "PENDING_APPROVAL",
                 null,
-                JSON.stringify({ orgId, orgName, companyId, companyName: compName })
+                JSON.stringify({ orgId, orgName, companyId, companyName: compName, status: "pending" })
             );
         } catch (logErr) {
             console.warn("Audit log warning on register:", logErr.message);
         }
 
-        // Generate token
-        const token = jwt.sign(
-            { id: newUserId, role: "admin", name: name.trim(), username: finalUsername, organization_id: orgId, company_id: companyId },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
-
         return res.status(201).json({
             success: true,
-            message: "Organization and company registered successfully!",
-            token,
-            organization: { id: orgId, name: orgName },
-            company: { id: companyId, name: compName },
-            user: {
-                id: newUserId,
-                name: name.trim(),
-                username: finalUsername,
-                email: email.trim(),
-                role: "admin",
-                organization_id: orgId,
-                company_id: companyId,
-                companies: [{ id: companyId, organization_id: orgId, name: compName }]
-            }
+            status: "PENDING_APPROVAL",
+            message: "Organization registration submitted successfully! Awaiting developer approval before you can log in.",
+            organization: { id: orgId, name: orgName, status: "pending" },
+            company: { id: companyId, name: compName }
         });
     } catch (error) {
         console.error("Register Organization Error:", error);

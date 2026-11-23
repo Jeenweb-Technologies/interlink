@@ -22,7 +22,7 @@ exports.getPortfolioMetrics = async (req, res) => {
                 SUM(approved_budget) as total_approved_budget,
                 SUM(actual_cost) as total_actual_cost
             FROM projects 
-            WHERE tenant_id = ? AND (company_id = ? OR company_id IS NULL) AND parent_project_id IS NULL AND deleted_at IS NULL
+            WHERE tenant_id = ? AND company_id = ? AND parent_project_id IS NULL AND deleted_at IS NULL
         `, [tenantId, companyId]);
 
         // Health distribution (On Track, At Risk, Delayed)
@@ -30,7 +30,7 @@ exports.getPortfolioMetrics = async (req, res) => {
             SELECT p.id, p.end_date, p.progress_percentage, p.approved_budget, p.actual_cost,
                    (SELECT COUNT(*) FROM project_risks r WHERE r.project_id = p.id AND r.severity_score >= 12 AND r.status != 'closed') as high_risks_count
             FROM projects p
-            WHERE p.tenant_id = ? AND (p.company_id = ? OR p.company_id IS NULL) AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
         `, [tenantId, companyId]);
 
         let onTrack = 0;
@@ -101,7 +101,7 @@ exports.getProjects = async (req, res) => {
             FROM projects p
             LEFT JOIN users u_owner ON p.owner_id = u_owner.id
             LEFT JOIN users u_sponsor ON p.sponsor_id = u_sponsor.id
-            WHERE p.tenant_id = ? AND (p.company_id = ? OR p.company_id IS NULL) AND p.deleted_at IS NULL
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
         `;
 
         const params = [tenantId, companyId];
@@ -160,7 +160,8 @@ exports.getProjects = async (req, res) => {
 exports.getProjectById = async (req, res) => {
     try {
         const { id } = req.params;
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
+        const companyId = req.user?.company_id || 1;
 
         const [rows] = await db.execute(`
             SELECT p.*,
@@ -171,8 +172,8 @@ exports.getProjectById = async (req, res) => {
             LEFT JOIN users u_owner ON p.owner_id = u_owner.id
             LEFT JOIN users u_sponsor ON p.sponsor_id = u_sponsor.id
             LEFT JOIN projects parent ON p.parent_project_id = parent.id
-            WHERE p.id = ? AND p.tenant_id = ? AND p.deleted_at IS NULL
-        `, [id, tenantId]);
+            WHERE p.id = ? AND p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
+        `, [id, tenantId, companyId]);
 
         if (rows.length === 0) {
             return res.status(404).json({ success: false, message: "Project not found" });

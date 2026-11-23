@@ -18,20 +18,43 @@ const { getAllAuditLogs, createAuditLog } = require("../models/auditLogModel.js"
 
 const fetchUsers = async (req, res) => {
     try {
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
         const includeInactive = req.query.includeInactive === 'true';
-        const whereClause = includeInactive ? '' : 'WHERE u.active = TRUE';
+        let whereClauses = [];
+        let params = [];
+
+        if (!includeInactive) {
+            whereClauses.push('u.active = TRUE');
+        }
+
+        if (!isSuper) {
+            whereClauses.push('u.organization_id = ?');
+            params.push(organizationId);
+            whereClauses.push('u.company_id = ?');
+            params.push(companyId);
+        } else if (req.headers["x-company-id"] || req.headers["company-id"]) {
+            whereClauses.push('u.company_id = ?');
+            params.push(companyId);
+        }
+
+        const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
         // Fetch users along with their active device status
         const query = `
             SELECT 
-                u.id, u.name, u.username, u.email, u.mob_no, u.role,
+                u.id, u.name, u.username, u.email, u.mob_no, u.role, u.organization_id, u.company_id,
                 d.status AS device_status, ut.type_name,
                 d.device_id, device_verification_required, u.active
             FROM users u
             LEFT JOIN user_devices d ON d.user_id = u.id AND d.closed_at IS NULL
             LEFT JOIN user_types ut ON u.user_type_id = ut.id
-            ${whereClause}
+            ${whereSQL}
+            ORDER BY u.id DESC
         `;
-        const [users] = await db.execute(query);
+        const [users] = await db.execute(query, params);
 
         return res.status(200).json({
             success: true,
@@ -64,7 +87,7 @@ const createUserByAdmin = async (req, res) => {
         
         const hashedPassword = await bcrypt.hash(password, 10);
         const organizationId = req.user?.organization_id || 1;
-        const companyId = req.body.companyId || req.user?.company_id || 1;
+        const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : (req.user?.company_id || 1);
 
         const newUser = await createUser(
             name,
@@ -98,8 +121,11 @@ const createUserByAdmin = async (req, res) => {
                 mob_no: mobNo || null,
                 date_of_join: dateOfJoin || null,
                 device_verification_required: deviceVerificationRequired,
-                role: role || 'user'
-            }
+                role: role || 'user',
+                company_id: companyId
+            },
+            null,
+            companyId
         );
 
         return res.status(201).json({ success: true, message: "User created successfully" });
@@ -161,7 +187,11 @@ const revokeDeviceController = async (req, res) => {
 
 const fetchAuditLogs = async (req, res) => {
     try {
-        const logs = await getAllDeviceHistory();
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
+        const logs = await getAllDeviceHistory(isSuper ? null : organizationId, isSuper ? null : companyId);
         return res.status(200).json({ success: true, logs });
     } catch (error) {
         console.log("Fetch Audit Logs Error:", error);
@@ -183,10 +213,11 @@ const fetchUserAuditLogs = async (req, res) => {
 const fetchActivityLogs = async (req, res) => {
     try {
         const isAdmin = req.user.role === "admin" || req.user.role === "super admin";
+        const companyId = req.user?.company_id || 1;
         let logs = [];
 
         if (isAdmin) {
-            logs = await getAllAuditLogs(null);
+            logs = await getAllAuditLogs(null, companyId);
         } else {
             const userId = req.user.id;
             const [userRows] = await db.execute(
@@ -204,7 +235,7 @@ const fetchActivityLogs = async (req, res) => {
                 const hasClosed = permRows.some(r => r.master_name === 'closed_inquiry_report' && r.permitted === 1);
 
                 if (hasActivity || hasClosed) {
-                    const rawLogs = await getAllAuditLogs(userId);
+                    const rawLogs = await getAllAuditLogs(userId, companyId);
                     logs = rawLogs.filter(row => {
                         const isClosedInquiry = row.master_name === 'Inquiry' && 
                                                 row.change_type === 'status_updated' && 
@@ -233,7 +264,11 @@ const fetchActivityLogs = async (req, res) => {
 
 const fetchPendingDevices = async (req, res) => {
     try {
-        const devices = await getPendingDevicesAllUsers();
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
+        const devices = await getPendingDevicesAllUsers(isSuper ? null : organizationId, isSuper ? null : companyId);
         return res.status(200).json({ success: true, devices });
     } catch (error) {
         console.log("Fetch Pending Devices Error:", error);

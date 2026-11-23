@@ -7,6 +7,9 @@ import toast from "react-hot-toast";
 export default function CreateUser() {
     const navigate = useNavigate();
     const [userTypes, setUserTypes] = useState([]);
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const activeCompanyId = localStorage.getItem("active_company_id") || user.company_id || "1";
+    const activeCompanyName = user.companies?.find(c => String(c.id) === String(activeCompanyId))?.name || "Active Workspace";
 
     const [newUserForm, setNewUserForm] = useState({
         name: "",
@@ -39,8 +42,11 @@ export default function CreateUser() {
         e.preventDefault();
         setCreatingUser(true);
         try {
-            await createUserByAdmin(newUserForm);
-            toast.success("User created successfully");
+            await createUserByAdmin({
+                ...newUserForm,
+                companyId: activeCompanyId
+            });
+            toast.success(`User created successfully for ${activeCompanyName}`);
             setNewUserForm({
                 name: "",
                 username: "",
@@ -66,8 +72,16 @@ export default function CreateUser() {
         <div className="w-full max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 <div className="mb-6 flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-900">Create New User</h1>
-                        <p className="text-slate-500 mt-1">Add a new user to the system.</p>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-2xl font-bold text-slate-900">Create New User</h1>
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold shadow-xs">
+                                <i className="fa-solid fa-building text-[10px]"></i>
+                                {activeCompanyName}
+                            </span>
+                        </div>
+                        <p className="text-slate-500 mt-1">
+                            This user will belong strictly to <strong className="text-slate-700">{activeCompanyName}</strong> and will not appear in other company workspaces.
+                        </p>
                     </div>
                     <button
                         onClick={() => navigate("/admin/dashboard")}

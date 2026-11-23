@@ -10,6 +10,7 @@ const { connectDB } = require("./config/db.js");
 // Routes
 const authRoutes = require("./routes/authRoutes.js");
 const companyRoutes = require("./routes/companyRoutes.js");
+const superadminRoutes = require("./routes/superadminRoutes.js");
 const adminRoutes = require("./routes/adminRoutes.js");
 const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
@@ -67,6 +68,7 @@ app.use((req, res, next) => {
 
 app.use(["/api/auth", "/auth"], authRoutes);
 app.use(["/api/companies", "/companies"], companyRoutes);
+app.use(["/api/superadmin", "/superadmin"], superadminRoutes);
 app.use(["/api/admin", "/admin"], adminRoutes);
 app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);

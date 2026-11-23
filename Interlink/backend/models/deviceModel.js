@@ -119,9 +119,9 @@ const getDeviceHistoryForUser = async (userId) => {
     return rows;
 };
 
-// Get all device history across all users
-const getAllDeviceHistory = async () => {
-    const query = `
+// Get all device history across all users (scoped by organization and company)
+const getAllDeviceHistory = async (organizationId = null, companyId = null) => {
+    let query = `
         SELECT
             d.*,
             u.name AS user_name,
@@ -132,15 +132,23 @@ const getAllDeviceHistory = async () => {
         JOIN users u ON u.id = d.user_id
         LEFT JOIN users approver ON approver.id = d.approved_by
         LEFT JOIN users closer ON closer.id = d.closed_by
-        ORDER BY d.submitted_at DESC
     `;
-    const [rows] = await db.execute(query);
+    const params = [];
+    if (organizationId && companyId) {
+        query += ` WHERE u.organization_id = ? AND u.company_id = ?`;
+        params.push(organizationId, companyId);
+    } else if (companyId) {
+        query += ` WHERE u.company_id = ?`;
+        params.push(companyId);
+    }
+    query += ` ORDER BY d.submitted_at DESC`;
+    const [rows] = await db.execute(query, params);
     return rows;
 };
 
-// Get all pending devices across all users
-const getPendingDevicesAllUsers = async () => {
-    const query = `
+// Get all pending devices across all users (scoped by organization and company)
+const getPendingDevicesAllUsers = async (organizationId = null, companyId = null) => {
+    let query = `
         SELECT
             d.*,
             u.name AS user_name,
@@ -148,9 +156,17 @@ const getPendingDevicesAllUsers = async () => {
         FROM user_devices d
         JOIN users u ON u.id = d.user_id
         WHERE d.status = 'pending' AND d.closed_at IS NULL
-        ORDER BY d.submitted_at DESC
     `;
-    const [rows] = await db.execute(query);
+    const params = [];
+    if (organizationId && companyId) {
+        query += ` AND u.organization_id = ? AND u.company_id = ?`;
+        params.push(organizationId, companyId);
+    } else if (companyId) {
+        query += ` AND u.company_id = ?`;
+        params.push(companyId);
+    }
+    query += ` ORDER BY d.submitted_at DESC`;
+    const [rows] = await db.execute(query, params);
     return rows;
 };
 

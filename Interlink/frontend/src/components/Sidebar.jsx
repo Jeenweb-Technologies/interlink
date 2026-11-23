@@ -197,6 +197,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         if (path === "/admin/user-types/create") return { title: "Create User Type", category: "Masters" };
         if (path === "/admin/report") return { title: "Activity Report", category: "Analytics" };
         if (path === "/profile") return { title: "Account Profile", category: "Settings" };
+        if (path === "/developer" || path === "/admin/developer") return { title: "Developer Console", category: "Platform" };
         return { title: "Interlink Suite", category: "Portal" };
     };
 
@@ -835,7 +836,8 @@ export default function Sidebar({
     const location = useLocation();
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const { hasPermission } = usePermission();
-    const isAdmin = user.role === "admin" || user.role === "super admin";
+    const isAdmin = user.role === "admin" || user.role === "super admin" || user.role === "super_admin";
+    const isDeveloper = user.role === "super_admin" || user.role === "super admin" || user.role === "developer";
 
     const [companies, setCompanies] = useState(user.companies || []);
     const [activeCompanyId, setActiveCompanyId] = useState(
@@ -1099,6 +1101,43 @@ export default function Sidebar({
                             </button>
                         </div>
                     </div>
+
+                    {/* Developer Console (Super Admin / Developer only) */}
+                    {isDeveloper && (
+                        <div>
+                            {!isCollapsed && (
+                                <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-purple-400 flex items-center gap-1.5">
+                                    <i className="fa-solid fa-code text-[10px]"></i>
+                                    Platform Control
+                                </p>
+                            )}
+                            <div className="space-y-1">
+                                <button
+                                    onClick={() => handleNav("/developer")}
+                                    title={isCollapsed ? "Developer Console" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname === "/developer" || location.pathname === "/admin/developer"
+                                            ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 font-semibold"
+                                            : "text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-900/30"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname === "/developer" || location.pathname === "/admin/developer" ? "text-white" : "text-purple-400 group-hover:text-purple-300"
+                                    }`}>
+                                        <i className="fa-solid fa-laptop-code"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <div className="flex items-center justify-between flex-1 min-w-0">
+                                            <span className="truncate">Developer Console</span>
+                                            <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded-full font-bold uppercase">
+                                                Super
+                                            </span>
+                                        </div>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {hasAnyMaster && (
                         <div>
