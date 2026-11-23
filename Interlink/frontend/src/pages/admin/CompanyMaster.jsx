@@ -1,446 +1,283 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import toast from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
 import DataTable from "../../components/DataTable";
 import {
     getCompanies,
+    createCompany,
     updateCompany,
     deleteCompany,
-    toggleCompanyStatus,
-    getCompanyById,
     switchCompany
 } from "../../api/companyApi";
-import { startDirectChat } from "../../api/chatApi";
-import { usePermission } from "../../context/PermissionContext";
-import { isUserAdmin } from "../../utils/roleUtils";
 
 export default function CompanyMaster() {
-    const navigate = useNavigate();
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
-    const isAdmin = isUserAdmin(user);
-    const { hasPermission } = usePermission();
-
-    // Permission checks
-    const canWrite = isAdmin || hasPermission("company_master", "write");
-    const canUpdate = isAdmin || hasPermission("company_master", "update");
-    const canDelete = isAdmin || hasPermission("company_master", "delete");
-
     const [companies, setCompanies] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    // Active workspace tracker
+    const [loading, setLoading] = useState(true);
     const [activeCompanyId, setActiveCompanyId] = useState(
-        localStorage.getItem("active_company_id") || user.company_id || "1"
+        localStorage.getItem("active_company_id") || user.company_id || ""
     );
 
-    // Edit modal state
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    // Modal states
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [modalMode, setModalMode] = useState("create"); // "create" | "edit"
     const [selectedCompany, setSelectedCompany] = useState(null);
-    const [editFormData, setEditFormData] = useState({
-        company_name: "",
-        company_code: "",
-        legal_name: "",
-        tax_id: "",
-        email: "",
-        phone: "",
-        website: "",
-        address: "",
-        city: "",
-        state: "",
-        country: "India",
-        postal_code: "",
-        industry: "",
-        description: "",
-        status: "ACTIVE"
-    });
-    const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+    const [formData, setFormData] = useState({ name: "", email: "", phone: "" });
+    const [saving, setSaving] = useState(false);
 
-    // View departments modal state
-    const [viewingCompanyDepts, setViewingCompanyDepts] = useState(null);
-    const [isLoadingDepts, setIsLoadingDepts] = useState(false);
-    const [companyModalTab, setCompanyModalTab] = useState("departments"); // "departments" | "employees"
-
-    // Delete confirmation modal state
+    // Delete confirmation state
     const [deleteModalCompany, setDeleteModalCompany] = useState(null);
-    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
-    // Direct chat launcher
-    const handleStartChatWithEmployee = async (targetUser) => {
-        if (!targetUser?.id) return;
+    const fetchCompaniesList = async () => {
         try {
-            const chatRes = await startDirectChat(targetUser.id);
-            if (chatRes?.conversation?.id) {
-                navigate("/chat", { state: { conversationId: chatRes.conversation.id } });
-            } else {
-                navigate("/chat");
-            }
-        } catch (err) {
-            console.error("Direct chat initiation error:", err);
-            toast.error("Could not initiate chat with this employee");
-        }
-    };
-
-    // Load Companies
-    const fetchCompanies = async () => {
-        try {
-            setIsLoading(true);
-            const res = await getCompanies(true, "");
-            const list = res.companies || res.data?.companies || res.data || (Array.isArray(res) ? res : []);
-            setCompanies(Array.isArray(list) ? list : []);
-
-            if (!activeCompanyId && Array.isArray(list) && list.length > 0) {
-                const firstId = String(list[0].id);
-                setActiveCompanyId(firstId);
-                localStorage.setItem("active_company_id", firstId);
+            setLoading(true);
+            const res = await getCompanies();
+            if (res.data?.success && res.data.companies) {
+                setCompanies(res.data.companies);
+                // If active company is not set, set it to the first one
+                if (!activeCompanyId && res.data.companies.length > 0) {
+                    const firstId = String(res.data.companies[0].id);
+                    setActiveCompanyId(firstId);
+                    localStorage.setItem("active_company_id", firstId);
+                }
             }
         } catch (error) {
             console.error("Failed to load companies:", error);
-            toast.error(error.response?.data?.message || "Failed to load company entities");
+            toast.error("Failed to load companies");
         } finally {
-            setIsLoading(false);
+            setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchCompanies();
+        fetchCompaniesList();
     }, []);
 
-    // Switch active company workspace
-    const handleSwitchCompany = async (companyId) => {
-        try {
-            await switchCompany(companyId);
-            const strId = String(companyId);
-            setActiveCompanyId(strId);
-            localStorage.setItem("active_company_id", strId);
-            const updatedUser = { ...user, company_id: parseInt(companyId, 10) };
-            localStorage.setItem("user", JSON.stringify(updatedUser));
-            toast.success("Switched active company workspace");
-            window.location.reload();
-        } catch (err) {
-            console.error("Failed to switch company:", err);
-            toast.error(err.response?.data?.message || "Failed to switch company");
-        }
+    const openCreateModal = () => {
+        setModalMode("create");
+        setSelectedCompany(null);
+        setFormData({ name: "", email: "", phone: "" });
+        setIsModalOpen(true);
     };
 
-    // Open Edit Modal
-    const handleOpenEdit = (comp) => {
+    const openEditModal = (comp) => {
+        setModalMode("edit");
         setSelectedCompany(comp);
-        setEditFormData({
-            company_name: comp.company_name || comp.name || "",
-            company_code: comp.company_code || "",
-            legal_name: comp.legal_name || "",
-            tax_id: comp.tax_id || "",
+        setFormData({
+            name: comp.name || "",
             email: comp.email || "",
-            phone: comp.phone || "",
-            website: comp.website || "",
-            address: comp.address || "",
-            city: comp.city || "",
-            state: comp.state || "",
-            country: comp.country || "India",
-            postal_code: comp.postal_code || "",
-            industry: comp.industry || "",
-            description: comp.description || "",
-            status: comp.status || "ACTIVE"
+            phone: comp.phone || ""
         });
-        setIsEditModalOpen(true);
+        setIsModalOpen(true);
     };
 
-    // Save Edit Form
-    const handleSaveEdit = async (e) => {
+    const handleFormSubmit = async (e) => {
         e.preventDefault();
-        if (!selectedCompany?.id) return;
-
-        if (!editFormData.company_name.trim()) {
+        if (!formData.name.trim()) {
             toast.error("Company name is required");
             return;
         }
 
+        setSaving(true);
         try {
-            setIsSubmittingEdit(true);
-            await updateCompany(selectedCompany.id, {
-                ...editFormData,
-                company_name: editFormData.company_name.trim(),
-                name: editFormData.company_name.trim(),
-                company_code: editFormData.company_code.trim().toUpperCase()
-            });
-            toast.success("Company updated successfully");
-            setIsEditModalOpen(false);
-            fetchCompanies();
+            if (modalMode === "create") {
+                const res = await createCompany({
+                    name: formData.name.trim(),
+                    email: formData.email.trim() || null,
+                    phone: formData.phone.trim() || null
+                });
+
+                if (res.data?.success) {
+                    toast.success("New company added successfully!");
+                    setIsModalOpen(false);
+                    await fetchCompaniesList();
+
+                    // Update local storage companies list
+                    const updatedUser = { ...user, companies: [...companies, res.data.company] };
+                    localStorage.setItem("user", JSON.stringify(updatedUser));
+                } else {
+                    toast.error(res.data?.message || "Failed to create company");
+                }
+            } else {
+                const res = await updateCompany(selectedCompany.id, {
+                    name: formData.name.trim(),
+                    email: formData.email.trim() || null,
+                    phone: formData.phone.trim() || null
+                });
+
+                if (res.data?.success) {
+                    toast.success("Company updated successfully!");
+                    setIsModalOpen(false);
+                    await fetchCompaniesList();
+
+                    // Update user companies array in localStorage
+                    const updatedList = companies.map(c => c.id === selectedCompany.id ? { ...c, ...formData } : c);
+                    const updatedUser = { ...user, companies: updatedList };
+                    localStorage.setItem("user", JSON.stringify(updatedUser));
+                } else {
+                    toast.error(res.data?.message || "Failed to update company");
+                }
+            }
         } catch (error) {
-            console.error("Failed to update company:", error);
-            toast.error(error.response?.data?.message || "Failed to save company changes");
+            console.error("Save company error:", error);
+            toast.error(error.response?.data?.message || "Failed to save company");
         } finally {
-            setIsSubmittingEdit(false);
+            setSaving(false);
         }
     };
 
-    // Toggle Status
-    const handleToggleStatus = async (comp) => {
+    const handleSwitchCompany = async (comp) => {
         try {
-            const nextStatus = comp.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
-            await toggleCompanyStatus(comp.id, comp.status);
-            toast.success(`Company status updated to ${nextStatus}`);
-            fetchCompanies();
+            const compIdStr = String(comp.id);
+            setActiveCompanyId(compIdStr);
+            localStorage.setItem("active_company_id", compIdStr);
+
+            // Persist to backend
+            try {
+                await switchCompany(comp.id);
+            } catch (switchErr) {
+                console.warn("Backend active company switch notice:", switchErr.message);
+            }
+
+            const updatedUser = { ...user, company_id: comp.id };
+            localStorage.setItem("user", JSON.stringify(updatedUser));
+            toast.success(`Switched active workspace to "${comp.name}"`);
+
+            // Trigger window auth-change or reload so other pages reflect the new company immediately
+            window.location.reload();
         } catch (error) {
-            console.error("Failed to toggle company status:", error);
-            toast.error(error.response?.data?.message || "Failed to change company status");
+            console.error("Switch company error:", error);
+            toast.error("Failed to switch company");
         }
     };
 
-    // Trigger Delete Confirmation Modal
-    const handleDelete = (comp) => {
-        if (comp.is_main) {
-            toast.error("Primary corporate entity cannot be deleted.");
-            return;
-        }
-        setDeleteModalCompany(comp);
-    };
-
-    // Execute Delete
-    const handleConfirmDelete = async () => {
-        if (!deleteModalCompany?.id) return;
+    const handleDeleteConfirm = async () => {
+        if (!deleteModalCompany) return;
+        setDeleting(true);
         try {
-            setIsDeleting(true);
-            await deleteCompany(deleteModalCompany.id);
-            toast.success("Company deleted successfully");
-            setDeleteModalCompany(null);
-            fetchCompanies();
+            const res = await deleteCompany(deleteModalCompany.id);
+            if (res.data?.success) {
+                toast.success("Company deleted successfully");
+                setDeleteModalCompany(null);
+
+                // If deleting currently active company, reset to another one
+                if (String(deleteModalCompany.id) === String(activeCompanyId)) {
+                    const remaining = companies.filter(c => c.id !== deleteModalCompany.id);
+                    if (remaining.length > 0) {
+                        const newActiveId = String(remaining[0].id);
+                        setActiveCompanyId(newActiveId);
+                        localStorage.setItem("active_company_id", newActiveId);
+                    }
+                }
+
+                await fetchCompaniesList();
+            } else {
+                toast.error(res.data?.message || "Failed to delete company");
+            }
         } catch (error) {
-            console.error("Failed to delete company:", error);
+            console.error("Delete company error:", error);
             toast.error(error.response?.data?.message || "Failed to delete company");
         } finally {
-            setIsDeleting(false);
+            setDeleting(false);
         }
     };
 
-    // View Departments & Employees Modal
-    const handleViewDepartments = async (comp) => {
-        try {
-            setIsLoadingDepts(true);
-            setViewingCompanyDepts(comp);
-            setCompanyModalTab("departments");
-            const res = await getCompanyById(comp.id);
-            const fullComp = res.company || res.data?.company || res.data || res;
-            setViewingCompanyDepts(fullComp || comp);
-        } catch (error) {
-            console.error("Failed to fetch company details:", error);
-            toast.error("Failed to load departments & personnel for this company");
-        } finally {
-            setIsLoadingDepts(false);
-        }
-    };
-
-    // Quick Stats Calculation
-    const stats = useMemo(() => {
-        const total = companies.length;
-        const active = companies.filter(c => c.status === "ACTIVE").length;
-        const totalDepts = companies.reduce((acc, c) => acc + (Number(c.department_count) || 0), 0);
-        const totalUsers = companies.reduce((acc, c) => acc + (Number(c.user_count) || 0), 0);
-        return { total, active, totalDepts, totalUsers };
-    }, [companies]);
-
-    // DataTable Columns Definition
+    // Columns for DataTable
     const columns = [
         {
-            key: "company_code",
-            label: "Code & Identity",
-            render: (row) => (
-                <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs uppercase shadow-2xs shrink-0">
-                        {row.logo_url ? (
-                            <img src={row.logo_url} alt={row.company_name || row.name} className="w-full h-full object-cover rounded-xl" />
-                        ) : (
-                            <i className="fa-solid fa-building text-slate-600"></i>
-                        )}
-                    </div>
-                    <div>
-                        <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                            <span>{row.company_code || "CO"}</span>
-                            {row.is_main && (
-                                <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.5 rounded-sm font-semibold tracking-wide">
-                                    PRIMARY
-                                </span>
-                            )}
-                        </div>
-                        <span className="text-[11px] text-slate-400 font-mono">ID: #{row.id}</span>
-                    </div>
-                </div>
-            )
+            key: "id",
+            label: "ID",
+            render: (row) => <span className="font-mono text-xs text-slate-500 font-bold">#{row.id}</span>
         },
         {
-            key: "company_name",
-            label: "Company / Workspace Name",
-            render: (row) => (
-                <div>
-                    <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                        {row.company_name || row.name}
-                    </div>
-                    {row.industry && (
-                        <div className="text-[11px] text-slate-500 font-medium">
-                            <i className="fa-solid fa-briefcase text-[10px] text-slate-400 mr-1"></i>
-                            {row.industry}
-                        </div>
-                    )}
-                </div>
-            )
-        },
-        {
-            key: "legal_tax",
-            label: "Legal & Tax Details",
-            render: (row) => (
-                <div className="text-xs">
-                    <div className="text-slate-800 font-medium">{row.legal_name || "—"}</div>
-                    {row.tax_id && (
-                        <div className="text-[11px] text-slate-400 font-mono">GST / Tax: {row.tax_id}</div>
-                    )}
-                </div>
-            )
-        },
-        {
-            key: "assigned_units",
-            label: "Assigned Units",
-            render: (row) => (
-                <button
-                    type="button"
-                    onClick={() => handleViewDepartments(row)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50/80 hover:bg-blue-100/90 text-blue-700 text-xs font-semibold border border-blue-200/60 transition-all cursor-pointer shadow-2xs group"
-                    title="Click to view hosted departments & employees"
-                >
-                    <i className="fa-solid fa-sitemap text-blue-500 group-hover:scale-110 transition-transform"></i>
-                    <span>{row.department_count || 0} Depts</span>
-                    <span className="text-blue-300">|</span>
-                    <span className="text-blue-600 font-normal">{row.user_count || 0} Staff</span>
-                </button>
-            )
-        },
-        {
-            key: "contact_details",
-            label: "Helpline & Contact",
-            render: (row) => (
-                <div className="text-xs text-slate-600 space-y-0.5">
-                    {row.email ? (
-                        <div className="flex items-center gap-1.5 text-slate-700">
-                            <i className="fa-regular fa-envelope text-[11px] text-slate-400"></i>
-                            <a href={`mailto:${row.email}`} className="hover:underline">{row.email}</a>
-                        </div>
-                    ) : (
-                        <div className="text-slate-400 italic text-[11px]">—</div>
-                    )}
-                    {row.phone && (
-                        <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
-                            <i className="fa-solid fa-phone text-[10px] text-slate-400"></i>
-                            <span>{row.phone}</span>
-                        </div>
-                    )}
-                </div>
-            )
-        },
-        {
-            key: "location",
-            label: "Location",
+            key: "name",
+            label: "Company Name",
             render: (row) => {
-                const locParts = [row.city, row.state, row.country].filter(Boolean);
+                const isActive = String(row.id) === String(activeCompanyId);
                 return (
-                    <div className="text-xs text-slate-600">
-                        {locParts.length > 0 ? (
-                            <div className="flex items-center gap-1.5">
-                                <i className="fa-solid fa-location-dot text-[11px] text-slate-400"></i>
-                                <span>{locParts.join(", ")}</span>
+                    <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            isActive ? "bg-blue-600 text-white shadow-sm shadow-blue-500/30" : "bg-slate-100 text-slate-600"
+                        }`}>
+                            <i className="fa-solid fa-building text-sm"></i>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold text-slate-800 text-sm">{row.name}</span>
+                                {isActive && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                        CURRENT ACTIVE
+                                    </span>
+                                )}
                             </div>
-                        ) : (
-                            <span className="text-slate-400 italic text-[11px]">—</span>
-                        )}
+                            <span className="text-xs text-slate-400">Created: {new Date(row.created_at).toLocaleDateString()}</span>
+                        </div>
                     </div>
                 );
             }
         },
         {
-            key: "status",
-            label: "Status",
+            key: "email",
+            label: "Contact Email",
             render: (row) => (
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border shadow-xs ${
-                    row.status === "ACTIVE"
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : "bg-slate-100 text-slate-600 border-slate-200"
-                }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${row.status === "ACTIVE" ? "bg-emerald-500" : "bg-slate-400"}`}></span>
-                    {row.status || "ACTIVE"}
+                <span className="text-xs text-slate-600 font-medium">
+                    {row.email ? (
+                        <a href={`mailto:${row.email}`} className="hover:text-blue-600 transition-colors">
+                            {row.email}
+                        </a>
+                    ) : (
+                        <span className="text-slate-400 italic">Not provided</span>
+                    )}
+                </span>
+            )
+        },
+        {
+            key: "phone",
+            label: "Phone / Helpline",
+            render: (row) => (
+                <span className="text-xs text-slate-600 font-medium">
+                    {row.phone || <span className="text-slate-400 italic">—</span>}
                 </span>
             )
         },
         {
             key: "actions",
             label: "Actions",
-            sortable: false,
             render: (row) => {
-                const isActiveWorkspace = String(row.id) === String(activeCompanyId);
+                const isActive = String(row.id) === String(activeCompanyId);
                 return (
-                    <div className="flex items-center gap-1.5">
-                        {/* Switch Workspace Button */}
-                        {isActiveWorkspace ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
-                                <i className="fa-solid fa-circle-check text-emerald-500 text-[10px]"></i>
+                    <div className="flex items-center gap-2">
+                        {!isActive ? (
+                            <button
+                                onClick={() => handleSwitchCompany(row)}
+                                className="px-2.5 py-1 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200 cursor-pointer flex items-center gap-1.5"
+                                title="Switch active workspace to this company"
+                            >
+                                <i className="fa-solid fa-arrow-right-arrow-left text-[11px]"></i>
+                                <span>Set Active</span>
+                            </button>
+                        ) : (
+                            <span className="px-2.5 py-1 text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                                <i className="fa-solid fa-circle-check text-[11px]"></i>
                                 <span>Active</span>
                             </span>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={() => handleSwitchCompany(row.id)}
-                                className="flex h-8 px-2.5 items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                                title="Switch to this company's workspace"
-                            >
-                                <i className="fa-solid fa-arrow-right-arrow-left text-[10px] text-blue-600"></i>
-                                <span>Switch</span>
-                            </button>
                         )}
 
                         <button
-                            type="button"
-                            onClick={() => handleViewDepartments(row)}
-                            className="flex h-8 px-2.5 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                            title="View Departments & Employees"
+                            onClick={() => openEditModal(row)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Company Details"
                         >
-                            <i className="fa-solid fa-users text-[10px]"></i>
-                            <span>Units</span>
+                            <i className="fa-solid fa-pen-to-square text-sm"></i>
                         </button>
 
-                        {canUpdate && (
+                        {companies.length > 1 && (
                             <button
-                                type="button"
-                                onClick={() => handleOpenEdit(row)}
-                                className="flex h-8 px-2.5 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                                title="Edit Company Details"
-                            >
-                                <i className="fa-solid fa-pen text-[10px]"></i>
-                                <span>Edit</span>
-                            </button>
-                        )}
-
-                        {canUpdate && (
-                            <button
-                                type="button"
-                                onClick={() => handleToggleStatus(row)}
-                                className={`flex h-8 px-2.5 items-center gap-1 rounded-lg border text-xs font-semibold transition-all shadow-2xs cursor-pointer ${
-                                    row.status === "ACTIVE"
-                                        ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                                        : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                }`}
-                                title={row.status === "ACTIVE" ? "Deactivate Company" : "Activate Company"}
-                            >
-                                <i className={`fa-solid ${row.status === "ACTIVE" ? "fa-ban text-[10px]" : "fa-check text-[10px]"}`}></i>
-                                <span>{row.status === "ACTIVE" ? "Disable" : "Enable"}</span>
-                            </button>
-                        )}
-
-                        {canDelete && !row.is_main && (
-                            <button
-                                type="button"
-                                onClick={() => handleDelete(row)}
-                                className="flex h-8 px-2.5 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                                onClick={() => setDeleteModalCompany(row)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                 title="Delete Company"
                             >
-                                <i className="fa-solid fa-trash text-[10px]"></i>
-                                <span>Delete</span>
+                                <i className="fa-solid fa-trash-can text-sm"></i>
                             </button>
                         )}
                     </div>
@@ -449,292 +286,173 @@ export default function CompanyMaster() {
         }
     ];
 
+    const activeCompanyObj = companies.find(c => String(c.id) === String(activeCompanyId)) || companies[0];
+
     return (
-        <div className="space-y-6 animate-in fade-in duration-200">
-            {/* ── TOP HEADER & STATS ───────────────────────────────────────── */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+            {/* Header & Stats */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                    <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
                         <i className="fa-solid fa-building text-blue-600"></i>
-                        <span>Company & Entity Master</span>
+                        <span>Company Master</span>
                     </h1>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                        Manage corporate entities, subsidiaries, and divisional business workspaces
+                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                        Manage multiple companies, subsidiaries, and branches under your organization
                     </p>
                 </div>
-                {canWrite && (
-                    <button
-                        type="button"
-                        onClick={() => navigate("/peoples/companies/create")}
-                        className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer shrink-0"
-                    >
-                        <i className="fa-solid fa-plus text-xs"></i>
-                        <span>Add Company</span>
-                    </button>
-                )}
+
+                <button
+                    onClick={openCreateModal}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all cursor-pointer self-start sm:self-auto"
+                >
+                    <i className="fa-solid fa-plus"></i>
+                    <span>Add New Company</span>
+                </button>
             </div>
 
-            {/* ── METRIC STAT CARDS ───────────────────────────────────────── */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-sm font-bold shrink-0">
-                        <i className="fa-solid fa-building"></i>
-                    </div>
-                    <div>
-                        <div className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider">Total Entities</div>
-                        <div className="text-lg sm:text-xl font-black text-slate-900">{stats.total}</div>
-                    </div>
-                </div>
-
-                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-bold shrink-0">
-                        <i className="fa-solid fa-circle-check"></i>
-                    </div>
-                    <div>
-                        <div className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider">Active Entities</div>
-                        <div className="text-lg sm:text-xl font-black text-emerald-600">{stats.active}</div>
-                    </div>
-                </div>
-
-                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-sm font-bold shrink-0">
+            {/* Quick KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg">
                         <i className="fa-solid fa-sitemap"></i>
                     </div>
                     <div>
-                        <div className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider">Total Departments</div>
-                        <div className="text-lg sm:text-xl font-black text-indigo-600">{stats.totalDepts}</div>
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Companies</p>
+                        <p className="text-xl font-black text-slate-900 mt-0.5">{companies.length}</p>
                     </div>
                 </div>
 
-                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center text-sm font-bold shrink-0">
-                        <i className="fa-solid fa-users"></i>
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg">
+                        <i className="fa-solid fa-building-circle-check"></i>
                     </div>
                     <div>
-                        <div className="text-slate-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider">Total Personnel</div>
-                        <div className="text-lg sm:text-xl font-black text-violet-600">{stats.totalUsers}</div>
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Current Active Workspace</p>
+                        <p className="text-base font-extrabold text-slate-900 mt-0.5 truncate max-w-[180px]">
+                            {activeCompanyObj?.name || "None"}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center text-lg">
+                        <i className="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Organization ID</p>
+                        <p className="text-base font-extrabold text-slate-900 mt-0.5 font-mono">
+                            #{user.organization_id || 1}
+                        </p>
                     </div>
                 </div>
             </div>
 
-            {/* ── DATATABLE ────────────────────────────────────────────────── */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Main Table */}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                 <DataTable
-                    columns={columns}
+                    tableId="company_master_list"
+                    title="All Registered Companies"
                     data={companies}
-                    isLoading={isLoading}
-                    searchPlaceholder="Search company by name, code, legal entity, city..."
-                    filterKey="status"
-                    filterOptions={[
-                        { label: "All Entities", value: "ALL" },
-                        { label: "Active Only", value: "ACTIVE" },
-                        { label: "Inactive Only", value: "INACTIVE" }
-                    ]}
+                    columns={columns}
+                    loading={loading}
+                    searchPlaceholder="Search companies by name, email, or phone..."
+                    actionButton={
+                        <button
+                            onClick={openCreateModal}
+                            className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-sm"
+                            title="Add Company"
+                        >
+                            <i className="fa-solid fa-plus text-xs"></i>
+                        </button>
+                    }
                 />
             </div>
 
-            {/* ── EDIT COMPANY MODAL ───────────────────────────────────────── */}
-            {isEditModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+            {/* Add / Edit Modal */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150">
                         {/* Modal Header */}
-                        <div className="px-4 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-sm">
                                     <i className="fa-solid fa-building"></i>
                                 </div>
-                                <div>
-                                    <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">Edit Company Details</h3>
-                                    <p className="text-[11px] sm:text-xs text-slate-500">Update corporate record, compliance info, and address</p>
-                                </div>
+                                <h2 className="text-base font-bold text-slate-900">
+                                    {modalMode === "create" ? "Add New Company" : "Edit Company Details"}
+                                </h2>
                             </div>
                             <button
-                                type="button"
-                                onClick={() => setIsEditModalOpen(false)}
-                                className="w-8 h-8 rounded-full hover:bg-slate-200/60 text-slate-400 hover:text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                                onClick={() => setIsModalOpen(false)}
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
                             >
-                                <i className="fa-solid fa-xmark text-sm"></i>
+                                <i className="fa-solid fa-xmark text-base"></i>
                             </button>
                         </div>
 
                         {/* Modal Form */}
-                        <form onSubmit={handleSaveEdit} className="p-4 sm:p-6 overflow-y-auto space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Company Name <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={editFormData.company_name}
-                                        onChange={(e) => setEditFormData({ ...editFormData, company_name: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="e.g. Epoxy House Private Limited"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Company Code <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={editFormData.company_code}
-                                        onChange={(e) => setEditFormData({ ...editFormData, company_code: e.target.value.toUpperCase() })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 uppercase font-mono transition-all"
-                                        placeholder="e.g. EPOXY"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Legal Entity Name
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.legal_name}
-                                        onChange={(e) => setEditFormData({ ...editFormData, legal_name: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="Full registered statutory name"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Tax ID / GST Number
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.tax_id}
-                                        onChange={(e) => setEditFormData({ ...editFormData, tax_id: e.target.value.toUpperCase() })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 uppercase font-mono transition-all"
-                                        placeholder="e.g. 24AAACE1234F1Z5"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Official Email
-                                    </label>
-                                    <input
-                                        type="email"
-                                        value={editFormData.email}
-                                        onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="contact@company.com"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Phone / Helpline
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.phone}
-                                        onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="+91 98765 43210"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Website
-                                    </label>
-                                    <input
-                                        type="url"
-                                        value={editFormData.website}
-                                        onChange={(e) => setEditFormData({ ...editFormData, website: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="https://company.com"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        City
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.city}
-                                        onChange={(e) => setEditFormData({ ...editFormData, city: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="e.g. Vadodara"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        State
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.state}
-                                        onChange={(e) => setEditFormData({ ...editFormData, state: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="e.g. Gujarat"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                        Industry / Sector
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editFormData.industry}
-                                        onChange={(e) => setEditFormData({ ...editFormData, industry: e.target.value })}
-                                        className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                        placeholder="Manufacturing, IT, etc."
-                                    />
-                                </div>
-                            </div>
-
+                        <form onSubmit={handleFormSubmit} className="p-6 space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                    Company Description
+                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                    Company Name <span className="text-red-500">*</span>
                                 </label>
-                                <textarea
-                                    rows="2"
-                                    value={editFormData.description}
-                                    onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
-                                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all"
-                                    placeholder="Brief summary or operational scope"
+                                <input
+                                    type="text"
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                    required
+                                    placeholder="e.g. Acme Logistics Pvt Ltd"
+                                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                                 />
                             </div>
 
-                            <div className="pt-2 border-t border-slate-100 flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                    Contact / Billing Email
+                                </label>
+                                <input
+                                    type="email"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    placeholder="e.g. info@acmelogistics.com"
+                                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                    Phone / Helpline Number
+                                </label>
+                                <input
+                                    type="tel"
+                                    value={formData.phone}
+                                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                    placeholder="e.g. +91 9876543210"
+                                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
+                                />
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
                                 <button
                                     type="button"
-                                    onClick={() => setIsEditModalOpen(false)}
-                                    className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                                    onClick={() => setIsModalOpen(false)}
+                                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={isSubmittingEdit}
-                                    className="w-full sm:w-auto px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                    disabled={saving}
+                                    className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-75 cursor-pointer flex items-center gap-1.5"
                                 >
-                                    {isSubmittingEdit ? (
+                                    {saving ? (
                                         <>
-                                            <i className="fa-solid fa-spinner animate-spin"></i>
+                                            <i className="fa-solid fa-spinner animate-spin text-xs"></i>
                                             <span>Saving...</span>
                                         </>
                                     ) : (
-                                        <>
-                                            <i className="fa-solid fa-check"></i>
-                                            <span>Update Company</span>
-                                        </>
+                                        <span>{modalMode === "create" ? "Create Company" : "Save Changes"}</span>
                                     )}
                                 </button>
                             </div>
@@ -743,178 +461,30 @@ export default function CompanyMaster() {
                 </div>
             )}
 
-            {/* ── VIEW COMPANY DEPARTMENTS & EMPLOYEES MODAL ───────────────── */}
-            {viewingCompanyDepts && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden border border-slate-200 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
-                        {/* Modal Header */}
-                        <div className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/90 shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-[#17365D] text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
-                                    <i className="fa-solid fa-building-user"></i>
-                                </div>
-                                <div>
-                                    <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">{viewingCompanyDepts.company_name || viewingCompanyDepts.name}</h3>
-                                    <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Departments & personnel hosted under this entity</p>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setViewingCompanyDepts(null)}
-                                className="w-8 h-8 rounded-full hover:bg-slate-200/60 text-slate-400 hover:text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
-                            >
-                                <i className="fa-solid fa-xmark text-sm"></i>
-                            </button>
-                        </div>
-
-                        {/* Modal Tabs */}
-                        <div className="flex items-center gap-2 px-4 sm:px-6 pt-3 border-b border-slate-100 bg-white shrink-0">
-                            <button
-                                type="button"
-                                onClick={() => setCompanyModalTab("departments")}
-                                className={`pb-2.5 text-xs font-bold transition-all relative cursor-pointer flex items-center gap-1.5 ${
-                                    companyModalTab === "departments"
-                                        ? "text-[#17365D] border-b-2 border-[#17365D]"
-                                        : "text-slate-400 hover:text-slate-600"
-                                }`}
-                            >
-                                <i className="fa-solid fa-sitemap"></i>
-                                <span>Departments ({viewingCompanyDepts.departments?.length || 0})</span>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setCompanyModalTab("employees")}
-                                className={`pb-2.5 text-xs font-bold transition-all relative cursor-pointer flex items-center gap-1.5 ${
-                                    companyModalTab === "employees"
-                                        ? "text-[#17365D] border-b-2 border-[#17365D]"
-                                        : "text-slate-400 hover:text-slate-600"
-                                }`}
-                            >
-                                <i className="fa-solid fa-users"></i>
-                                <span>Personnel ({viewingCompanyDepts.employees?.length || 0})</span>
-                            </button>
-                        </div>
-
-                        {/* Tab Content */}
-                        <div className="p-4 sm:p-6 overflow-y-auto divide-y divide-slate-100">
-                            {isLoadingDepts ? (
-                                <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-2">
-                                    <i className="fa-solid fa-spinner animate-spin text-xl text-blue-600"></i>
-                                    <span className="text-xs font-medium">Fetching organizational hierarchy...</span>
-                                </div>
-                            ) : companyModalTab === "departments" ? (
-                                viewingCompanyDepts.departments?.length > 0 ? (
-                                    <div className="space-y-2">
-                                        {viewingCompanyDepts.departments.map((dept) => (
-                                            <div
-                                                key={dept.id}
-                                                className="p-3 rounded-xl bg-slate-50/80 hover:bg-blue-50/50 border border-slate-200/70 flex items-center justify-between transition-colors"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-lg bg-blue-100/80 text-blue-700 flex items-center justify-center text-xs font-bold shrink-0">
-                                                        <i className="fa-solid fa-network-wired"></i>
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-xs font-bold text-slate-900">{dept.department_name}</div>
-                                                        <div className="text-[11px] text-slate-500 line-clamp-1">{dept.description || "Active department unit"}</div>
-                                                    </div>
-                                                </div>
-                                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                                    dept.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"
-                                                }`}>
-                                                    {dept.status}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="py-10 text-center text-slate-400">
-                                        <i className="fa-solid fa-diagram-project text-3xl mb-2 text-slate-300"></i>
-                                        <p className="text-xs font-medium">No departments currently allocated to this company.</p>
-                                    </div>
-                                )
-                            ) : (
-                                viewingCompanyDepts.employees?.length > 0 ? (
-                                    <div className="space-y-2">
-                                        {viewingCompanyDepts.employees.map((emp) => (
-                                            <div
-                                                key={emp.id}
-                                                className="p-3 rounded-xl bg-slate-50/80 hover:bg-indigo-50/40 border border-slate-200/70 flex items-center justify-between transition-colors"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-[#17365D] text-white flex items-center justify-center text-xs font-bold shrink-0">
-                                                        {(emp.name || emp.username || "U").charAt(0).toUpperCase()}
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-xs font-bold text-slate-900">{emp.name || emp.username}</div>
-                                                        <div className="text-[11px] text-slate-500">
-                                                            {emp.user_type_name || emp.role || "Employee"} • <span className="text-slate-400">{emp.email || emp.mob_no || ""}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleStartChatWithEmployee(emp)}
-                                                        className="h-7 px-2.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-[11px] font-bold border border-blue-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                                        title="Launch Direct Chat"
-                                                    >
-                                                        <i className="fa-regular fa-comment-dots"></i>
-                                                        <span>Chat</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="py-10 text-center text-slate-400">
-                                        <i className="fa-solid fa-users-slash text-3xl mb-2 text-slate-300"></i>
-                                        <p className="text-xs font-medium">No direct personnel enrolled under this entity.</p>
-                                    </div>
-                                )
-                            )}
-                        </div>
-
-                        {/* Modal Footer */}
-                        <div className="px-4 sm:px-6 py-3 border-t border-slate-100 flex items-center justify-end bg-slate-50/80 shrink-0">
-                            <button
-                                type="button"
-                                onClick={() => setViewingCompanyDepts(null)}
-                                className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
-                            >
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ── DELETE CONFIRMATION MODAL ─────────────────────────────────── */}
+            {/* Delete Confirmation Modal */}
             {deleteModalCompany && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-                    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-2xl max-w-sm w-full text-center animate-in zoom-in-95 duration-150">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-in zoom-in-95 duration-150">
                         <div className="w-12 h-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto mb-3 text-lg">
                             <i className="fa-solid fa-triangle-exclamation"></i>
                         </div>
                         <h3 className="text-base font-bold text-slate-900">Delete Company?</h3>
                         <p className="text-xs text-slate-500 mt-1 mb-5">
-                            Are you sure you want to delete <span className="font-bold text-slate-800">{deleteModalCompany.company_name || deleteModalCompany.name}</span>? This action cannot be undone.
+                            Are you sure you want to delete <span className="font-bold text-slate-800">{deleteModalCompany.name}</span>? This action cannot be undone.
                         </p>
                         <div className="flex items-center justify-center gap-3">
                             <button
-                                type="button"
                                 onClick={() => setDeleteModalCompany(null)}
                                 className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
                             >
                                 Cancel
                             </button>
                             <button
-                                type="button"
-                                onClick={handleConfirmDelete}
-                                disabled={isDeleting}
+                                onClick={handleDeleteConfirm}
+                                disabled={deleting}
                                 className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm cursor-pointer disabled:opacity-75"
                             >
-                                {isDeleting ? "Deleting..." : "Yes, Delete"}
+                                {deleting ? "Deleting..." : "Yes, Delete"}
                             </button>
                         </div>
                     </div>
