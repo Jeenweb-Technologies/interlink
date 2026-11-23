@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import { loginUser } from "../api/authApi";
 import { getDeviceId } from "../utils/device";
@@ -238,6 +238,19 @@ export default function Login() {
                                     </>
                                 )}
                             </button>
+
+                            {/* Organization Registration Link */}
+                            <div className="pt-3 border-t border-slate-900/60 text-center">
+                                <span className="text-xs text-slate-400">
+                                    New company or organization?{" "}
+                                    <Link
+                                        to="/register"
+                                        className="text-blue-400 hover:text-blue-300 font-bold hover:underline transition-colors"
+                                    >
+                                        Register Organization
+                                    </Link>
+                                </span>
+                            </div>
                         </form>
                     </div>
                 </div>

@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 
 import Login from "./pages/Login";
+import RegisterOrg from "./pages/RegisterOrg";
 import DeviceRegistration from "./pages/DeviceRegistration";
 import PendingApproval from "./pages/PendingApproval";
 
@@ -11,6 +12,7 @@ import CreateUser from "./pages/admin/user/CreateUser";
 import CreateUserType from "./pages/admin/user/CreateUserType";
 import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
+import CompanyMaster from "./pages/admin/CompanyMaster";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
@@ -23,6 +25,16 @@ export default function AppRoutes() {
             <Route
                 path="/"
                 element={<Login />}
+            />
+
+            <Route
+                path="/register"
+                element={<RegisterOrg />}
+            />
+
+            <Route
+                path="/register-org"
+                element={<RegisterOrg />}
             />
 
             <Route
@@ -63,6 +75,13 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/dashboard"
                             element={<AdminDashboard />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute allowedRole="admin" />}>
+                        <Route
+                            path="/admin/companies"
+                            element={<CompanyMaster />}
                         />
                     </Route>
 
