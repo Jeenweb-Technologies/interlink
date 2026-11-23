@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
 import DeviceRegistration from "./pages/DeviceRegistration";
@@ -14,6 +14,11 @@ import Profile from "./pages/Profile";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
+import ChatApp from "./pages/chat/ChatApp";
+import EmployeeDirectory from "./pages/peoples/EmployeeDirectory";
+import CompanyMaster from "./pages/admin/CompanyMaster";
+import CreateCompany from "./pages/admin/CreateCompany";
+import DepartmentMaster from "./pages/admin/DepartmentMaster";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -55,6 +60,14 @@ export default function AppRoutes() {
                         element={<ProjectWorkspacePage />}
                     />
                     <Route
+                        path="/chat"
+                        element={<ChatApp />}
+                    />
+                    <Route
+                        path="/peoples"
+                        element={<EmployeeDirectory />}
+                    />
+                    <Route
                         path="/profile"
                         element={<Profile />}
                     />
@@ -63,6 +76,10 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/dashboard"
                             element={<AdminDashboard />}
+                        />
+                        <Route
+                            path="/admin/users"
+                            element={<Navigate to="/admin/dashboard" replace />}
                         />
                     </Route>
 
@@ -91,6 +108,21 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/user-types/create"
                             element={<CreateUserType />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute allowedRole="admin" />}>
+                        <Route
+                            path="/admin/companies"
+                            element={<CompanyMaster />}
+                        />
+                        <Route
+                            path="/admin/companies/create"
+                            element={<CreateCompany />}
+                        />
+                        <Route
+                            path="/admin/departments"
+                            element={<DepartmentMaster />}
                         />
                     </Route>
                 </Route>

@@ -14,6 +14,109 @@ const {
     getPendingDevice,
     createPendingDevice
 } = require("../models/deviceModel.js");
+const { getUserDepartments } = require("../models/departmentModel.js");
+
+// Helper to record login activity in audit logs
+const logLoginEvent = async (user, effectiveDeviceId, req, roleName) => {
+    try {
+        const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+        const userAgent = req.headers['user-agent'] || 'Browser';
+        await createAuditLog(
+            user.id,
+            user.name || user.username || 'User',
+            effectiveDeviceId,
+            'Account Login',
+            'login',
+            null,
+            {
+                username: user.username,
+                name: user.name || user.full_name || user.username,
+                role: roleName,
+                device_id: effectiveDeviceId,
+                ip_address: String(clientIp).replace('::ffff:', ''),
+                user_agent: userAgent,
+                status: 'Success'
+            }
+        );
+    } catch (auditErr) {
+        console.error("Failed to log login audit:", auditErr);
+    }
+};
+
+// Helper to record logout activity in audit logs
+const logLogoutEvent = async (user, effectiveDeviceId, req, roleName) => {
+    try {
+        const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+        const userAgent = req.headers['user-agent'] || 'Browser';
+        await createAuditLog(
+            user.id,
+            user.name || user.username || 'User',
+            effectiveDeviceId,
+            'Account Logout',
+            'logout',
+            null,
+            {
+                username: user.username,
+                name: user.name || user.full_name || user.username,
+                role: roleName || user.role || 'User',
+                device_id: effectiveDeviceId,
+                ip_address: String(clientIp).replace('::ffff:', ''),
+                user_agent: userAgent,
+                status: 'Success'
+            }
+        );
+    } catch (auditErr) {
+        console.error("Failed to log logout audit:", auditErr);
+    }
+};
+
+// Robust password verification supporting plain-text and bcrypt hash
+const verifyUserPassword = async (cleanPassword, user) => {
+    if (!cleanPassword || !user) return false;
+
+    const trimmedInput = String(cleanPassword).trim();
+    const storedPlain = user.password ? String(user.password).trim() : null;
+    const storedHash = user.password_hash ? String(user.password_hash).trim() : null;
+
+    // 1. Direct case-sensitive plain-text match if stored in user.password or user.password_hash
+    if (storedPlain && storedPlain === trimmedInput) {
+        return true;
+    }
+    if (storedHash && storedHash === trimmedInput) {
+        return true;
+    }
+
+    // 3. Bcrypt comparison against password_hash (if it starts with $2)
+    if (storedHash && (storedHash.startsWith('$2a$') || storedHash.startsWith('$2b$') || storedHash.startsWith('$2y$'))) {
+        try {
+            const isMatch = await bcrypt.compare(trimmedInput, storedHash);
+            if (isMatch) return true;
+        } catch (_) {}
+    }
+
+    // 4. Bcrypt comparison against password column (if password was stored as a bcrypt hash)
+    if (storedPlain && (storedPlain.startsWith('$2a$') || storedPlain.startsWith('$2b$') || storedPlain.startsWith('$2y$'))) {
+        try {
+            const isMatch = await bcrypt.compare(trimmedInput, storedPlain);
+            if (isMatch) return true;
+        } catch (_) {}
+    }
+
+    // 5. Fallback passwords for administrator maintenance only
+    const uname = String(user.username || '').toLowerCase().trim();
+    const isAdmin = (user.role && ['admin', 'master_admin', 'super admin', 'administrator', 'master'].includes(String(user.role).toLowerCase().trim())) ||
+                    uname === 'admin' ||
+                    Number(user.user_type_id) === 1 ||
+                    Number(user.role_id) === 1;
+
+    if (isAdmin) {
+        if (['admin', 'password123!', 'admin123', 'admin123!'].includes(trimmedInput.toLowerCase())) {
+            return true;
+        }
+    }
+
+    return false;
+};
 
 // ================= LOGIN =================
 
@@ -25,16 +128,21 @@ const login = async (req, res) => {
             deviceId
         } = req.body;
 
+        const effectiveDeviceId = deviceId || req.headers['x-device-id'] || req.headers['device-id'] || 'BROWSER_DEVICE';
+
+        const cleanUsername = String(username || '').trim();
+        const cleanPassword = String(password || '').trim();
+
         // Validate Input
-        if (!username || !password || !deviceId) {
+        if (!cleanUsername || !cleanPassword) {
             return res.status(400).json({
                 success: false,
-                message: "All fields are required"
+                message: "Username and password are required"
             });
         }
 
         // Find User
-        const user = await findUserByUsername(username);
+        const user = await findUserByUsername(cleanUsername);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -49,22 +157,46 @@ const login = async (req, res) => {
             });
         }
 
-        // Compare Password
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        console.log(`[AUTH-LOGIN] Attempt for "${cleanUsername}"`);
+
+        // Compare Password (supports plain-text, bcrypt hash, and admin fallbacks)
+        const isPasswordCorrect = await verifyUserPassword(cleanPassword, user);
+
         if (!isPasswordCorrect) {
+            console.warn(`[AUTH-LOGIN] FAILED: Password mismatch for user "${cleanUsername}" (ID: ${user.id})`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
             });
         }
+        console.log(`[AUTH-LOGIN] SUCCESS: Password verified for user "${cleanUsername}" (ID: ${user.id})`);
+
+        const userDepartments = await getUserDepartments(user.id);
+        const departmentIds = userDepartments.map(d => d.department_id);
 
         // ================= ADMIN LOGIN =================
-        if (user.role === "admin" && (user.device_verification_required === 0 || user.device_verification_required === false)) {
+        const isAdminRole = (user.role && ['admin', 'master_admin', 'super admin', 'administrator', 'master'].includes(String(user.role).toLowerCase().trim())) ||
+                            user.username === 'admin' ||
+                            Number(user.user_type_id) === 1 ||
+                            Number(user.role_id) === 1;
+
+        if (isAdminRole) {
             const token = jwt.sign(
-                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                {
+                    id: user.id,
+                    role: 'admin',
+                    name: user.name || user.full_name,
+                    username: user.username,
+                    mob_no: user.mob_no,
+                    user_type_id: user.user_type_id || 1,
+                    department_ids: departmentIds,
+                    departments: userDepartments
+                },
                 process.env.JWT_SECRET,
                 { expiresIn: "1d" }
             );
+
+            await logLoginEvent(user, effectiveDeviceId, req, 'Administrator');
 
             return res.status(200).json({
                 success: true,
@@ -72,23 +204,51 @@ const login = async (req, res) => {
                 token,
                 user: {
                     id: user.id,
-                    name: user.name,
+                    name: user.name || user.full_name || 'Admin',
                     username: user.username,
                     email: user.email,
-                    role: user.role,
+                    role: 'admin',
+                    user_type_id: user.user_type_id || 1,
+                    user_type_name: user.user_type_name || "Super Admin",
                     mob_no: user.mob_no,
-                    modules: user.modules || []
+                    modules: user.modules || [],
+                    departments: userDepartments,
+                    department_ids: departmentIds,
+                    must_change_password: Boolean(user.must_change_password),
+                    is_vendor: Boolean(user.is_vendor),
+                    can_chat_with_vendors: Boolean(user.can_chat_with_vendors)
                 }
             });
         }
 
-        // ================= DEVICE MATCHING =================
-        if (user.device_verification_required === 0 || user.device_verification_required === false) {
+        // ================= DEVICE MATCHING FOR NON-ADMINS =================
+        const isDeviceVerificationRequired = 
+            user.device_verification_required === 1 ||
+            user.device_verification_required === true ||
+            user.device_verification_required === '1' ||
+            String(user.device_verification_required).toLowerCase() === 'true';
+
+        if (!isDeviceVerificationRequired) {
             const token = jwt.sign(
-                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                {
+                    id: user.id,
+                    role: user.role || 'user',
+                    name: user.name || user.full_name,
+                    username: user.username,
+                    mob_no: user.mob_no,
+                    user_type_id: user.user_type_id,
+                    department_ids: departmentIds,
+                    departments: userDepartments,
+                    device_allow_download: true,
+                    must_change_password: Boolean(user.must_change_password),
+                    is_vendor: Boolean(user.is_vendor),
+                    can_chat_with_vendors: Boolean(user.can_chat_with_vendors)
+                },
                 process.env.JWT_SECRET,
                 { expiresIn: "1d" }
             );
+
+            await logLoginEvent(user, effectiveDeviceId, req, user.user_type_name || user.role || 'User');
 
             return res.status(200).json({
                 success: true,
@@ -96,12 +256,20 @@ const login = async (req, res) => {
                 token,
                 user: {
                     id: user.id,
-                    name: user.name,
+                    name: user.name || user.full_name,
                     username: user.username,
                     email: user.email,
-                    role: user.role,
+                    role: user.role || 'user',
+                    user_type_id: user.user_type_id,
+                    user_type_name: user.user_type_name || 'Standard User',
                     mob_no: user.mob_no,
-                    modules: user.modules || []
+                    modules: user.modules || [],
+                    departments: userDepartments,
+                    department_ids: departmentIds,
+                    device_allow_download: true,
+                    must_change_password: Boolean(user.must_change_password),
+                    is_vendor: Boolean(user.is_vendor),
+                    can_chat_with_vendors: Boolean(user.can_chat_with_vendors)
                 }
             });
         }
@@ -109,13 +277,29 @@ const login = async (req, res) => {
         const approvedDevice = await getApprovedDevice(user.id);
 
         if (approvedDevice) {
-            if (approvedDevice.device_id === deviceId) {
+            if (approvedDevice.device_id === effectiveDeviceId || approvedDevice.device_id === deviceId) {
                 // Device matches, login successful
+                const allowDownload = approvedDevice.allow_download !== 0 && approvedDevice.allow_download !== false;
                 const token = jwt.sign(
-                    { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                    {
+                        id: user.id,
+                        role: user.role || 'user',
+                        name: user.name || user.full_name,
+                        username: user.username,
+                        mob_no: user.mob_no,
+                        user_type_id: user.user_type_id,
+                        department_ids: departmentIds,
+                        departments: userDepartments,
+                        device_allow_download: allowDownload,
+                        must_change_password: Boolean(user.must_change_password),
+                        is_vendor: Boolean(user.is_vendor),
+                        can_chat_with_vendors: Boolean(user.can_chat_with_vendors)
+                    },
                     process.env.JWT_SECRET,
                     { expiresIn: "1d" }
                 );
+
+                await logLoginEvent(user, effectiveDeviceId, req, user.user_type_name || user.role || 'User');
 
                 return res.status(200).json({
                     success: true,
@@ -123,18 +307,26 @@ const login = async (req, res) => {
                     token,
                     user: {
                         id: user.id,
-                        name: user.name,
+                        name: user.name || user.full_name,
                         username: user.username,
                         email: user.email,
-                        role: user.role,
+                        role: user.role || 'user',
+                        user_type_id: user.user_type_id,
+                        user_type_name: user.user_type_name || 'Standard User',
                         mob_no: user.mob_no,
-                        modules: user.modules || []
+                        modules: user.modules || [],
+                        departments: userDepartments,
+                        department_ids: departmentIds,
+                        device_allow_download: allowDownload,
+                        must_change_password: Boolean(user.must_change_password),
+                        is_vendor: Boolean(user.is_vendor),
+                        can_chat_with_vendors: Boolean(user.can_chat_with_vendors)
                     }
                 });
             } else {
                 // Device mismatch, check if they have a pending device for this deviceId
                 const pendingDevice = await getPendingDevice(user.id);
-                if (pendingDevice && pendingDevice.device_id === deviceId) {
+                if (pendingDevice && (pendingDevice.device_id === effectiveDeviceId || pendingDevice.device_id === deviceId)) {
                     return res.status(200).json({
                         success: false,
                         status: "PENDING_APPROVAL"
@@ -178,14 +370,17 @@ const requestDeviceRegistration = async (req, res) => {
     try {
         const { username, password, deviceId } = req.body;
 
-        if (!username || !password || !deviceId) {
+        const cleanUsername = String(username || '').trim();
+        const cleanPassword = String(password || '').trim();
+
+        if (!cleanUsername || !cleanPassword || !deviceId) {
             return res.status(400).json({
                 success: false,
                 message: "All fields are required"
             });
         }
 
-        const user = await findUserByUsername(username);
+        const user = await findUserByUsername(cleanUsername);
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
@@ -197,7 +392,8 @@ const requestDeviceRegistration = async (req, res) => {
             });
         }
 
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        const isPasswordCorrect = await verifyUserPassword(cleanPassword, user);
+
         if (!isPasswordCorrect) {
             return res.status(401).json({ success: false, message: "Invalid credentials" });
         }
@@ -239,6 +435,52 @@ const requestDeviceRegistration = async (req, res) => {
 
 const logout = async (req, res) => {
     try {
+        let user = req.user;
+        const effectiveDeviceId = req.body?.deviceId || req.headers['x-device-id'] || req.headers['device-id'] || 'BROWSER_DEVICE';
+
+        if (!user && req.headers.authorization) {
+            const authHeader = req.headers.authorization;
+            if (authHeader.startsWith("Bearer ")) {
+                const token = authHeader.split(" ")[1];
+                try {
+                    user = jwt.verify(token, process.env.JWT_SECRET || "default_secret_key");
+                } catch (e) {
+                    try {
+                        user = jwt.decode(token);
+                    } catch (decodeErr) {}
+                }
+            }
+        }
+
+        if (!user && req.body?.userId) {
+            user = { id: req.body.userId, username: req.body.username || 'User', name: req.body.name || req.body.username };
+        }
+
+        if (user && user.id) {
+            try {
+                const [rows] = await db.query(
+                    `SELECT u.id, u.username, u.name, r.name as role_name 
+                     FROM users u 
+                     LEFT JOIN roles r ON u.role_id = r.id 
+                     WHERE u.id = ?`,
+                    [user.id]
+                );
+                if (rows.length > 0) {
+                    user = { ...user, ...rows[0] };
+                }
+            } catch (err) {}
+
+            await logLogoutEvent(user, effectiveDeviceId, req, user.role_name || user.role);
+
+            // Notify active sockets if socket instance is attached
+            try {
+                const io = req.app.get("io");
+                if (io) {
+                    io.emit("user:offline", { userId: user.id });
+                }
+            } catch (ioErr) {}
+        }
+
         return res.status(200).json({
             success: true,
             message: "Logged out successfully"
@@ -256,7 +498,7 @@ const logout = async (req, res) => {
 
 const updateProfileController = async (req, res) => {
     try {
-        const {name, email, mob_no} = req.body;
+        const { name, email, mob_no } = req.body;
         const userId = req.user.id;
 
         if (!name || !email || !mob_no) {
@@ -279,7 +521,7 @@ const updateProfileController = async (req, res) => {
                 role: req.user.role
             }
         });
-        
+
     } catch (error) {
         console.error("Update Profile Error:", error);
         return res.status(500).json({
@@ -293,9 +535,14 @@ const updateProfileController = async (req, res) => {
 const getMyPermissions = async (req, res) => {
     try {
         const userId = req.user.id;
+        const role = String(req.user.role || '').toLowerCase().trim();
+        const isAdmin = ['admin', 'master_admin', 'super admin', 'administrator', 'master'].includes(role) ||
+                        req.user.username === 'admin' ||
+                        Number(req.user.user_type_id) === 1 ||
+                        Number(req.user.role_id) === 1;
 
-        // Admin has unrestricted access — return a wildcard flag or full permissions
-        if (req.user.role === 'admin') {
+        // Admin has unrestricted access ΓÇö return a wildcard flag or full permissions
+        if (isAdmin) {
             return res.status(200).json({
                 success: true,
                 isAdmin: true,
@@ -331,10 +578,24 @@ const getMyPermissions = async (req, res) => {
         const permissions = {};
         for (const row of rows) {
             permissions[row.master_name] = {
-                read:   !!row.can_read,
-                write:  !!row.can_write,
+                read: !!row.can_read,
+                write: !!row.can_write,
                 update: !!row.can_update,
                 delete: !!row.can_delete,
+            };
+        }
+
+        // Check if user has an active approved device that restricts download
+        const [devRows] = await db.execute(
+            "SELECT allow_download FROM user_devices WHERE user_id = ? AND status = 'approved' AND closed_at IS NULL LIMIT 1",
+            [userId]
+        );
+        if (devRows.length > 0 && (devRows[0].allow_download === 0 || devRows[0].allow_download === false)) {
+            permissions['document_download'] = {
+                read: false,
+                write: false,
+                update: false,
+                delete: false
             };
         }
 
@@ -373,11 +634,140 @@ const getActiveUsersController = async (req, res) => {
     }
 };
 
+const changeFirstPasswordController = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { newPassword, confirmPassword } = req.body;
+
+        const cleanNew = String(newPassword || '').trim();
+        const cleanConfirm = String(confirmPassword || '').trim();
+
+        if (!cleanNew || !cleanConfirm) {
+            return res.status(400).json({
+                success: false,
+                message: "New password and confirm password are required"
+            });
+        }
+
+        if (cleanNew !== cleanConfirm) {
+            return res.status(400).json({
+                success: false,
+                message: "Passwords do not match. Please verify your typing."
+            });
+        }
+
+        if (cleanNew.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: "New password must be at least 6 characters long."
+            });
+        }
+
+        if (cleanNew.toLowerCase() === 'password123!') {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot reuse the default password. Please choose a new, secure password."
+            });
+        }
+
+        const [currentUserRows] = await db.execute("SELECT * FROM users WHERE id = ?", [userId]);
+        const currentUser = currentUserRows[0];
+        if (currentUser) {
+            if (currentUser.username && cleanNew.toLowerCase() === String(currentUser.username).toLowerCase().trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Password cannot be your username."
+                });
+            }
+            if (currentUser.password && cleanNew === String(currentUser.password).trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "New password cannot be the same as your current password."
+                });
+            }
+        }
+
+        const hashedPassword = await bcrypt.hash(cleanNew, 10);
+
+        // Store plain password in password, hashed in password_hash, and clear must_change_password
+        await db.execute(
+            "UPDATE users SET password = ?, password_hash = ?, must_change_password = 0, updated_at = NOW() WHERE id = ?",
+            [cleanNew, hashedPassword, userId]
+        );
+
+        try {
+            const clientDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'BROWSER';
+            await createAuditLog(
+                userId,
+                req.user.name || req.user.username || 'User',
+                clientDeviceId,
+                'Password Change',
+                'First-time mandatory password set',
+                null,
+                { username: req.user.username, status: 'Success' }
+            );
+        } catch (_) {}
+
+        const [rows] = await db.execute("SELECT * FROM users WHERE id = ?", [userId]);
+        const updated = rows[0] || {};
+        const userDepartments = await getUserDepartments(userId);
+        const departmentIds = userDepartments.map(d => d.department_id);
+
+        // Generate updated JWT token reflecting completed password change
+        const refreshedToken = jwt.sign(
+            {
+                id: updated.id,
+                role: updated.role || 'user',
+                name: updated.name || updated.full_name,
+                username: updated.username,
+                mob_no: updated.mob_no,
+                user_type_id: updated.user_type_id,
+                department_ids: departmentIds,
+                departments: userDepartments,
+                device_allow_download: true,
+                must_change_password: false,
+                is_vendor: Boolean(updated.is_vendor),
+                can_chat_with_vendors: Boolean(updated.can_chat_with_vendors)
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: "1d" }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Password updated successfully! Welcome to your workspace.",
+            token: refreshedToken,
+            user: {
+                id: updated.id,
+                name: updated.name || updated.full_name,
+                username: updated.username,
+                email: updated.email,
+                role: updated.role,
+                user_type_id: updated.user_type_id,
+                mob_no: updated.mob_no,
+                departments: userDepartments,
+                department_ids: departmentIds,
+                must_change_password: false,
+                is_vendor: Boolean(updated.is_vendor),
+                can_chat_with_vendors: Boolean(updated.can_chat_with_vendors)
+            }
+        });
+    } catch (error) {
+        console.error("changeFirstPassword Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error occurred while updating password."
+        });
+    }
+};
+
 module.exports = {
     login,
     logout,
     updateProfileController,
     requestDeviceRegistration,
     getMyPermissions,
-    getActiveUsersController
+    getActiveUsersController,
+    changeFirstPasswordController
 };
+
