@@ -52,6 +52,7 @@ export default function ChatPage() {
         isAdminOnly: false,
         memberIds: []
     });
+    const [memberSearchQuery, setMemberSearchQuery] = useState("");
     const [broadcastForm, setBroadcastForm] = useState({
         title: "",
         description: "",
@@ -156,7 +157,8 @@ export default function ChatPage() {
 
     useEffect(() => {
         fetchConversationsList();
-    }, []);
+        loadDirectoryUsers();
+    }, [activeCompanyId]);
 
     // Load Messages when active conversation changes
     useEffect(() => {
@@ -258,6 +260,26 @@ export default function ChatPage() {
             return true;
         });
     }, [conversations, searchQuery, filterCategory]);
+
+    // Handle Tab Filter Selection & Sync Active Conversation
+    const handleSelectFilter = (category) => {
+        setFilterCategory(category);
+        const matches = conversations.filter(c => {
+            if (category === "DIRECT") return c.type === "DIRECT";
+            if (category === "GROUP") return c.type === "GROUP";
+            if (category === "BROADCAST") return c.type === "BROADCAST";
+            if (category === "UNREAD") return c.unread_count > 0;
+            return true;
+        });
+
+        if (matches.length > 0) {
+            if (!matches.some(c => c.id === selectedConvId)) {
+                setSelectedConvId(matches[0].id);
+            }
+        } else {
+            setSelectedConvId(null);
+        }
+    };
 
     // Send Message Handler
     const handleSendMessage = async (e) => {
@@ -420,29 +442,53 @@ export default function ChatPage() {
 
                         {/* Action buttons */}
                         <div className="flex items-center gap-1.5">
-                            <button
-                                onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
-                                className="p-2 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-[#2878C7] transition-colors cursor-pointer border border-slate-200/80"
-                                title="New Direct Message (Select User from User Master)"
-                            >
-                                <i className="fa-solid fa-user-plus text-xs"></i>
-                            </button>
-
-                            <button
-                                onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
-                                className="p-2 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-[#2878C7] transition-colors cursor-pointer border border-slate-200/80"
-                                title="New Group Channel"
-                            >
-                                <i className="fa-solid fa-users text-xs"></i>
-                            </button>
-
-                            <button
-                                onClick={() => { loadDirectoryUsers(); setIsBroadcastModalOpen(true); }}
-                                className="p-2 rounded-xl bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-600 transition-colors cursor-pointer border border-slate-200/80"
-                                title="New Broadcast Channel (1-Way Announcements)"
-                            >
-                                <i className="fa-solid fa-bullhorn text-xs"></i>
-                            </button>
+                            {filterCategory === "GROUP" ? (
+                                <button
+                                    onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                    className="px-3 py-1.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Create Group Channel"
+                                >
+                                    <i className="fa-solid fa-users text-xs"></i>
+                                    <span>Create Group</span>
+                                </button>
+                            ) : filterCategory === "BROADCAST" ? (
+                                <button
+                                    onClick={() => { loadDirectoryUsers(); setIsBroadcastModalOpen(true); }}
+                                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Create Broadcast Announcement"
+                                >
+                                    <i className="fa-solid fa-bullhorn text-xs"></i>
+                                    <span>New Broadcast</span>
+                                </button>
+                            ) : filterCategory === "DIRECT" ? (
+                                <button
+                                    onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
+                                    className="px-3 py-1.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                    title="Direct Message with User from User Master"
+                                >
+                                    <i className="fa-solid fa-user-plus text-xs"></i>
+                                    <span>New Direct</span>
+                                </button>
+                            ) : (
+                                <div className="flex items-center gap-1.5">
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
+                                        className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#2878C7] border border-blue-200 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                                        title="Direct Message"
+                                    >
+                                        <i className="fa-solid fa-user-plus text-[10px]"></i>
+                                        <span>Direct</span>
+                                    </button>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                        className="px-2.5 py-1.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                        title="Create Group"
+                                    >
+                                        <i className="fa-solid fa-users text-[10px]"></i>
+                                        <span>Create Group</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -469,7 +515,7 @@ export default function ChatPage() {
                         ].map(tab => (
                             <button
                                 key={tab.key}
-                                onClick={() => setFilterCategory(tab.key)}
+                                onClick={() => handleSelectFilter(tab.key)}
                                 className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer ${
                                     filterCategory === tab.key
                                         ? "bg-[#17365D] text-white shadow-xs"
@@ -483,25 +529,98 @@ export default function ChatPage() {
                 </div>
 
                 {/* Conversations Roster */}
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 flex flex-col">
                     {loadingConversations ? (
-                        <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
+                        <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 my-auto">
                             <i className="fa-solid fa-spinner fa-spin text-xl text-[#2878C7]"></i>
                             <span className="text-xs font-semibold">Loading conversations...</span>
                         </div>
                     ) : filteredConversations.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
-                            <i className="fa-regular fa-comment-dots text-3xl text-slate-300"></i>
-                            <p className="text-xs font-bold text-slate-600">No conversations found</p>
-                            <p className="text-[11px] text-slate-400 max-w-xs">
-                                Start a direct message with a user from User Master or create a new channel.
-                            </p>
-                            <button
-                                onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
-                                className="mt-2 px-3 py-1.5 rounded-lg bg-blue-50 text-[#2878C7] font-bold text-xs hover:bg-blue-100 transition-colors"
-                            >
-                                <i className="fa-solid fa-plus mr-1"></i> New Direct Chat
-                            </button>
+                        <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center gap-3 my-auto">
+                            {filterCategory === "GROUP" ? (
+                                <>
+                                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center text-xl shadow-xs">
+                                        <i className="fa-solid fa-users"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-700">No Group Channels Yet</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+                                            Create a group channel with colleagues from User Master to collaborate on projects.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                        className="mt-1 px-4 py-2 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <i className="fa-solid fa-plus text-xs"></i>
+                                        <span>Create Group Channel</span>
+                                    </button>
+                                </>
+                            ) : filterCategory === "BROADCAST" ? (
+                                <>
+                                    <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center text-xl shadow-xs">
+                                        <i className="fa-solid fa-bullhorn"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-700">No Broadcast Channels</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+                                            Launch official broadcast channels for company or department announcements.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsBroadcastModalOpen(true); }}
+                                        className="mt-1 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <i className="fa-solid fa-bullhorn text-xs"></i>
+                                        <span>Create Broadcast</span>
+                                    </button>
+                                </>
+                            ) : filterCategory === "DIRECT" ? (
+                                <>
+                                    <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#2878C7] border border-blue-100 flex items-center justify-center text-xl shadow-xs">
+                                        <i className="fa-solid fa-user-plus"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-700">No Direct Messages Yet</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+                                            Start a 1-to-1 conversation with any colleague created in User Master.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
+                                        className="mt-1 px-4 py-2 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <i className="fa-solid fa-user-plus text-xs"></i>
+                                        <span>Start Direct Chat</span>
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center text-xl shadow-xs">
+                                        <i className="fa-regular fa-comments"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-700">No Conversations Found</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+                                            Start a 1-to-1 direct chat with a colleague or create a team group channel.
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <button
+                                            onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
+                                            className="px-3 py-1.5 rounded-xl bg-[#2878C7] text-white font-bold text-xs hover:bg-[#1e63a8] transition-all cursor-pointer"
+                                        >
+                                            <i className="fa-solid fa-user-plus mr-1"></i> Direct Chat
+                                        </button>
+                                        <button
+                                            onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                            className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs hover:bg-slate-200 transition-all cursor-pointer border border-slate-200"
+                                        >
+                                            <i className="fa-solid fa-users mr-1"></i> Create Group
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     ) : (
                         filteredConversations.map(conv => {
@@ -889,14 +1008,68 @@ export default function ChatPage() {
                         </div>
                     </>
                 ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
-                        <div className="w-16 h-16 rounded-3xl bg-white border border-slate-200 flex items-center justify-center text-[#2878C7] text-2xl shadow-sm mb-4">
-                            <i className="fa-solid fa-comments"></i>
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-4">
+                        <div className="w-16 h-16 rounded-3xl bg-white border border-slate-200 flex items-center justify-center text-2xl shadow-sm">
+                            {filterCategory === "GROUP" ? (
+                                <i className="fa-solid fa-users text-emerald-600"></i>
+                            ) : filterCategory === "BROADCAST" ? (
+                                <i className="fa-solid fa-bullhorn text-purple-600"></i>
+                            ) : (
+                                <i className="fa-solid fa-comments text-[#2878C7]"></i>
+                            )}
                         </div>
-                        <h3 className="text-base font-bold text-slate-800">Welcome to Interlink Chat</h3>
-                        <p className="text-xs text-slate-400 max-w-sm mt-1">
-                            Select a colleague or group channel from the left sidebar, or start a new direct conversation with staff from User Master.
-                        </p>
+                        <div>
+                            <h3 className="text-base font-bold text-slate-800">
+                                {filterCategory === "GROUP"
+                                    ? "Team Group Channels"
+                                    : filterCategory === "BROADCAST"
+                                    ? "Official Broadcast Channels"
+                                    : "Welcome to Interlink Chat"}
+                            </h3>
+                            <p className="text-xs text-slate-400 max-w-sm mt-1 leading-relaxed">
+                                {filterCategory === "GROUP"
+                                    ? "Select an existing group channel on the left or create a new group channel to collaborate with team members."
+                                    : filterCategory === "BROADCAST"
+                                    ? "Select an announcement channel to view executive notices and department broadcasts."
+                                    : "Select a colleague or group channel from the left sidebar, or start a new direct conversation with staff from User Master."}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                            {filterCategory === "GROUP" ? (
+                                <button
+                                    onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                    className="px-4 py-2.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                >
+                                    <i className="fa-solid fa-plus text-xs"></i>
+                                    <span>Create Group Channel</span>
+                                </button>
+                            ) : filterCategory === "BROADCAST" ? (
+                                <button
+                                    onClick={() => { loadDirectoryUsers(); setIsBroadcastModalOpen(true); }}
+                                    className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                >
+                                    <i className="fa-solid fa-bullhorn text-xs"></i>
+                                    <span>New Broadcast</span>
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsDirectModalOpen(true); }}
+                                        className="px-4 py-2.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-xs shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <i className="fa-solid fa-user-plus text-xs"></i>
+                                        <span>New Direct Chat</span>
+                                    </button>
+                                    <button
+                                        onClick={() => { loadDirectoryUsers(); setIsGroupModalOpen(true); }}
+                                        className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs border border-slate-200 transition-all cursor-pointer flex items-center gap-2"
+                                    >
+                                        <i className="fa-solid fa-users text-xs"></i>
+                                        <span>Create Group</span>
+                                    </button>
+                                </>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
@@ -1029,13 +1202,18 @@ export default function ChatPage() {
             {isGroupModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95">
-                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-emerald-50/50">
                             <div className="flex items-center gap-2">
-                                <i className="fa-solid fa-users text-[#2878C7]"></i>
-                                <h3 className="text-sm font-bold text-slate-900">Create Team Group Channel</h3>
+                                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-sm font-bold">
+                                    <i className="fa-solid fa-users"></i>
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-bold text-slate-900">Create New Group Channel</h3>
+                                    <p className="text-[11px] text-slate-400">Collaborate with multiple colleagues from User Master</p>
+                                </div>
                             </div>
-                            <button onClick={() => setIsGroupModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                <i className="fa-solid fa-xmark"></i>
+                            <button onClick={() => setIsGroupModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                                <i className="fa-solid fa-xmark text-lg"></i>
                             </button>
                         </div>
 
@@ -1049,8 +1227,8 @@ export default function ChatPage() {
                                     required
                                     value={groupForm.title}
                                     onChange={(e) => setGroupForm({ ...groupForm, title: e.target.value })}
-                                    placeholder="e.g. Mobile App Dev, Marketing Sprint"
-                                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#2878C7] focus:outline-none"
+                                    placeholder="e.g. Frontend Engineering, Product Strategy, Marketing"
+                                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-[#2878C7] focus:outline-none"
                                 />
                             </div>
 
@@ -1062,34 +1240,61 @@ export default function ChatPage() {
                                     rows={2}
                                     value={groupForm.description}
                                     onChange={(e) => setGroupForm({ ...groupForm, description: e.target.value })}
-                                    placeholder="Brief scope of this group channel..."
-                                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-[#2878C7] focus:outline-none resize-none"
+                                    placeholder="Brief outline of this group's goals or work..."
+                                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs sm:text-sm focus:ring-2 focus:ring-[#2878C7] focus:outline-none resize-none"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                                    Select Members from User Master
-                                </label>
-                                <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1">
-                                    {availableUsers.map(u => (
-                                        <label key={u.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 text-xs cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={groupForm.memberIds.includes(u.id)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                        setGroupForm({ ...groupForm, memberIds: [...groupForm.memberIds, u.id] });
-                                                    } else {
-                                                        setGroupForm({ ...groupForm, memberIds: groupForm.memberIds.filter(id => id !== u.id) });
-                                                    }
-                                                }}
-                                                className="w-4 h-4 rounded text-[#2878C7] border-slate-300"
-                                            />
-                                            <span className="font-semibold text-slate-700">{u.name}</span>
-                                            <span className="text-slate-400 text-[10px]">({u.department_name || "General"})</span>
-                                        </label>
-                                    ))}
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                                        Select Members from User Master
+                                    </label>
+                                    <span className="text-[11px] font-bold text-[#2878C7] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                                        {groupForm.memberIds.length} Selected
+                                    </span>
+                                </div>
+
+                                <div className="relative mb-2">
+                                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                                    <input
+                                        type="text"
+                                        value={memberSearchQuery}
+                                        onChange={(e) => setMemberSearchQuery(e.target.value)}
+                                        placeholder="Filter colleagues by name or department..."
+                                        className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs focus:ring-2 focus:ring-[#2878C7] focus:bg-white focus:outline-none placeholder:text-slate-400"
+                                    />
+                                </div>
+
+                                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1 divide-y divide-slate-100">
+                                    {availableUsers
+                                        .filter(u => !memberSearchQuery || u.name.toLowerCase().includes(memberSearchQuery.toLowerCase()) || (u.department_name && u.department_name.toLowerCase().includes(memberSearchQuery.toLowerCase())))
+                                        .map(u => (
+                                            <label key={u.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 text-xs cursor-pointer select-none">
+                                                <div className="flex items-center gap-2.5">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={groupForm.memberIds.includes(u.id)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setGroupForm({ ...groupForm, memberIds: [...groupForm.memberIds, u.id] });
+                                                            } else {
+                                                                setGroupForm({ ...groupForm, memberIds: groupForm.memberIds.filter(id => id !== u.id) });
+                                                            }
+                                                        }}
+                                                        className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                                    />
+                                                    <div>
+                                                        <span className="font-bold text-slate-800 block">{u.name}</span>
+                                                        <span className="text-[10px] text-slate-400">@{u.username}</span>
+                                                    </div>
+                                                </div>
+                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                                                    {u.department_name || "General"}
+                                                </span>
+                                            </label>
+                                        ))
+                                    }
                                 </div>
                             </div>
 
@@ -1097,16 +1302,21 @@ export default function ChatPage() {
                                 <button
                                     type="button"
                                     onClick={() => setIsGroupModalOpen(false)}
-                                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold"
+                                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 cursor-pointer"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={creatingChannel}
-                                    className="px-5 py-2 rounded-xl bg-[#2878C7] text-white text-xs font-bold shadow-md hover:bg-[#1e63a8]"
+                                    disabled={creatingChannel || !groupForm.title.trim()}
+                                    className="px-5 py-2.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white text-xs font-bold shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                                 >
-                                    {creatingChannel ? "Creating..." : "Create Group"}
+                                    {creatingChannel ? (
+                                        <i className="fa-solid fa-spinner fa-spin text-xs"></i>
+                                    ) : (
+                                        <i className="fa-solid fa-check text-xs"></i>
+                                    )}
+                                    <span>Create Group Channel</span>
                                 </button>
                             </div>
                         </form>
