@@ -3,9 +3,11 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 
+const http = require("http");
 const path = require("path");
 const uploadConfig = require("./config/uploadConfig.js");
 const { connectDB } = require("./config/db.js");
+const { initSocket } = require("./socket.js");
 
 // Routes
 const authRoutes = require("./routes/authRoutes.js");
@@ -17,6 +19,7 @@ const taskRoutes = require("./routes/taskRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
 const searchRoutes = require("./routes/searchRoutes.js");
 const departmentRoutes = require("./routes/departmentRoutes.js");
+const chatRoutes = require("./routes/chatRoutes.js");
 
 // Model Initializations
 const { initCompanyModel } = require("./models/companyModel.js");
@@ -27,6 +30,7 @@ const { createAuditLogsTable } = require("./models/auditLogModel.js");
 const { createUserDevicesTable } = require("./models/deviceModel.js");
 const { createTaskTables } = require("./models/taskModel.js");
 const { createProjectTables } = require("./models/projectModel.js");
+const { createChatTables } = require("./models/chatModel.js");
 
 
 const app = express();
@@ -77,6 +81,7 @@ app.use(["/api/tasks", "/tasks"], taskRoutes);
 app.use(["/api/projects", "/projects"], projectRoutes);
 app.use(["/api/search", "/search"], searchRoutes);
 app.use(["/api/departments", "/departments", "/api/admin/departments", "/admin/departments"], departmentRoutes);
+app.use(["/api/chat", "/chat"], chatRoutes);
 
 
 // Global 404 handler
@@ -105,12 +110,16 @@ const startServer = async () => {
         await createUserDevicesTable();
         await createTaskTables();
         await createProjectTables();
+        await createChatTables();
 
         console.log("All database tables are initialized and ready.");
 
         const PORT = process.env.PORT || 5000;
-        app.listen(PORT, () => {
-            console.log(`Server Running on Port ${PORT}`);
+        const server = http.createServer(app);
+        initSocket(server);
+
+        server.listen(PORT, () => {
+            console.log(`Server & Socket.IO Running on Port ${PORT}`);
         });
     } catch (error) {
         console.error("Failed to start application server:", error);

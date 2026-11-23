@@ -16,6 +16,8 @@ import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
 import CompanyMaster from "./pages/admin/CompanyMaster";
 import DepartmentMaster from "./pages/admin/DepartmentMaster";
+import ChatSettingsMaster from "./pages/admin/ChatSettingsMaster";
+import ChatPage from "./pages/chat/ChatPage";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
@@ -67,6 +69,10 @@ export default function AppRoutes() {
                         element={<TasksPage />}
                     />
                     <Route
+                        path="/chat"
+                        element={<ChatPage />}
+                    />
+                    <Route
                         path="/projects"
                         element={<ProjectsPortfolioPage />}
                     />
@@ -94,6 +100,10 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/departments"
                             element={<DepartmentMaster />}
+                        />
+                        <Route
+                            path="/admin/chat-settings"
+                            element={<ChatSettingsMaster />}
                         />
                     </Route>
 
