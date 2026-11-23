@@ -280,14 +280,14 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 flex flex-col max-h-[92vh]">
                 
                 {/* ── Modal Header ── */}
-                <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+                <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between bg-[#F6F8FB]">
                     <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center text-xs shadow-2xs font-bold">
-                            <i className="fa-solid fa-users"></i>
+                        <div className="w-8 h-8 rounded-lg bg-[#17365D] text-white flex items-center justify-center text-xs shadow-2xs font-bold">
+                            <i className="fa-solid fa-users text-[#38BDF8]"></i>
                         </div>
                         <div>
-                            <h3 className="font-bold text-slate-900 text-sm tracking-tight">Create Group</h3>
-                            <p className="text-[11px] text-slate-500 font-normal">
+                            <h3 className="font-bold text-[#17212F] text-sm tracking-tight">Create Group Channel</h3>
+                            <p className="text-[11px] text-[#5B6573] font-normal">
                                 Company-wise or department-scoped team channels
                             </p>
                         </div>
@@ -307,15 +307,15 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                     {/* 1. Group Name & Description */}
                     <div className="space-y-2">
                         <div>
-                            <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">
+                            <label className="block font-bold text-[#17212F] uppercase tracking-wider text-[10px] mb-1">
                                 Group Name *
                             </label>
                             <input
                                 type="text"
-                                placeholder="e.g. Epoxy Sales & Operations Core"
+                                placeholder="e.g. Sales & Operations Core Team"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#ED1C28] bg-slate-50/80 focus:bg-white transition-colors"
+                                className="w-full px-3 py-2 rounded-lg border border-[#E2E8F0] text-xs font-semibold text-[#17212F] focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20 bg-slate-50/80 focus:bg-white transition-colors"
                                 required
                             />
                         </div>
@@ -325,7 +325,7 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                                 placeholder="Short description or channel goal (optional)"
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
-                                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 focus:outline-none focus:border-[#ED1C28] bg-slate-50/60 focus:bg-white transition-colors"
+                                className="w-full px-3 py-1.5 rounded-lg border border-[#E2E8F0] text-xs text-slate-700 focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20 bg-slate-50/60 focus:bg-white transition-colors"
                             />
                         </div>
                     </div>
@@ -469,7 +469,7 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                             <select
                                 value={customDepartmentId}
                                 onChange={(e) => setCustomDepartmentId(e.target.value)}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#ED1C28] bg-slate-50 focus:bg-white cursor-pointer"
+                                className="w-full px-3 py-2 rounded-lg border border-[#E2E8F0] text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20 bg-slate-50 focus:bg-white cursor-pointer"
                             >
                                 <option value="">Open / Cross-Functional</option>
                                 {allDepartments.map((d) => (
@@ -552,14 +552,14 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                                 placeholder="Search coworkers in this scope..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:outline-none focus:border-[#ED1C28]"
+                                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[#E2E8F0] text-xs bg-slate-50 focus:bg-white focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20"
                             />
                         </div>
 
-                        <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white custom-chat-scrollbar">
+                        <div className="max-h-52 overflow-y-auto border border-[#E2E8F0] rounded-xl divide-y divide-slate-100 bg-white custom-chat-scrollbar">
                             {isLoadingUsers ? (
                                 <div className="p-5 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-                                    <i className="fa-solid fa-circle-notch fa-spin text-slate-500"></i>
+                                    <i className="fa-solid fa-circle-notch fa-spin text-[#2878C7]"></i>
                                     <span>Loading coworkers in scope...</span>
                                 </div>
                             ) : coworkers.length === 0 ? (
@@ -575,7 +575,7 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                                         <div
                                             key={u.id}
                                             className={`p-2.5 flex items-center justify-between gap-2 transition-colors ${
-                                                isSelected ? "bg-red-50/20" : "hover:bg-slate-50/70"
+                                                isSelected ? "bg-[#EFF6FF]" : "hover:bg-slate-50/70"
                                             }`}
                                         >
                                             {/* Member Name + Details */}
@@ -587,9 +587,9 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                                                     type="checkbox"
                                                     checked={isSelected}
                                                     onChange={() => toggleMember(u.id)}
-                                                    className="w-4 h-4 rounded text-[#ED1C28] focus:ring-[#ED1C28] border-slate-300 cursor-pointer shrink-0"
+                                                    className="w-4 h-4 rounded text-[#2878C7] focus:ring-[#2878C7] border-slate-300 cursor-pointer shrink-0"
                                                 />
-                                                <div className="w-7 h-7 rounded-lg bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                                <div className="w-7 h-7 rounded-lg bg-[#17365D] text-white flex items-center justify-center font-bold text-xs shrink-0">
                                                     {(u.name || u.username || "U")[0].toUpperCase()}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
@@ -628,7 +628,7 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                                                     onClick={(e) => toggleCanPost(u.id, e)}
                                                     className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
                                                         canPost
-                                                            ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+                                                            ? "bg-blue-50 text-[#2878C7] border-blue-200 hover:bg-blue-100"
                                                             : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
                                                     }`}
                                                 >
@@ -643,18 +643,18 @@ export default function CreateGroupModal({ onClose, onGroupCreated }) {
                     </div>
 
                     {/* ── Footer ── */}
-                    <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
+                    <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#E2E8F0]">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
+                            className="px-4 py-2 rounded-lg text-[#5B6573] hover:bg-slate-100 text-xs font-semibold cursor-pointer"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={isSubmitting || selectedMemberIds.length === 0}
-                            className="px-5 py-2 rounded-xl bg-[#ED1C28] hover:bg-[#C5131E] disabled:opacity-40 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
+                            className="px-5 py-2 rounded-lg bg-[#17365D] hover:bg-[#102642] disabled:opacity-40 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 transition-all"
                         >
                             {isSubmitting && <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>}
                             <span>Create {groupType === "COMPANY" ? "Company Group" : "Group"}</span>

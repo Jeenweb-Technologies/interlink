@@ -878,7 +878,7 @@ export default function CameraCaptureModal({ onClose, onSendMedia, onSendPhoto }
                                     type="button"
                                     onClick={handleSend}
                                     disabled={isSending || !capturedFile || isProcessing}
-                                    className="flex-1 py-2.5 px-4 rounded-xl text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer disabled:opacity-50 bg-[#ED1C28] hover:bg-[#C5131E] shadow-red-600/20"
+                                    className="flex-1 py-2.5 px-4 rounded-xl text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer disabled:opacity-50 bg-[#17365D] hover:bg-[#102642] shadow-slate-900/20"
                                 >
                                     {isSending ? (
                                         <>

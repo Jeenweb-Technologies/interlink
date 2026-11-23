@@ -161,8 +161,8 @@ export default function EmployeeDirectory() {
                 <div className="flex items-center gap-2.5">
                     {canCreateUser && (
                         <button
-                            onClick={() => navigate("/admin/users/create")}
-                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#2878C7] hover:bg-[#1e63a8] text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
+                            onClick={() => navigate("/peoples/create")}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#17365D] hover:bg-[#102642] text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer"
                         >
                             <i className="fa-solid fa-user-plus text-xs"></i>
                             <span>Add New Employee</span>
@@ -176,6 +176,31 @@ export default function EmployeeDirectory() {
                         <i className={`fa-solid fa-arrow-rotate-right text-xs ${loading ? "animate-spin text-[#2878C7]" : ""}`}></i>
                     </button>
                 </div>
+            </div>
+
+            {/* Top Module Sub-Navigation Bar */}
+            <div className="flex items-center gap-2 mb-6 border-b border-[#E2E8F0] pb-3 text-xs font-bold">
+                <button
+                    onClick={() => navigate("/peoples")}
+                    className="px-3.5 py-1.5 rounded-lg bg-[#17365D] text-white shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                    <i className="fa-solid fa-users"></i>
+                    <span>Employee Directory</span>
+                </button>
+                <button
+                    onClick={() => navigate("/peoples/departments")}
+                    className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-[#5B6573] hover:text-[#17212F] border border-[#E2E8F0] cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                    <i className="fa-solid fa-sitemap text-[#2878C7]"></i>
+                    <span>Departments & Teams</span>
+                </button>
+                <button
+                    onClick={() => navigate("/peoples/companies")}
+                    className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-[#5B6573] hover:text-[#17212F] border border-[#E2E8F0] cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                    <i className="fa-solid fa-building text-emerald-600"></i>
+                    <span>Companies & Entities</span>
+                </button>
             </div>
 
             {/* Filter Bar */}

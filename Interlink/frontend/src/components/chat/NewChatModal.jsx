@@ -62,15 +62,15 @@ export default function NewChatModal({ onClose, onChatStarted }) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 animate-in zoom-in-95">
-                <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-[#E2E8F0] animate-in zoom-in-95">
+                <div className="px-5 py-3.5 border-b border-[#E2E8F0] flex items-center justify-between bg-[#F6F8FB]">
                     <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center font-medium text-xs shadow-2xs">
-                            <i className="fa-solid fa-user-plus"></i>
+                        <div className="w-8 h-8 rounded-lg bg-[#17365D] text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                            <i className="fa-solid fa-user-plus text-[#38BDF8]"></i>
                         </div>
                         <div>
-                            <h3 className="font-semibold text-slate-800 text-sm">New Direct Chat</h3>
-                            <p className="text-[10px] text-slate-400 font-normal">Start 1-on-1 discussion</p>
+                            <h3 className="font-bold text-[#17212F] text-sm">New Direct Chat</h3>
+                            <p className="text-[11px] text-[#5B6573] font-normal">Start 1-on-1 discussion</p>
                         </div>
                     </div>
                     <button
@@ -82,7 +82,7 @@ export default function NewChatModal({ onClose, onChatStarted }) {
                 </div>
 
                 <div className="p-4 sm:p-5">
-                    <label className="block text-[11px] font-medium text-slate-600 uppercase tracking-wide mb-1.5">
+                    <label className="block text-[11px] font-bold text-[#17212F] uppercase tracking-wide mb-1.5">
                         Find Coworker
                     </label>
                     <div className="relative mb-2.5">
@@ -93,17 +93,17 @@ export default function NewChatModal({ onClose, onChatStarted }) {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             autoFocus
-                            className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-[13px] focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#ED1C28]/20 focus:border-[#ED1C28] transition-all font-normal placeholder:text-slate-400"
+                            className="w-full pl-8 pr-3 py-2 rounded-lg bg-slate-50 border border-[#E2E8F0] text-xs sm:text-[13px] focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all font-normal placeholder:text-slate-400"
                         />
                     </div>
-                    <p className="text-[10px] text-slate-400 mb-3 font-normal">
-                        Search coworkers by their full name, guidance email handle, or phone number.
+                    <p className="text-[10px] text-[#5B6573] mb-3 font-normal">
+                        Search coworkers by their full name, email handle, or phone number.
                     </p>
 
-                    <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-xl divide-y divide-slate-100 custom-chat-scrollbar">
+                    <div className="max-h-64 overflow-y-auto border border-[#E2E8F0] rounded-xl divide-y divide-slate-100 custom-chat-scrollbar">
                         {isLoading ? (
                             <div className="p-6 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                                <i className="fa-solid fa-circle-notch fa-spin text-[#ED1C28]"></i>
+                                <i className="fa-solid fa-circle-notch fa-spin text-[#2878C7]"></i>
                                 <span>Searching coworkers...</span>
                             </div>
                         ) : searchResults.length === 0 ? (
@@ -113,36 +113,36 @@ export default function NewChatModal({ onClose, onChatStarted }) {
                                 <div
                                     key={u.id}
                                     onClick={() => !isSubmitting && handleSelectUser(u)}
-                                    className="p-2.5 flex items-center justify-between hover:bg-slate-50/80 cursor-pointer transition-all group"
+                                    className="p-2.5 flex items-center justify-between hover:bg-[#F8FAFC] cursor-pointer transition-all group"
                                 >
                                     <div className="flex items-center gap-2.5">
-                                        <div className="w-8 h-8 rounded-xl bg-[#333842] text-slate-100 border border-slate-600/40 flex items-center justify-center font-medium text-xs shadow-2xs group-hover:scale-105 transition-transform">
+                                        <div className="w-8 h-8 rounded-lg bg-[#17365D] text-white flex items-center justify-center font-bold text-xs shadow-2xs group-hover:scale-105 transition-transform">
                                             {getInitials(u.name || u.username || "U")}
                                         </div>
                                         <div>
                                             <div className="flex items-center gap-1.5">
-                                                <p className="text-xs font-medium text-slate-800 group-hover:text-slate-900 transition-colors">
+                                                <p className="text-xs font-semibold text-[#17212F] group-hover:text-[#2878C7] transition-colors">
                                                     {u.name || u.username}
                                                 </p>
                                                 {u.company_name && (
-                                                    <span className="px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[8px] font-medium flex items-center gap-1">
-                                                        <i className="fa-solid fa-city text-[8px] text-purple-400"></i>
+                                                    <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[8px] font-semibold flex items-center gap-1">
+                                                        <i className="fa-solid fa-city text-[8px] text-emerald-600"></i>
                                                         {u.company_name}
                                                     </span>
                                                 )}
                                                 {u.department_names && (
-                                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[8px] font-medium flex items-center gap-1">
+                                                    <span className="px-1.5 py-0.2 rounded bg-slate-100 text-[#5B6573] border border-[#E2E8F0] text-[8px] font-medium flex items-center gap-1">
                                                         <i className="fa-solid fa-building text-[8px] text-slate-400"></i>
                                                         {u.department_names}
                                                     </span>
                                                 )}
                                             </div>
-                                            <p className="text-[10px] text-slate-400 font-normal">
+                                            <p className="text-[10px] text-[#5B6573] font-normal">
                                                 {u.email} {u.mob_no ? <span className="text-slate-300 mx-0.5">&bull;</span> : ''}{u.mob_no || ''}
                                             </p>
                                         </div>
                                     </div>
-                                    <span className="text-xs font-medium text-[#ED1C28] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                    <span className="text-xs font-bold text-[#2878C7] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                                         Chat <i className="fa-solid fa-arrow-right text-[9px]"></i>
                                     </span>
                                 </div>

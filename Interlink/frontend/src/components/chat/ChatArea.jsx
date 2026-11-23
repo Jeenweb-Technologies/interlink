@@ -27,7 +27,9 @@ export default function ChatArea({
     onTypingStart,
     onTypingStop,
     permissions = {},
-    onDeleteMessage
+    onDeleteMessage,
+    onToggleDetails,
+    isDetailsOpen = false
 }) {
     const [messageText, setMessageText] = useState("");
     const [replyingTo, setReplyingTo] = useState(null);
@@ -512,16 +514,16 @@ export default function ChatArea({
 
     if (!conversation) {
         return (
-            <div className="flex-1 flex flex-col items-center justify-center bg-slate-50/60 p-6 text-center select-none">
-                <div className="w-14 h-14 rounded-2xl bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center mb-4 text-2xl shadow-xs">
-                    <i className="fa-solid fa-comments"></i>
+            <div className="flex-1 flex flex-col items-center justify-center bg-[#F6F8FB] p-6 text-center select-none">
+                <div className="w-14 h-14 rounded-xl bg-[#17365D] text-white border border-[#102642] flex items-center justify-center mb-4 text-2xl shadow-xs">
+                    <i className="fa-solid fa-comments text-[#38BDF8]"></i>
                 </div>
-                <h3 className="text-base font-semibold text-slate-800 mb-1 tracking-tight">Select a Channel or Conversation</h3>
-                <p className="text-xs text-slate-500 max-w-sm leading-relaxed mb-5 font-normal">
+                <h3 className="text-base font-bold text-[#17212F] mb-1 tracking-tight">Select a Channel or Conversation</h3>
+                <p className="text-xs text-[#5B6573] max-w-sm leading-relaxed mb-5 font-normal">
                     Pick a channel from the sidebar or start a direct conversation with any colleague across the organization.
                 </p>
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-medium text-slate-600 shadow-2xs">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-[#E2E8F0] text-xs font-semibold text-[#5B6573] shadow-xs">
+                    <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
                     <span>Direct chats and `#activity` are encrypted & secure</span>
                 </div>
             </div>
@@ -529,36 +531,36 @@ export default function ChatArea({
     }
 
     return (
-        <div className="flex-1 flex flex-col h-full bg-[#F6F8FA] relative overflow-hidden">
+        <div className="flex-1 flex flex-col h-full bg-[#F6F8FB] relative overflow-hidden">
             {/* Top Chat Header */}
-            <div className="h-14 px-4 sm:px-6 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs z-10 select-none">
+            <div className="h-14 px-4 sm:px-6 bg-white border-b border-[#E2E8F0] flex items-center justify-between shrink-0 shadow-2xs z-10 select-none">
                 <div className="flex items-center gap-2.5 truncate">
                     <div className="relative shrink-0">
                         <div
-                            className={`w-9 h-9 rounded-xl flex items-center justify-center font-medium text-xs shadow-2xs text-white ${isActivity
-                                    ? "bg-[#2D333B] text-[#E53E3E] border border-slate-700/60 font-semibold"
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs shadow-2xs text-white ${isActivity
+                                    ? "bg-[#17365D] text-[#38BDF8] border border-[#102642]"
                                     : isMaster || isAnnouncement
-                                        ? "bg-[#333842] text-slate-100 border border-slate-600/40"
+                                        ? "bg-[#17365D] text-white border border-[#102642]"
                                         : isGroup
-                                            ? "bg-[#374151] text-slate-100 border border-slate-600/40"
-                                            : "bg-[#333842] text-slate-100 border border-slate-600/40"
+                                            ? "bg-[#EFF6FF] text-[#2878C7] border border-[#BFDBFE]"
+                                            : "bg-[#17365D] text-white border border-[#102642]"
                                 }`}
                         >
                             {isActivity ? (
-                                <span className="font-semibold text-sm text-[#ED1C28]">#</span>
+                                <span className="font-extrabold text-sm text-[#38BDF8]">#</span>
                             ) : isMaster || isAnnouncement ? (
                                 <i className="fa-solid fa-bullhorn text-xs"></i>
                             ) : (conversation.is_company_group || conversation.company_name) ? (
                                 <i className="fa-solid fa-building text-xs text-emerald-400"></i>
                             ) : isGroup ? (
-                                <i className="fa-solid fa-users text-xs"></i>
+                                <i className="fa-solid fa-users text-xs text-[#2878C7]"></i>
                             ) : (
                                 getInitials(conversation.displayTitle || conversation.title || "U")
                             )}
                         </div>
                         {!isGroup && (
                             <span
-                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${isPartnerOnline ? "bg-emerald-500 ring-1 ring-emerald-200" : "bg-slate-300"
+                                className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${isPartnerOnline ? "bg-[#10B981] ring-1 ring-emerald-200" : "bg-slate-300"
                                     }`}
                             />
                         )}
@@ -567,59 +569,59 @@ export default function ChatArea({
                     <div className="truncate">
                         <div className="flex items-center gap-1.5 truncate">
                             {isActivity && (
-                                <span className="text-[#ED1C28] font-semibold text-xs shrink-0">#</span>
+                                <span className="text-[#2878C7] font-bold text-xs shrink-0">#</span>
                             )}
-                            <h3 className="text-xs sm:text-[13px] font-semibold text-slate-800 truncate">
+                            <h3 className="text-xs sm:text-[13px] font-bold text-[#17212F] truncate">
                                 {isActivity ? "activity" : conversation.displayTitle || conversation.title || (isGroup ? "Group Chat" : "Direct Chat")}
                             </h3>
                             {isActivity && (
-                                <span className="px-1.5 py-0.2 rounded bg-red-50 border border-red-200/60 text-[#ED1C28] text-[9px] font-medium tracking-normal flex items-center gap-1 shrink-0">
-                                    <span className="font-semibold text-[#ED1C28] text-[9px]">#</span> DEFAULT
+                                <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[#2878C7] text-[9px] font-bold tracking-wider flex items-center gap-1 shrink-0">
+                                    DEFAULT
                                 </span>
                             )}
                             {isMaster && (
-                                <span className="px-1.5 py-0.2 rounded bg-purple-50 border border-purple-200/60 text-purple-700 text-[9px] font-medium flex items-center gap-1 shrink-0">
+                                <span className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-bold flex items-center gap-1 shrink-0">
                                     BROADCAST
                                 </span>
                             )}
                             {conversation.company_name && !isActivity && (
-                                <span className="px-1.5 py-0.2 rounded bg-emerald-50 border border-emerald-200/60 text-emerald-700 text-[9px] font-semibold flex items-center gap-1 shrink-0">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-semibold flex items-center gap-1 shrink-0">
                                     <i className="fa-solid fa-building text-[8px] text-emerald-600"></i>
                                     {conversation.company_name}
                                 </span>
                             )}
                             {isGroup && whoCanPostSetting === "ADMIN_ONLY" && !isActivity && !isMaster && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-50 border border-amber-200/60 text-amber-700 text-[9px] font-medium flex items-center gap-1 shrink-0">
+                                <span className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-bold flex items-center gap-1 shrink-0">
                                     <i className="fa-solid fa-lock text-[8px]"></i> Admin-Only
                                 </span>
                             )}
                             {isGroup && whoCanPostSetting === "SELECTED_MEMBERS" && !isActivity && !isMaster && (
-                                <span className="px-1.5 py-0.2 rounded bg-purple-50 border border-purple-200/60 text-purple-700 text-[9px] font-medium flex items-center gap-1 shrink-0">
+                                <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[#2878C7] text-[9px] font-semibold flex items-center gap-1 shrink-0">
                                     <i className="fa-solid fa-user-check text-[8px]"></i> Selected
                                 </span>
                             )}
                             {conversation.department_name && !isActivity && (
-                                <span className="px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200/60 text-indigo-700 text-[9px] font-medium flex items-center gap-1 shrink-0">
-                                    <i className="fa-solid fa-layer-group text-[8px] text-indigo-600"></i>
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[#E2E8F0] text-[#5B6573] text-[9px] font-medium flex items-center gap-1 shrink-0">
+                                    <i className="fa-solid fa-layer-group text-[8px] text-slate-500"></i>
                                     {conversation.department_name}
                                 </span>
                             )}
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 font-normal">
+                        <div className="flex items-center gap-2 text-[11px] text-[#5B6573] font-normal">
                             {isActivity ? (
-                                <span className="text-[#ED1C28] font-normal flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                                <span className="text-[#2878C7] font-medium flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] inline-block animate-pulse"></span>
                                     Company-wide activity & announcements feed
                                 </span>
                             ) : isGroup ? (
                                 <span>{conversation.description || "Team channel discussion"}</span>
                             ) : isPartnerOnline ? (
-                                <span className="text-emerald-600 font-medium flex items-center gap-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                                <span className="text-[#10B981] font-semibold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-[#10B981] inline-block animate-pulse"></span>
                                     Active Now
                                 </span>
                             ) : (
-                                <span className="text-slate-400 font-normal flex items-center gap-1.5">
+                                <span className="text-[#94A3B8] font-normal flex items-center gap-1.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>
                                     Offline
                                 </span>
@@ -630,14 +632,28 @@ export default function ChatArea({
 
                 {/* Top Actions */}
                 <div className="flex items-center gap-1.5 sm:gap-2">
+                    {/* Toggle Channel Details & Shared Files (CHAT-01 & CHAT-07) */}
+                    <button
+                        onClick={() => onToggleDetails && onToggleDetails()}
+                        title="Channel Details & Files"
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                            isDetailsOpen
+                                ? "bg-[#17365D] text-white border-[#17365D]"
+                                : "bg-[#F8FAFC] hover:bg-[#E2E8F0] text-[#17365D] border-[#E2E8F0]"
+                        }`}
+                    >
+                        <i className="fa-solid fa-folder-open text-xs text-[#2878C7]"></i>
+                        <span className="hidden sm:inline">Files & Info</span>
+                    </button>
+
                     {/* Group Settings / Write Access Toggle for Admins */}
                     {isGroup && isGroupAdminOrCreator && !isActivity && (
                         <button
                             onClick={handleOpenSettings}
                             title="Group Settings & Permissions"
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-slate-200 shadow-2xs"
+                            className="px-2.5 py-1.5 rounded-lg bg-[#F8FAFC] hover:bg-[#E2E8F0] text-[#17212F] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-[#E2E8F0] shadow-2xs"
                         >
-                            <i className="fa-solid fa-gear text-xs text-slate-500"></i>
+                            <i className="fa-solid fa-gear text-xs text-[#5B6573]"></i>
                             <span className="hidden sm:inline">Settings</span>
                         </button>
                     )}
@@ -646,7 +662,7 @@ export default function ChatArea({
                         <button
                             onClick={() => setIsDeleteModalOpen(true)}
                             title="Delete Group Channel"
-                            className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-red-200/70 shadow-2xs"
+                            className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-[#EF4444] text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-red-200 shadow-2xs"
                         >
                             <i className="fa-solid fa-trash-can text-xs"></i>
                             <span className="hidden sm:inline">Delete</span>
@@ -680,7 +696,7 @@ export default function ChatArea({
                                     type="text"
                                     value={editTitle}
                                     onChange={(e) => setEditTitle(e.target.value)}
-                                    className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-900 focus:outline-none focus:border-[#ED1C28] bg-slate-50 focus:bg-white"
+                                    className="w-full px-3 py-2 rounded-lg border border-[#E2E8F0] text-xs font-semibold text-[#17212F] focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20 bg-slate-50 focus:bg-white"
                                     required
                                 />
                             </div>
@@ -755,7 +771,7 @@ export default function ChatArea({
                                         placeholder="Search members..."
                                         value={memberSearch}
                                         onChange={(e) => setMemberSearch(e.target.value)}
-                                        className="w-full px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white text-xs mb-2 focus:outline-none focus:border-[#ED1C28]"
+                                        className="w-full px-3 py-1.5 rounded-lg border border-[#E2E8F0] bg-slate-50 focus:bg-white text-xs mb-2 focus:outline-none focus:border-[#2878C7] focus:ring-1 focus:ring-[#2878C7]/20"
                                     />
 
                                     <div className="max-h-52 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100 bg-white no-scrollbar">
@@ -800,8 +816,8 @@ export default function ChatArea({
                                                                     type="button"
                                                                     onClick={() => toggleMemberSelection(member.id)}
                                                                     className={`px-2.5 py-1 rounded-md text-[11px] font-bold border transition-all cursor-pointer ${canPost
-                                                                            ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
-                                                                            : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
+                                                                            ? "bg-blue-50 text-[#2878C7] border-blue-200 hover:bg-blue-100"
+                                                                            : "bg-slate-100 text-[#5B6573] border-[#E2E8F0] hover:bg-slate-200"
                                                                         }`}
                                                                 >
                                                                     {canPost ? "Can Message" : "Read Only"}
@@ -827,7 +843,7 @@ export default function ChatArea({
                                 <button
                                     type="submit"
                                     disabled={isSavingSettings}
-                                    className="px-4 py-2 rounded-lg bg-[#ED1C28] hover:bg-[#C5131E] disabled:opacity-40 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                                    className="px-4 py-2 rounded-lg bg-[#17365D] hover:bg-[#102642] disabled:opacity-40 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
                                 >
                                     {isSavingSettings && <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>}
                                     <span>Save Settings</span>
@@ -913,7 +929,7 @@ export default function ChatArea({
                                         type="button"
                                         disabled={isDeletingMessage}
                                         onClick={() => handleExecuteDelete("FOR_EVERYONE")}
-                                        className="w-full py-2.5 px-4 rounded-xl bg-[#ED1C28] hover:bg-red-700 text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all disabled:opacity-50"
+                                        className="w-full py-2.5 px-4 rounded-lg bg-[#EF4444] hover:bg-red-600 text-white font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-all disabled:opacity-50"
                                     >
                                         {isDeletingMessage ? (
                                             <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>
@@ -957,30 +973,30 @@ export default function ChatArea({
             <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto pl-2 sm:pl-3 pr-3 sm:pr-4 py-2.5 space-y-2.5 custom-chat-scrollbar">
                 {/* Special Welcome & Joined Banner for #activity Channel */}
                 {isActivity && (
-                    <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs mb-3 animate-in fade-in">
+                    <div className="p-3.5 sm:p-4 rounded-xl bg-white border border-[#E2E8F0] shadow-xs mb-3 animate-in fade-in">
                         <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center text-sm font-semibold shrink-0 shadow-2xs">
-                                #
+                            <div className="w-8 h-8 rounded-lg bg-[#17365D] text-white flex items-center justify-center text-sm font-bold shrink-0 shadow-2xs">
+                                <span className="text-[#38BDF8]">#</span>
                             </div>
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                                    <h4 className="text-xs sm:text-sm font-semibold text-slate-800 tracking-tight">
+                                    <h4 className="text-xs sm:text-sm font-bold text-[#17212F] tracking-tight">
                                         Welcome to #activity
                                     </h4>
-                                    <span className="px-1.5 py-0.2 rounded bg-red-50 border border-red-200/60 text-[#ED1C28] text-[8px] font-medium tracking-normal shadow-2xs">
-                                        All Team Members
+                                    <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[#2878C7] text-[8px] font-bold tracking-wider">
+                                        ALL EMPLOYEES
                                     </span>
                                 </div>
-                                <p className="text-[11px] text-slate-500 leading-relaxed mb-1.5 font-normal">
-                                    This is the default activity feed for the entire organization. All newly joined team members are automatically enrolled here.
+                                <p className="text-[11px] text-[#5B6573] leading-relaxed mb-1.5 font-normal">
+                                    This is the official company broadcast and activity feed. All employees are automatically enrolled here.
                                 </p>
-                                <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-400 font-normal">
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-slate-600 font-medium">
-                                        <i className="fa-solid fa-calendar-check text-[#ED1C28] text-[10px]"></i>
-                                        Joined: {formatJoinDate(conversation?.joined_at)}
+                                <div className="flex items-center gap-2 flex-wrap text-[10px] text-[#5B6573] font-normal">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F6F8FB] border border-[#E2E8F0] text-[#17212F] font-medium">
+                                        <i className="fa-solid fa-calendar-check text-[#2878C7] text-[10px]"></i>
+                                        Enrolled: {formatJoinDate(conversation?.joined_at)}
                                     </span>
-                                    <span className="text-slate-400 text-[10px]">
-                                        • Messages appear in real-time
+                                    <span className="text-[#94A3B8] text-[10px]">
+                                        • Real-time updates enabled
                                     </span>
                                 </div>
                             </div>
@@ -1161,10 +1177,10 @@ export default function ChatArea({
                                 {/* Replied-to Quote Banner */}
                                 {!msg.is_deleted && msg.reply_to_text && (
                                     <div
-                                        className={`text-[11px] px-2.5 py-1 mb-1 rounded-lg max-w-md truncate border-l-2 ${isMe ? "border-[#ED1C28] bg-white/75 text-slate-700 shadow-2xs" : "border-slate-300 bg-slate-100/90 text-slate-600"
+                                        className={`text-[11px] px-2.5 py-1 mb-1 rounded-lg max-w-md truncate border-l-2 ${isMe ? "border-[#2878C7] bg-[#102642]/60 text-slate-200 shadow-2xs" : "border-[#2878C7] bg-[#F8FAFC] text-[#5B6573]"
                                             }`}
                                     >
-                                        <span className="font-medium text-slate-400 mr-1">Replying:</span>
+                                        <span className="font-semibold text-[#2878C7] mr-1">Replying:</span>
                                         {msg.reply_to_text}
                                     </div>
                                 )}
@@ -1173,7 +1189,7 @@ export default function ChatArea({
                                     {/* Deleted Message Placeholder Bubble */}
                                     {msg.is_deleted ? (
                                         <div
-                                            className={`rounded-2xl px-3.5 py-2 border transition-all ${isMe
+                                            className={`rounded-xl px-3.5 py-2 border transition-all ${isMe
                                                     ? "bg-slate-100/80 text-slate-500 border-dashed border-slate-300 rounded-br-xs"
                                                     : "bg-slate-50 text-slate-500 border-dashed border-slate-200 rounded-bl-xs"
                                                 }`}
@@ -1189,9 +1205,9 @@ export default function ChatArea({
                                     ) : (
                                         /* Main Active Bubble */
                                         <div
-                                            className={`rounded-2xl p-2.5 sm:p-3 shadow-2xs transition-all ${isMe
-                                                    ? "bg-[#FEE2E2] text-slate-800 border border-red-200/90 rounded-br-xs shadow-2xs"
-                                                    : "bg-white text-slate-800 border border-slate-200/80 rounded-bl-xs shadow-2xs"
+                                            className={`rounded-xl p-2.5 sm:p-3 shadow-xs transition-all ${isMe
+                                                    ? "bg-[#17365D] text-white border border-[#102642] rounded-br-xs"
+                                                    : "bg-white text-[#17212F] border border-[#E2E8F0] rounded-bl-xs shadow-2xs"
                                                 }`}
                                         >
                                             {/* Text content */}
@@ -1205,18 +1221,18 @@ export default function ChatArea({
                                             {hasAttachment && (
                                                 <div
                                                     onClick={() => openInternalFile(msg)}
-                                                    className={`mt-2 p-2.5 rounded-xl border transition-all cursor-pointer ${isMe
-                                                            ? "bg-white/85 hover:bg-white border-red-200/80 text-slate-800 shadow-2xs"
-                                                            : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800"
+                                                    className={`mt-2 p-2.5 rounded-lg border transition-all cursor-pointer ${isMe
+                                                            ? "bg-white/10 hover:bg-white/20 border-white/20 text-white shadow-2xs"
+                                                            : "bg-[#F8FAFC] hover:bg-slate-100 border-[#E2E8F0] text-[#17212F]"
                                                         }`}
                                                 >
                                                     {/* Image Thumbnail Preview if image */}
                                                     {isImgAttachment ? (
-                                                        <div className="mb-2 overflow-hidden rounded-xl max-h-56 flex items-center justify-center bg-black/10">
+                                                        <div className="mb-2 overflow-hidden rounded-lg max-h-56 flex items-center justify-center bg-black/10">
                                                             <img
                                                                 src={getAuthenticatedFileUrl(`/api/chat/files/${attId}/view`)}
                                                                 alt={attName || "Photo"}
-                                                                className="w-full h-auto object-cover max-h-56 rounded-xl pointer-events-none select-none hover:scale-102 transition-transform duration-200"
+                                                                className="w-full h-auto object-cover max-h-56 rounded-lg pointer-events-none select-none hover:scale-102 transition-transform duration-200"
                                                                 loading="lazy"
                                                                 onLoad={() => {
                                                                     if (isAtBottomRef.current) scrollToBottomInstant();
@@ -1230,12 +1246,12 @@ export default function ChatArea({
                                                         </div>
                                                     ) : isVideoAttachment ? (
                                                         /* Video Preview / Player */
-                                                        <div className="mb-2 overflow-hidden rounded-xl max-h-60 bg-black/80 relative flex items-center justify-center group/video">
+                                                        <div className="mb-2 overflow-hidden rounded-lg max-h-60 bg-black/80 relative flex items-center justify-center group/video">
                                                             <video
                                                                 src={getAuthenticatedFileUrl(`/api/chat/files/${attId}/view`)}
                                                                 controls
                                                                 preload="metadata"
-                                                                className="w-full max-h-60 rounded-xl"
+                                                                className="w-full max-h-60 rounded-lg"
                                                                 onLoadedData={() => {
                                                                     if (isAtBottomRef.current) scrollToBottomInstant();
                                                                 }}
@@ -1253,11 +1269,11 @@ export default function ChatArea({
                                                     <div className="flex items-center justify-between gap-3">
                                                         <div className="flex items-center gap-2.5 truncate">
                                                             <div
-                                                                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isMe
-                                                                        ? "bg-red-100 text-[#ED1C28]"
+                                                                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${isMe
+                                                                        ? "bg-white/20 text-[#38BDF8]"
                                                                         : isVideoAttachment
                                                                             ? "bg-red-50 text-red-600"
-                                                                            : "bg-indigo-50 text-indigo-600"
+                                                                            : "bg-[#EFF6FF] text-[#2878C7]"
                                                                     }`}
                                                             >
                                                                 <i
@@ -1274,7 +1290,7 @@ export default function ChatArea({
                                                                 <p className="text-xs font-bold truncate">
                                                                     {attName || "Attachment"}
                                                                 </p>
-                                                                <p className={`text-[10px] ${isMe ? "text-slate-500" : "text-slate-400"}`}>
+                                                                <p className={`text-[10px] ${isMe ? "text-slate-300" : "text-[#5B6573]"}`}>
                                                                     {attSize ? formatFileSize(attSize) : "Internal Media"} • {isVideoAttachment ? "Video Player" : isImgAttachment ? "Image Preview" : "Document"}
                                                                 </p>
                                                             </div>
@@ -1282,9 +1298,9 @@ export default function ChatArea({
 
                                                         <div className="flex items-center gap-1.5 shrink-0">
                                                             <span
-                                                                className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${isMe
-                                                                        ? "bg-white hover:bg-red-50 text-[#ED1C28] border border-red-200/70 shadow-2xs"
-                                                                        : "bg-red-50 hover:bg-red-100 text-[#ED1C28]"
+                                                                className={`px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1 transition-colors ${isMe
+                                                                        ? "bg-white/20 hover:bg-white/30 text-white border border-white/30 shadow-2xs"
+                                                                        : "bg-[#EFF6FF] hover:bg-blue-100 text-[#2878C7] border border-blue-200"
                                                                     }`}
                                                             >
                                                                 <i className="fa-solid fa-eye text-[10px]"></i> View
@@ -1296,11 +1312,11 @@ export default function ChatArea({
 
                                             {/* Time and Status Footer */}
                                             <div
-                                                className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 ${isMe ? "text-slate-500" : "text-slate-400"
+                                                className={`text-[9px] mt-1.5 flex items-center justify-end gap-1 ${isMe ? "text-slate-300" : "text-[#94A3B8]"
                                                     }`}
                                             >
                                                 <span>{formatMessageTime(msg.created_at)}</span>
-                                                {isMe && <i className="fa-solid fa-check-double text-[8px] text-[#ED1C28]"></i>}
+                                                {isMe && <i className="fa-solid fa-check-double text-[8px] text-[#38BDF8]"></i>}
                                             </div>
                                         </div>
                                     )}
@@ -1367,11 +1383,11 @@ export default function ChatArea({
                 <div className="p-3 sm:p-4 bg-white border-t border-slate-200/90 shrink-0 shadow-2xs">
                     {/* Replying Banner */}
                     {replyingTo && (
-                        <div className="mb-2 px-3.5 py-1.5 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-between text-xs text-indigo-900 animate-in fade-in">
+                        <div className="mb-2 px-3.5 py-1.5 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] flex items-center justify-between text-xs text-[#17365D] animate-in fade-in">
                             <div className="flex items-center gap-2 truncate">
-                                <i className="fa-solid fa-reply text-indigo-500"></i>
-                                <span className="font-medium text-[#ED1C28]">{replyingTo.sender_name || "Coworker"}:</span>
-                                <span className="truncate text-slate-600">{replyingTo.message_text || "Attachment"}</span>
+                                <i className="fa-solid fa-reply text-[#2878C7]"></i>
+                                <span className="font-semibold text-[#2878C7]">{replyingTo.sender_name || "Coworker"}:</span>
+                                <span className="truncate text-[#5B6573]">{replyingTo.message_text || "Attachment"}</span>
                             </div>
                             <button
                                 onClick={() => setReplyingTo(null)}
@@ -1384,7 +1400,7 @@ export default function ChatArea({
 
                     {/* Selected File Banner */}
                     {selectedFile && (
-                        <div className="mb-2 px-3.5 py-2 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900 animate-in fade-in">
+                        <div className="mb-2 px-3.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900 animate-in fade-in">
                             <div className="flex items-center gap-2 truncate">
                                 <i className="fa-solid fa-paperclip text-emerald-600"></i>
                                 <span className="font-bold truncate">{selectedFile.name}</span>
@@ -1419,10 +1435,10 @@ export default function ChatArea({
                                 }
                                 fileInputRef.current?.click();
                             }}
-                            title={canUpload ? "Attach Document (Internal Only)" : "Upload Disabled"}
+                            title={canUpload ? "Attach Document" : "Upload Disabled"}
                             disabled={!canUpload}
-                            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150 shrink-0 mb-0.5 ${canUpload
-                                    ? "bg-slate-100 hover:bg-red-50/70 text-slate-600 hover:text-[#ED1C28] cursor-pointer"
+                            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center transition-all duration-150 shrink-0 mb-0.5 ${canUpload
+                                    ? "bg-slate-100 hover:bg-[#EFF6FF] text-[#5B6573] hover:text-[#2878C7] cursor-pointer"
                                     : "bg-slate-50 text-slate-300 cursor-not-allowed"
                                 }`}
                         >
@@ -1441,15 +1457,15 @@ export default function ChatArea({
                             }}
                             title={canCamera ? "Take Photo with Live Camera" : "Camera Access Restricted"}
                             disabled={!canCamera}
-                            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150 shrink-0 mb-0.5 ${canCamera
-                                    ? "bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 cursor-pointer"
+                            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center transition-all duration-150 shrink-0 mb-0.5 ${canCamera
+                                    ? "bg-slate-100 hover:bg-emerald-50 text-[#5B6573] hover:text-emerald-600 cursor-pointer"
                                     : "bg-slate-50 text-slate-300 cursor-not-allowed"
                                 }`}
                         >
                             <i className="fa-solid fa-camera text-xs"></i>
                         </button>
 
-                        {/* Text Input Area (Supports Shift+Enter for newlines) */}
+                        {/* Text Input Area */}
                         <textarea
                             ref={textareaRef}
                             rows={1}
@@ -1463,14 +1479,14 @@ export default function ChatArea({
                                         ? "Send message to #activity channel... (Shift+Enter for new line)"
                                         : "Type a message... (Shift+Enter for new line, Enter to send)"
                             }
-                            className="flex-1 px-3.5 py-2 sm:py-2.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs sm:text-[13px] focus:outline-none focus:ring-1 focus:ring-[#ED1C28]/20 focus:border-[#ED1C28] transition-all font-normal placeholder:text-slate-400 resize-none max-h-36 overflow-y-auto leading-relaxed custom-chat-scrollbar"
+                            className="flex-1 px-3.5 py-2 sm:py-2.5 rounded-lg bg-[#F6F8FB] focus:bg-white border border-[#E2E8F0] text-[#17212F] text-xs sm:text-[13px] focus:outline-none focus:ring-1 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all font-normal placeholder:text-[#94A3B8] resize-none max-h-36 overflow-y-auto leading-relaxed custom-chat-scrollbar"
                         />
 
                         {/* Send Button */}
                         <button
                             type="submit"
                             disabled={isUploading || (!messageText.trim() && !selectedFile)}
-                            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#ED1C28] hover:bg-[#C5131E] disabled:opacity-35 text-white flex items-center justify-center transition-all shadow-2xs cursor-pointer shrink-0 mb-0.5"
+                            className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-[#2878C7] hover:bg-[#1e63a8] disabled:opacity-35 text-white flex items-center justify-center transition-all shadow-xs cursor-pointer shrink-0 mb-0.5"
                         >
                             {isUploading ? (
                                 <i className="fa-solid fa-circle-notch fa-spin text-xs"></i>

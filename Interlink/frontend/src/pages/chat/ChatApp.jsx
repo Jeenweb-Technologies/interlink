@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import ChatSidebar from "../../components/chat/ChatSidebar";
 import ChatArea from "../../components/chat/ChatArea";
+import ConversationDetailsPanel from "../../components/chat/ConversationDetailsPanel";
 import CreateGroupModal from "../../components/chat/CreateGroupModal";
 import NewChatModal from "../../components/chat/NewChatModal";
 import FileViewerModal from "../../components/chat/FileViewerModal";
@@ -96,6 +97,7 @@ export default function ChatApp() {
 
     // Mobile view toggle
     const [showMobileChat, setShowMobileChat] = useState(false);
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
     const activeConvRef = useRef(activeConversation);
     const selectActiveConversation = (conv) => {
@@ -552,85 +554,102 @@ export default function ChatApp() {
                 {/* Right / Main Chat Area */}
                 <div
                     className={`${showMobileChat ? "flex" : "hidden md:flex"
-                        } flex-1 flex-col h-full overflow-hidden bg-white relative`}
+                        } flex-1 h-full overflow-hidden bg-white relative flex-row`}
                 >
-                    {/* Mobile Back Button */}
-                    {showMobileChat && (
-                        <div className="md:hidden px-4 py-2 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs">
-                            <button
-                                onClick={() => setShowMobileChat(false)}
-                                className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                            >
-                                <i className="fa-solid fa-arrow-left text-[11px]"></i> Groups
-                            </button>
-                            <span className="text-xs font-medium text-slate-800 truncate max-w-[180px]">
-                                {activeConversation?.displayTitle || activeConversation?.title || "Chat"}
-                            </span>
-                        </div>
+                    <div className="flex-1 flex flex-col h-full overflow-hidden">
+                        {/* Mobile Back Button */}
+                        {showMobileChat && (
+                            <div className="md:hidden px-4 py-2 bg-white border-b border-[#E2E8F0] flex items-center justify-between shrink-0 shadow-2xs">
+                                <button
+                                    onClick={() => setShowMobileChat(false)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 text-[#17212F] text-xs font-medium flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                >
+                                    <i className="fa-solid fa-arrow-left text-[11px]"></i> Groups
+                                </button>
+                                <span className="text-xs font-semibold text-[#17212F] truncate max-w-[180px]">
+                                    {activeConversation?.displayTitle || activeConversation?.title || "Chat"}
+                                </span>
+                            </div>
+                        )}
+
+                        <ChatArea
+                            conversation={activeConversation}
+                            messages={messages}
+                            currentUserId={user.id}
+                            isAdmin={isAdmin}
+                            onSendMessage={handleSendMessage}
+                            onViewFile={(file) => setViewingFile(file)}
+                            onDeleteGroup={(convId) => {
+                                setConversations((prev) => prev.filter((c) => Number(c.id) !== Number(convId)));
+                                if (activeConversation?.id === convId) {
+                                    setActiveConversation(null);
+                                }
+                            }}
+                            onlineUserIds={onlineUserIds}
+                            typingUsers={typingUsers}
+                            onTypingStart={handleTypingStart}
+                            onTypingStop={handleTypingStop}
+                            permissions={permissions}
+                            onToggleDetails={() => setIsDetailsOpen(!isDetailsOpen)}
+                            isDetailsOpen={isDetailsOpen}
+                            onDeleteMessage={(messageId, deleteType, respData) => {
+                                if (deleteType === "FOR_ME") {
+                                    setMessages((prev) => prev.filter((m) => Number(m.id) !== Number(messageId)));
+                                } else {
+                                    setMessages((prev) =>
+                                        prev.map((m) =>
+                                            Number(m.id) === Number(messageId)
+                                                ? {
+                                                      ...m,
+                                                      is_deleted: true,
+                                                      content: "This message was deleted",
+                                                      message_text: "This message was deleted",
+                                                      attachments: [],
+                                                      attachmentId: null,
+                                                      file_name: null,
+                                                      file_type: null,
+                                                      file_size: null,
+                                                      reply_to_text: null
+                                                  }
+                                                : m
+                                        )
+                                    );
+                                }
+
+                                if (activeConversation?.id) {
+                                    const newSnippet = respData?.lastMessageText !== undefined 
+                                        ? respData.lastMessageText 
+                                        : (deleteType === "FOR_EVERYONE" ? "This message was deleted" : undefined);
+
+                                    setConversations((prev) =>
+                                        prev.map((c) => {
+                                            if (Number(c.id) === Number(activeConversation.id)) {
+                                                return {
+                                                    ...c,
+                                                    ...(newSnippet !== undefined ? { last_message: newSnippet, last_message_text: newSnippet } : {}),
+                                                    ...(respData?.lastMessageAt ? { last_message_at: respData.lastMessageAt } : {})
+                                                };
+                                            }
+                                            return c;
+                                        })
+                                    );
+                                }
+                            }}
+                        />
+                    </div>
+
+                    {/* Column 3: Conversation Details & Shared Files (CHAT-01 & CHAT-07) */}
+                    {isDetailsOpen && activeConversation && (
+                        <ConversationDetailsPanel
+                            conversation={activeConversation}
+                            messages={messages}
+                            onClose={() => setIsDetailsOpen(false)}
+                            onViewFile={(file) => setViewingFile(file)}
+                            currentUserId={user.id}
+                            isAdmin={isAdmin}
+                            canDownload={permissions.canDownload}
+                        />
                     )}
-
-                    <ChatArea
-                        conversation={activeConversation}
-                        messages={messages}
-                        currentUserId={user.id}
-                        isAdmin={isAdmin}
-                        onSendMessage={handleSendMessage}
-                        onViewFile={(file) => setViewingFile(file)}
-                        onDeleteGroup={(convId) => {
-                            setConversations((prev) => prev.filter((c) => Number(c.id) !== Number(convId)));
-                            if (activeConversation?.id === convId) {
-                                setActiveConversation(null);
-                            }
-                        }}
-                        onlineUserIds={onlineUserIds}
-                        typingUsers={typingUsers}
-                        onTypingStart={handleTypingStart}
-                        onTypingStop={handleTypingStop}
-                        permissions={permissions}
-                        onDeleteMessage={(messageId, deleteType, respData) => {
-                            if (deleteType === "FOR_ME") {
-                                setMessages((prev) => prev.filter((m) => Number(m.id) !== Number(messageId)));
-                            } else {
-                                setMessages((prev) =>
-                                    prev.map((m) =>
-                                        Number(m.id) === Number(messageId)
-                                            ? {
-                                                  ...m,
-                                                  is_deleted: true,
-                                                  content: "This message was deleted",
-                                                  message_text: "This message was deleted",
-                                                  attachments: [],
-                                                  attachmentId: null,
-                                                  file_name: null,
-                                                  file_type: null,
-                                                  file_size: null,
-                                                  reply_to_text: null
-                                              }
-                                            : m
-                                    )
-                                );
-                            }
-
-                            if (activeConversation?.id) {
-                                const newSnippet = respData?.lastMessageText !== undefined 
-                                    ? respData.lastMessageText 
-                                    : (deleteType === "FOR_EVERYONE" ? "This message was deleted" : undefined);
-
-                                setConversations((prev) =>
-                                    prev.map((c) => {
-                                        if (Number(c.id) === Number(activeConversation.id)) {
-                                            return {
-                                                ...c,
-                                                ...(newSnippet !== undefined ? { last_message: newSnippet, last_message_text: newSnippet } : {}),
-                                                ...(respData?.lastMessageAt ? { last_message_at: respData.lastMessageAt } : {})
-                                            };
-                                        }
-                                        return c;
-                                    })
-                                );
-                            }
-                        }}
-                    />
                 </div>
             </div>
 

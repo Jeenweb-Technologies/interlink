@@ -10,7 +10,7 @@ export default function ChatSidebar({
     currentUserId,
     canCreateGroup = true
 }) {
-    const [filterTab, setFilterTab] = useState("all"); // 'all' | 'groups' | 'direct'
+    const [filterTab, setFilterTab] = useState("all"); // 'all' | 'unread' | 'broadcasts' | 'groups' | 'direct'
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedDeptFilter, setSelectedDeptFilter] = useState("all");
 
@@ -36,8 +36,8 @@ export default function ChatSidebar({
         }
     };
 
-    // Extract unique department options from user departments and conversations
-    const availableDeptFilters = React.useMemo(() => {
+    // Extract unique department options
+    const availableDeptFilters = useMemo(() => {
         const map = new Map();
         userDepts.forEach(d => {
             if (d.department_id && d.department_name) {
@@ -54,7 +54,7 @@ export default function ChatSidebar({
 
     const [selectedBroadcastCompany, setSelectedBroadcastCompany] = useState("all");
 
-    // Separate 4 channels: #activity, company broadcast channels, custom groups & direct messages
+    // Channels segregation
     const activityGroup = conversations.find(
         (c) => Boolean(c.is_activity) || c.title === "#activity" || c.title === "# activity"
     );
@@ -71,16 +71,16 @@ export default function ChatSidebar({
             !(Boolean(c.is_activity) || c.title === "#activity" || c.title === "# activity")
     );
 
-    // 2. Company-wise broadcast channels
+    // 2. Company broadcasts
     const companyBroadcasts = allGroupConvs.filter(isCompanyBroadcastConv);
 
-    // 3. Custom Groups & Teams
+    // 3. Custom Groups
     const customGroups = allGroupConvs.filter(c => !isCompanyBroadcastConv(c));
 
     // 4. Direct Messages
     const allDirect = conversations.filter((c) => (c.type || "").toLowerCase() === "direct");
 
-    // Extract available companies for broadcast selector
+    // Available companies for broadcast selector
     const broadcastCompanies = useMemo(() => {
         const map = new Map();
         companyBroadcasts.forEach(c => {
@@ -106,6 +106,9 @@ export default function ChatSidebar({
                 return true;
             });
         }
+        if (filterTab === "unread") {
+            res = res.filter(c => Number(c.unread_count) > 0);
+        }
         if (searchTerm.trim()) {
             const term = searchTerm.toLowerCase();
             res = res.filter((c) => {
@@ -121,6 +124,7 @@ export default function ChatSidebar({
 
     const isActivityMatchingSearch =
         activityGroup &&
+        (filterTab !== "unread" || Number(activityGroup.unread_count) > 0) &&
         (!searchTerm.trim() ||
             (activityGroup.displayTitle || activityGroup.title || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
             (activityGroup.last_message || "").toLowerCase().includes(searchTerm.toLowerCase()));
@@ -131,13 +135,14 @@ export default function ChatSidebar({
             list = list.filter(c => String(c.company_id) === String(selectedBroadcastCompany));
         }
         return filterList(list);
-    }, [companyBroadcasts, selectedBroadcastCompany, searchTerm, selectedDeptFilter]);
+    }, [companyBroadcasts, selectedBroadcastCompany, searchTerm, selectedDeptFilter, filterTab]);
 
     const filteredCustomGroups = filterList(customGroups);
     const filteredDirect = filterList(allDirect);
 
-    const displayedGroups = filteredCustomGroups;
-    const displayedDirect = filteredDirect;
+    const totalUnreadCount = useMemo(() => {
+        return conversations.reduce((acc, c) => acc + (Number(c.unread_count) || 0), 0);
+    }, [conversations]);
 
     const renderConversationItem = (c, isPinnedActivity = false) => {
         const isSelected = c.id === activeConversationId;
@@ -169,40 +174,40 @@ export default function ChatSidebar({
             <div
                 key={c.id}
                 onClick={() => onSelectConversation(c)}
-                className={`group relative px-2.5 py-2 mx-1.5 rounded-xl flex items-center gap-2.5 cursor-pointer transition-all duration-150 ${
+                className={`group relative px-3 py-2.5 mx-2 rounded-lg flex items-center gap-3 cursor-pointer transition-all duration-150 ${
                     isSelected
-                        ? "bg-red-50/70 border border-red-200/70 text-slate-800 shadow-2xs"
-                        : "hover:bg-slate-100/70 border border-transparent text-slate-600"
+                        ? "bg-[#EFF6FF] border border-[#BFDBFE] text-[#17212F] shadow-xs"
+                        : "hover:bg-[#F8FAFC] border border-transparent text-[#5B6573]"
                 }`}
             >
-                {/* Active Indicator Strip */}
+                {/* Active Indicator Bar */}
                 {isSelected && (
-                    <div className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[#ED1C28]" />
+                    <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-md bg-[#2878C7]" />
                 )}
 
-                {/* Avatar with Presence / Channel Icon - Sleek Grayish / Graphite */}
+                {/* Avatar with Status / Channel Icon */}
                 <div className="relative shrink-0">
                     <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center font-medium text-xs shadow-2xs transition-transform duration-150 group-hover:scale-105 ${
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-xs shadow-2xs transition-transform duration-150 group-hover:scale-105 ${
                             isActivity
-                                ? "bg-[#2D333B] text-[#E53E3E] border border-slate-700/60"
+                                ? "bg-[#17365D] text-[#38BDF8] border border-[#102642]"
                                 : isBroadcast
-                                ? "bg-[#2D2A3E] text-amber-400 border border-amber-500/30"
+                                ? "bg-[#FEF3C7] text-[#D97706] border border-[#FDE68A]"
                                 : isMaster || isAnnouncement
-                                ? "bg-[#333842] text-slate-100 border border-slate-600/40"
+                                ? "bg-[#17365D] text-white border border-[#102642]"
                                 : isGroup
-                                ? "bg-[#374151] text-slate-100 border border-slate-600/40"
-                                : "bg-[#333842] text-slate-100 border border-slate-600/40"
+                                ? "bg-[#EFF6FF] text-[#2878C7] border border-[#BFDBFE]"
+                                : "bg-[#17365D] text-white border border-[#102642]"
                         }`}
                     >
                         {isActivity ? (
-                            <span className="text-sm font-semibold">#</span>
+                            <span className="text-base font-extrabold text-[#38BDF8]">#</span>
                         ) : isBroadcast ? (
-                            <i className="fa-solid fa-bullhorn text-[11px] text-amber-400"></i>
+                            <i className="fa-solid fa-bullhorn text-xs text-[#D97706]"></i>
                         ) : isMaster || isAnnouncement ? (
-                            <i className="fa-solid fa-bullhorn text-[11px]"></i>
+                            <i className="fa-solid fa-bullhorn text-xs"></i>
                         ) : isGroup ? (
-                            <i className="fa-solid fa-users text-[11px]"></i>
+                            <i className="fa-solid fa-users text-xs text-[#2878C7]"></i>
                         ) : (
                             initials
                         )}
@@ -213,46 +218,46 @@ export default function ChatSidebar({
                             title={isOnline ? "Online" : "Offline"}
                             className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white transition-all ${
                                 isOnline
-                                    ? "bg-emerald-500 ring-1 ring-emerald-200"
+                                    ? "bg-[#10B981] ring-1 ring-emerald-200"
                                     : "bg-slate-300"
                             }`}
                         />
                     )}
                 </div>
 
-                {/* Info */}
+                {/* Info Container */}
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1 mb-0.5">
                         <div className="flex items-center gap-1.5 truncate">
                             {isActivity && (
-                                <span className="text-[#ED1C28] font-semibold text-xs shrink-0">#</span>
+                                <span className="text-[#2878C7] font-bold text-xs shrink-0">#</span>
                             )}
                             <h4
                                 className={`text-xs truncate ${
                                     isSelected
-                                        ? "font-semibold text-slate-900"
-                                        : "font-medium text-slate-700 group-hover:text-slate-900"
+                                        ? "font-bold text-[#17212F]"
+                                        : "font-semibold text-[#17212F] group-hover:text-[#2878C7]"
                                 }`}
                             >
                                 {isActivity ? "activity" : c.displayTitle || c.title || (isGroup ? "Group Chat" : "Coworker")}
                             </h4>
                             {isActivity && (
-                                <span className="shrink-0 px-1.5 py-0.2 rounded bg-red-100/80 text-[#ED1C28] text-[8px] font-medium tracking-normal">
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-blue-50 text-[#2878C7] border border-blue-200 text-[8px] font-bold tracking-wider">
                                     DEFAULT
                                 </span>
                             )}
                             {isBroadcast && (
-                                <span className="shrink-0 px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[8px] font-semibold">
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[8px] font-bold">
                                     BROADCAST
                                 </span>
                             )}
                             {isBroadcast && (
-                                <span className={`shrink-0 px-1.5 py-0.2 rounded text-[8px] font-medium ${
+                                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[8px] font-semibold border ${
                                     c.who_can_post === 'ADMIN_ONLY'
-                                        ? 'bg-amber-100/80 text-amber-800'
+                                        ? 'bg-amber-100/70 text-amber-800 border-amber-200'
                                         : c.who_can_post === 'SELECTED_MEMBERS'
-                                        ? 'bg-blue-100/80 text-blue-800'
-                                        : 'bg-emerald-100/80 text-emerald-800'
+                                        ? 'bg-blue-100/70 text-blue-800 border-blue-200'
+                                        : 'bg-emerald-100/70 text-emerald-800 border-emerald-200'
                                 }`}>
                                     {c.who_can_post === 'ADMIN_ONLY'
                                         ? 'Admin Only'
@@ -262,19 +267,19 @@ export default function ChatSidebar({
                                 </span>
                             )}
                             {c.company_name && !isActivity && (
-                                <span className="shrink-0 px-1.5 py-0.2 rounded bg-emerald-50 border border-emerald-200/60 text-emerald-700 text-[8px] font-semibold flex items-center gap-1">
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[8px] font-semibold flex items-center gap-1">
                                     <i className="fa-solid fa-building text-[7px] text-emerald-600"></i>
                                     <span>{c.company_name}</span>
                                 </span>
                             )}
                             {c.department_name && !isActivity && !isBroadcast && (
-                                <span className="shrink-0 px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200/60 text-indigo-700 text-[8px] font-medium flex items-center gap-1">
-                                    <i className="fa-solid fa-layer-group text-[7px] text-indigo-600"></i>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[#5B6573] text-[8px] font-medium flex items-center gap-1">
+                                    <i className="fa-solid fa-layer-group text-[7px] text-slate-500"></i>
                                     <span>{c.department_name}</span>
                                 </span>
                             )}
                         </div>
-                        <span className="text-[10px] text-slate-400 font-normal shrink-0">
+                        <span className="text-[10px] text-[#94A3B8] font-medium shrink-0">
                             {formatTimestamp(c.last_message_at || c.created_at)}
                         </span>
                     </div>
@@ -282,8 +287,8 @@ export default function ChatSidebar({
                     <div className="flex items-center justify-between gap-2">
                         <p className={`text-[11px] font-normal truncate leading-tight ${
                             (c.last_message || c.last_message_text) === "This message was deleted"
-                                ? "text-slate-400 italic flex items-center gap-1"
-                                : "text-slate-500"
+                                ? "text-[#94A3B8] italic flex items-center gap-1"
+                                : "text-[#5B6573]"
                         }`}>
                             {(() => {
                                 let raw = (c.last_message || c.last_message_text || "").trim();
@@ -295,7 +300,7 @@ export default function ChatSidebar({
                                 }
                                 if (!raw) {
                                     return (
-                                        <span className="text-slate-400 italic">
+                                        <span className="text-[#94A3B8] italic">
                                             {isActivity ? "Company activity & announcements" : "No messages yet"}
                                         </span>
                                     );
@@ -303,15 +308,15 @@ export default function ChatSidebar({
                                 if (raw === "This message was deleted") {
                                     return (
                                         <>
-                                            <i className="fa-solid fa-ban text-[9px] text-slate-400"></i>
+                                            <i className="fa-solid fa-ban text-[9px] text-[#94A3B8]"></i>
                                             <span>This message was deleted</span>
                                         </>
                                     );
                                 }
                                 if (raw === "📷 Photo" || raw === "🎥 Video" || raw.startsWith("📎") || raw.toLowerCase().includes("attachment")) {
                                     return (
-                                        <span className="inline-flex items-center gap-1 text-slate-500">
-                                            <i className="fa-solid fa-paperclip text-[10px] text-slate-400"></i>
+                                        <span className="inline-flex items-center gap-1 text-[#5B6573]">
+                                            <i className="fa-solid fa-paperclip text-[10px] text-[#2878C7]"></i>
                                             <span>Attachment</span>
                                         </span>
                                     );
@@ -320,11 +325,7 @@ export default function ChatSidebar({
                             })()}
                         </p>
                         {c.unread_count > 0 && (
-                            <span
-                                className={`shrink-0 px-1.5 py-0.2 rounded-full text-white text-[9px] font-medium shadow-2xs ${
-                                    isActivity ? "bg-amber-600" : "bg-[#ED1C28]"
-                                }`}
-                            >
+                            <span className="shrink-0 px-2 py-0.5 rounded-full text-white text-[10px] font-bold bg-[#2878C7] shadow-xs">
                                 {c.unread_count}
                             </span>
                         )}
@@ -335,19 +336,18 @@ export default function ChatSidebar({
     };
 
     return (
-        <aside className="w-full bg-white border-r border-slate-200 flex flex-col h-full shrink-0 select-none shadow-2xs">
+        <aside className="w-full bg-[#FFFFFF] border-r border-[#E2E8F0] flex flex-col h-full shrink-0 select-none shadow-sm">
             {/* Top Workspace & Search Header */}
-            <div className="p-3 border-b border-slate-200/80 bg-slate-50/60 shrink-0">
-
-                {/* Department Multi-Scope Switcher Chips */}
+            <div className="p-3 border-b border-[#E2E8F0] bg-[#F6F8FB] shrink-0">
+                {/* Department Multi-Scope Switcher */}
                 {hasMultipleDepts && availableDeptFilters.length > 1 && (
-                    <div className="flex items-center gap-1 mb-2 overflow-x-auto no-scrollbar py-0.5">
+                    <div className="flex items-center gap-1 mb-2.5 overflow-x-auto no-scrollbar py-0.5">
                         <button
                             onClick={() => setSelectedDeptFilter("all")}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-all cursor-pointer border ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold shrink-0 transition-all cursor-pointer border ${
                                 selectedDeptFilter === "all"
-                                    ? "bg-[#2D333B] text-white border-[#2D333B] shadow-2xs"
-                                    : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
+                                    ? "bg-[#17365D] text-white border-[#17365D] shadow-xs"
+                                    : "bg-white text-[#5B6573] hover:bg-slate-50 border-[#E2E8F0]"
                             }`}
                         >
                             All Units
@@ -356,13 +356,13 @@ export default function ChatSidebar({
                             <button
                                 key={dept.id}
                                 onClick={() => setSelectedDeptFilter(dept.id)}
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-all cursor-pointer border flex items-center gap-1 ${
+                                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold shrink-0 transition-all cursor-pointer border flex items-center gap-1 ${
                                     selectedDeptFilter === dept.id
-                                        ? "bg-[#ED1C28] text-white border-[#ED1C28] shadow-2xs"
-                                        : "bg-white text-slate-600 hover:bg-slate-100 border-slate-200"
+                                        ? "bg-[#17365D] text-white border-[#17365D] shadow-xs"
+                                        : "bg-white text-[#5B6573] hover:bg-slate-50 border-[#E2E8F0]"
                                 }`}
                             >
-                                <i className="fa-solid fa-building text-[8px]"></i>
+                                <i className="fa-solid fa-building text-[9px]"></i>
                                 <span>{dept.name}</span>
                             </button>
                         ))}
@@ -370,93 +370,108 @@ export default function ChatSidebar({
                 )}
 
                 {/* Search Input Bar */}
-                <div className="relative mb-2">
-                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                <div className="relative mb-2.5">
+                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8] text-xs"></i>
                     <input
                         type="text"
                         placeholder="Search channels, people, or messages..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-800 text-xs focus:outline-none focus:ring-1 focus:ring-[#ED1C28]/20 focus:border-[#ED1C28] transition-all font-normal placeholder:text-slate-400"
+                        className="w-full pl-8 pr-7 py-1.5 rounded-lg bg-white border border-[#E2E8F0] text-[#17212F] text-xs focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all font-normal placeholder:text-[#94A3B8]"
                     />
                     {searchTerm && (
                         <button
                             onClick={() => setSearchTerm("")}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#17212F] text-xs cursor-pointer"
                         >
                             <i className="fa-solid fa-xmark"></i>
                         </button>
                     )}
                 </div>
 
-                {/* Filter Navigation Chips: 4 distinct categories */}
-                <div className="flex items-center gap-1 p-0.5 bg-slate-100/90 rounded-lg text-xs border border-slate-200/60">
+                {/* Category Filter Chips (CHAT-01: Unread, Direct, Groups, Announcements) */}
+                <div className="flex items-center gap-1 p-0.5 bg-[#E2E8F0]/60 rounded-lg text-xs border border-[#E2E8F0]">
                     <button
                         onClick={() => setFilterTab("all")}
-                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[10px] sm:text-[11px] ${
+                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[11px] ${
                             filterTab === "all"
-                                ? "bg-white text-slate-800 shadow-2xs font-semibold"
-                                : "text-slate-500 hover:text-slate-800 font-normal"
+                                ? "bg-[#17365D] text-white shadow-xs font-semibold"
+                                : "text-[#5B6573] hover:text-[#17212F] font-medium"
                         }`}
                     >
-                        All ({conversations.length})
+                        All
+                    </button>
+                    <button
+                        onClick={() => setFilterTab("unread")}
+                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[11px] flex items-center justify-center gap-1 ${
+                            filterTab === "unread"
+                                ? "bg-[#17365D] text-white shadow-xs font-semibold"
+                                : "text-[#5B6573] hover:text-[#17212F] font-medium"
+                        }`}
+                    >
+                        <span>Unread</span>
+                        {totalUnreadCount > 0 && (
+                            <span className={`px-1 py-0.2 rounded-full text-[9px] font-bold ${filterTab === "unread" ? "bg-[#2878C7] text-white" : "bg-[#2878C7] text-white"}`}>
+                                {totalUnreadCount}
+                            </span>
+                        )}
                     </button>
                     <button
                         onClick={() => setFilterTab("broadcasts")}
-                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[10px] sm:text-[11px] ${
+                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[11px] ${
                             filterTab === "broadcasts"
-                                ? "bg-white text-slate-800 shadow-2xs font-semibold"
-                                : "text-slate-500 hover:text-slate-800 font-normal"
+                                ? "bg-[#17365D] text-white shadow-xs font-semibold"
+                                : "text-[#5B6573] hover:text-[#17212F] font-medium"
                         }`}
                     >
-                        Broadcast ({companyBroadcasts.length})
+                        Broadcast
                     </button>
                     <button
                         onClick={() => setFilterTab("groups")}
-                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[10px] sm:text-[11px] ${
+                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[11px] ${
                             filterTab === "groups"
-                                ? "bg-white text-slate-800 shadow-2xs font-semibold"
-                                : "text-slate-500 hover:text-slate-800 font-normal"
+                                ? "bg-[#17365D] text-white shadow-xs font-semibold"
+                                : "text-[#5B6573] hover:text-[#17212F] font-medium"
                         }`}
                     >
-                        Teams ({customGroups.length})
+                        Teams
                     </button>
                     <button
                         onClick={() => setFilterTab("direct")}
-                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[10px] sm:text-[11px] ${
+                        className={`flex-1 py-1 rounded-md transition-all duration-150 cursor-pointer text-center text-[11px] ${
                             filterTab === "direct"
-                                ? "bg-white text-slate-800 shadow-2xs font-semibold"
-                                : "text-slate-500 hover:text-slate-800 font-normal"
+                                ? "bg-[#17365D] text-white shadow-xs font-semibold"
+                                : "text-[#5B6573] hover:text-[#17212F] font-medium"
                         }`}
                     >
-                        Direct ({allDirect.length})
+                        Direct
                     </button>
                 </div>
             </div>
 
             {/* Scrollable Conversation List */}
-            <div className="flex-1 overflow-y-auto py-1.5 custom-chat-scrollbar">
-                {/* Empty Search State */}
+            <div className="flex-1 overflow-y-auto py-2 custom-chat-scrollbar">
+                {/* Empty State */}
                 {!isActivityMatchingSearch && filteredCompanyBroadcasts.length === 0 && filteredCustomGroups.length === 0 && filteredDirect.length === 0 ? (
                     <div className="p-8 text-center">
-                        <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2 text-base">
+                        <div className="w-12 h-12 rounded-lg bg-[#F6F8FB] text-[#94A3B8] border border-[#E2E8F0] flex items-center justify-center mx-auto mb-3 text-lg">
                             <i className="fa-solid fa-comment-slash"></i>
                         </div>
-                        <p className="text-xs font-medium text-slate-700 mb-0.5">No conversations match your search</p>
-                        <p className="text-[11px] text-slate-400 font-normal">Try typing a coworker name or channel title.</p>
+                        <p className="text-xs font-bold text-[#17212F] mb-1">No conversations found</p>
+                        <p className="text-[11px] text-[#5B6573] font-normal">Try searching for another coworker or channel name.</p>
                     </div>
                 ) : (
                     <>
-                        {/* ================= 1. PINNED DEFAULT #ACTIVITY CHANNEL ================= */}
+                        {/* ================= 1. PINNED #ACTIVITY CHANNEL ================= */}
                         {(filterTab === "all" || filterTab === "groups") && isActivityMatchingSearch && activityGroup && (
                             <div className="mb-2">
                                 <div className="px-3 pt-1 pb-1 flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
-                                        <i className="fa-solid fa-thumbtack text-[9px] text-amber-600"></i>
-                                        <span>Company Activity Channel</span>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#17365D]">
+                                        <i className="fa-solid fa-thumbtack text-[9px] text-[#2878C7]"></i>
+                                        <span>Company Activity Stream</span>
                                     </div>
-                                    <span className="text-[9px] font-semibold text-amber-700 bg-amber-100/70 px-1.5 py-0.2 rounded">
-                                        Default For All
+                                    <span className="text-[9px] font-bold text-[#2878C7] bg-[#EFF6FF] border border-[#BFDBFE] px-1.5 py-0.2 rounded">
+                                        PINNED
                                     </span>
                                 </div>
 
@@ -468,20 +483,20 @@ export default function ChatSidebar({
                         {(filterTab === "all" || filterTab === "broadcasts") && (
                             <div className="mb-2">
                                 <div className="px-3 pt-2 pb-1 flex items-center justify-between gap-1">
-                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
-                                        <i className="fa-solid fa-bullhorn text-[10px] text-amber-600"></i>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#D97706]">
+                                        <i className="fa-solid fa-bullhorn text-[10px] text-[#D97706]"></i>
                                         <span>Company Broadcasts</span>
-                                        <span className="px-1.5 py-0.2 rounded-full bg-amber-50 border border-amber-200/80 text-amber-700 text-[9px] font-semibold">
+                                        <span className="px-1.5 py-0.2 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-bold">
                                             {filteredCompanyBroadcasts.length}
                                         </span>
                                     </div>
 
-                                    {/* Company Selector when multiple companies exist */}
+                                    {/* Company Selector */}
                                     {broadcastCompanies.length > 1 && (
                                         <select
                                             value={selectedBroadcastCompany}
                                             onChange={(e) => setSelectedBroadcastCompany(e.target.value)}
-                                            className="text-[10px] font-semibold bg-white border border-slate-200 rounded-md px-1.5 py-0.5 text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer max-w-[130px] truncate"
+                                            className="text-[10px] font-semibold bg-white border border-[#E2E8F0] rounded-md px-1.5 py-0.5 text-[#17212F] focus:outline-none focus:ring-1 focus:ring-[#2878C7] cursor-pointer max-w-[130px] truncate"
                                             title="Filter broadcasts by company"
                                         >
                                             <option value="all">All Companies</option>
@@ -494,7 +509,7 @@ export default function ChatSidebar({
 
                                 <div className="space-y-0.5">
                                     {filteredCompanyBroadcasts.length === 0 ? (
-                                        <div className="px-4 py-1 text-[11px] text-slate-400 italic font-normal">
+                                        <div className="px-4 py-1.5 text-[11px] text-[#94A3B8] italic font-normal">
                                             No company broadcasts available
                                         </div>
                                     ) : (
@@ -506,17 +521,17 @@ export default function ChatSidebar({
 
                         {/* Divider */}
                         {(filterTab === "all") && (
-                            <div className="mx-3 my-1 border-t border-slate-100"></div>
+                            <div className="mx-3 my-1 border-t border-[#E2E8F0]"></div>
                         )}
 
                         {/* ================= 3. CUSTOM GROUPS & TEAMS ================= */}
                         {(filterTab === "all" || filterTab === "groups") && (
-                            <div className="mb-1.5">
+                            <div className="mb-2">
                                 <div className="px-3 pt-2 pb-1 flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
-                                        <i className="fa-solid fa-layer-group text-[10px] text-slate-500"></i>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#17365D]">
+                                        <i className="fa-solid fa-layer-group text-[10px] text-[#2878C7]"></i>
                                         <span>Custom Groups & Teams</span>
-                                        <span className="px-1.5 py-0.2 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold">
+                                        <span className="px-1.5 py-0.2 rounded-full bg-slate-100 border border-[#E2E8F0] text-[#5B6573] text-[9px] font-bold">
                                             {filteredCustomGroups.length}
                                         </span>
                                     </div>
@@ -524,7 +539,7 @@ export default function ChatSidebar({
                                         <button
                                             onClick={onOpenNewGroup}
                                             title="Create Custom Group"
-                                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-600 hover:text-[#ED1C28] hover:bg-red-50/70 cursor-pointer flex items-center gap-1 transition-colors"
+                                            className="px-2 py-0.5 rounded text-[10px] font-bold text-[#2878C7] hover:bg-[#EFF6FF] border border-transparent hover:border-[#BFDBFE] cursor-pointer flex items-center gap-1 transition-all"
                                         >
                                             <i className="fa-solid fa-plus text-[8px]"></i> New
                                         </button>
@@ -533,8 +548,8 @@ export default function ChatSidebar({
 
                                 <div className="space-y-0.5">
                                     {filteredCustomGroups.length === 0 ? (
-                                        <div className="px-4 py-1.5 text-[11px] text-slate-400 italic font-normal">
-                                            No custom group channels created yet
+                                        <div className="px-4 py-1.5 text-[11px] text-[#94A3B8] italic font-normal">
+                                            No team channels created yet
                                         </div>
                                     ) : (
                                         filteredCustomGroups.map((g) => renderConversationItem(g, false))
@@ -545,17 +560,17 @@ export default function ChatSidebar({
 
                         {/* Divider */}
                         {filterTab === "all" && (
-                            <div className="mx-3 my-1 border-t border-slate-100"></div>
+                            <div className="mx-3 my-1 border-t border-[#E2E8F0]"></div>
                         )}
 
                         {/* ================= 4. DIRECT MESSAGES ================= */}
                         {(filterTab === "all" || filterTab === "direct") && (
                             <div>
                                 <div className="px-3 pt-2 pb-1 flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
-                                        <i className="fa-regular fa-comment-dots text-[10px] text-slate-500"></i>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#17365D]">
+                                        <i className="fa-regular fa-comment-dots text-[10px] text-[#2878C7]"></i>
                                         <span>Direct Messages</span>
-                                        <span className="px-1.5 py-0.2 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[9px] font-semibold">
+                                        <span className="px-1.5 py-0.2 rounded-full bg-slate-100 border border-[#E2E8F0] text-[#5B6573] text-[9px] font-bold">
                                             {filteredDirect.length}
                                         </span>
                                     </div>
@@ -563,12 +578,12 @@ export default function ChatSidebar({
                                         <button
                                             onClick={onOpenNewChat}
                                             title="Start Direct Chat"
-                                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-600 hover:text-[#ED1C28] hover:bg-red-50/70 cursor-pointer flex items-center gap-1 transition-colors"
+                                            className="px-2 py-0.5 rounded text-[10px] font-bold text-[#2878C7] hover:bg-[#EFF6FF] border border-transparent hover:border-[#BFDBFE] cursor-pointer flex items-center gap-1 transition-all"
                                         >
                                             <i className="fa-solid fa-plus text-[8px]"></i> New
                                         </button>
                                     ) : (
-                                        <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="External vendors cannot initiate new conversations">
+                                        <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200" title="External vendors cannot initiate new conversations">
                                             Vendor
                                         </span>
                                     )}
@@ -576,7 +591,7 @@ export default function ChatSidebar({
 
                                 <div className="space-y-0.5">
                                     {filteredDirect.length === 0 ? (
-                                        <div className="px-4 py-1.5 text-[11px] text-slate-400 italic font-normal">
+                                        <div className="px-4 py-1.5 text-[11px] text-[#94A3B8] italic font-normal">
                                             No direct messages yet
                                         </div>
                                     ) : (

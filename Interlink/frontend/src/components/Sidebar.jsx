@@ -280,20 +280,6 @@ export default function Sidebar({
             matchPaths: ["/admin/user-types", "/admin/user-types/create"],
             icon: "fa-solid fa-user-shield",
             visible: canReadRoles
-        },
-        {
-            name: "Company Master",
-            path: "/admin/companies",
-            matchPaths: ["/admin/companies", "/admin/companies/create"],
-            icon: "fa-solid fa-building",
-            visible: isAdmin || hasPermission("company_master", "read")
-        },
-        {
-            name: "Department Master",
-            path: "/admin/departments",
-            matchPaths: ["/admin/departments"],
-            icon: "fa-solid fa-sitemap",
-            visible: isAdmin || hasPermission("department_master", "read")
         }
     ].filter(m => m.visible);
 

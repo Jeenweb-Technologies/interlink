@@ -495,7 +495,7 @@ export default function FileViewerModal({
                             <a
                                 href={downloadUrl}
                                 download={originalName}
-                                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                                className="px-3.5 py-1.5 rounded-lg bg-[#17365D] hover:bg-[#102642] text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
                             >
                                 <i className="fa-solid fa-download"></i>
                                 <span className="hidden sm:inline">Download</span>

@@ -294,8 +294,33 @@ export default function CompanyMaster() {
     ], [canUpdate, canDelete]);
 
     return (
-        <div className="flex-1 flex flex-col min-h-screen bg-slate-50 font-sans text-slate-900 select-text">
+        <div className="flex-1 flex flex-col min-h-screen bg-[#F6F8FB] font-sans text-slate-900 select-text">
             <main className="flex-1 flex flex-col w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+                {/* Top Module Sub-Navigation Bar */}
+                <div className="flex items-center gap-2 mb-6 border-b border-[#E2E8F0] pb-3 text-xs font-bold">
+                    <button
+                        onClick={() => navigate("/peoples")}
+                        className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-[#5B6573] hover:text-[#17212F] border border-[#E2E8F0] cursor-pointer flex items-center gap-1.5 transition-colors"
+                    >
+                        <i className="fa-solid fa-users text-[#2878C7]"></i>
+                        <span>Employee Directory</span>
+                    </button>
+                    <button
+                        onClick={() => navigate("/peoples/departments")}
+                        className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-[#5B6573] hover:text-[#17212F] border border-[#E2E8F0] cursor-pointer flex items-center gap-1.5 transition-colors"
+                    >
+                        <i className="fa-solid fa-sitemap text-[#2878C7]"></i>
+                        <span>Departments & Teams</span>
+                    </button>
+                    <button
+                        onClick={() => navigate("/peoples/companies")}
+                        className="px-3.5 py-1.5 rounded-lg bg-[#17365D] text-white shadow-xs cursor-pointer flex items-center gap-1.5"
+                    >
+                        <i className="fa-solid fa-building text-emerald-400"></i>
+                        <span>Companies & Entities</span>
+                    </button>
+                </div>
+
                 <DataTable
                     tableId="company_master_directory"
                     title="Company Master"
@@ -309,10 +334,10 @@ export default function CompanyMaster() {
                     actionButton={
                         canWrite && (
                             <button
-                                onClick={() => navigate("/admin/companies/create")}
+                                onClick={() => navigate("/peoples/companies/create")}
                                 title="Register Company"
                                 aria-label="Register Company"
-                                className="inline-flex items-center justify-center w-9.5 h-9.5 rounded-xl bg-[#ED1C28] hover:bg-[#C5131E] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer shrink-0"
+                                className="inline-flex items-center justify-center w-9.5 h-9.5 rounded-xl bg-[#17365D] hover:bg-[#102642] text-white text-xs font-semibold shadow-xs transition-all cursor-pointer shrink-0"
                             >
                                 <i className="fa-solid fa-plus text-xs"></i>
                             </button>

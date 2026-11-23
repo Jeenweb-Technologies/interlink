@@ -16,6 +16,7 @@ import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
 import ChatApp from "./pages/chat/ChatApp";
 import EmployeeDirectory from "./pages/peoples/EmployeeDirectory";
+import CreateEmployee from "./pages/peoples/CreateEmployee";
 import CompanyMaster from "./pages/admin/CompanyMaster";
 import CreateCompany from "./pages/admin/CreateCompany";
 import DepartmentMaster from "./pages/admin/DepartmentMaster";
@@ -63,10 +64,29 @@ export default function AppRoutes() {
                         path="/chat"
                         element={<ChatApp />}
                     />
+
+                    {/* Peoples & Organization Module (EMP-01 to EMP-05) */}
                     <Route
                         path="/peoples"
                         element={<EmployeeDirectory />}
                     />
+                    <Route
+                        path="/peoples/create"
+                        element={<CreateEmployee />}
+                    />
+                    <Route
+                        path="/peoples/departments"
+                        element={<DepartmentMaster />}
+                    />
+                    <Route
+                        path="/peoples/companies"
+                        element={<CompanyMaster />}
+                    />
+                    <Route
+                        path="/peoples/companies/create"
+                        element={<CreateCompany />}
+                    />
+
                     <Route
                         path="/profile"
                         element={<Profile />}
@@ -111,20 +131,19 @@ export default function AppRoutes() {
                         />
                     </Route>
 
-                    <Route element={<ProtectedRoute allowedRole="admin" />}>
-                        <Route
-                            path="/admin/companies"
-                            element={<CompanyMaster />}
-                        />
-                        <Route
-                            path="/admin/companies/create"
-                            element={<CreateCompany />}
-                        />
-                        <Route
-                            path="/admin/departments"
-                            element={<DepartmentMaster />}
-                        />
-                    </Route>
+                    {/* Backward-compatible redirects from legacy admin paths to Peoples module */}
+                    <Route
+                        path="/admin/companies"
+                        element={<Navigate to="/peoples/companies" replace />}
+                    />
+                    <Route
+                        path="/admin/companies/create"
+                        element={<Navigate to="/peoples/companies/create" replace />}
+                    />
+                    <Route
+                        path="/admin/departments"
+                        element={<Navigate to="/peoples/departments" replace />}
+                    />
                 </Route>
             </Route>
         </Routes>
