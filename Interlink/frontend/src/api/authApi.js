@@ -89,6 +89,10 @@ export const createUserByAdmin = async (data) => {
     return apiClient.post("/admin/create-user", data);
 };
 
+export const updateUserByAdmin = async (id, data) => {
+    return apiClient.put(`/admin/user/${id}`, data);
+};
+
 export const fetchAuditLogs = async (userId = null) => {
     if (userId) {
         return apiClient.get(`/admin/audit-logs/${userId}`);

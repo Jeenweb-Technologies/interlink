@@ -192,6 +192,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         if (path.startsWith("/tasks")) return { title: "Task Management", category: "Productivity" };
         if (path === "/admin/dashboard") return { title: "User Master", category: "Masters" };
         if (path === "/admin/companies") return { title: "Company Master", category: "Masters" };
+        if (path === "/admin/departments") return { title: "Department Master", category: "Masters" };
         if (path === "/admin/users/create") return { title: "Create User", category: "Masters" };
         if (path === "/admin/user-types") return { title: "User Types Master", category: "Masters" };
         if (path === "/admin/user-types/create") return { title: "Create User Type", category: "Masters" };
@@ -923,6 +924,13 @@ export default function Sidebar({
             matchPaths: ["/admin/companies"],
             icon: "fa-solid fa-building",
             visible: isAdmin
+        },
+        {
+            name: "Department Master",
+            path: "/admin/departments",
+            matchPaths: ["/admin/departments"],
+            icon: "fa-solid fa-sitemap",
+            visible: canReadUsers
         },
         {
             name: "User Types Master",

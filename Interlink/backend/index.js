@@ -16,9 +16,11 @@ const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
 const searchRoutes = require("./routes/searchRoutes.js");
+const departmentRoutes = require("./routes/departmentRoutes.js");
 
 // Model Initializations
 const { initCompanyModel } = require("./models/companyModel.js");
+const { createDepartmentTables } = require("./models/departmentModel.js");
 const { initUserModel } = require("./models/userModel.js");
 const { createUserTypesTable, createUserTypePermissionsTable } = require("./models/userTypeModel.js");
 const { createAuditLogsTable } = require("./models/auditLogModel.js");
@@ -74,6 +76,7 @@ app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);
 app.use(["/api/projects", "/projects"], projectRoutes);
 app.use(["/api/search", "/search"], searchRoutes);
+app.use(["/api/departments", "/departments", "/api/admin/departments", "/admin/departments"], departmentRoutes);
 
 
 // Global 404 handler
@@ -94,6 +97,7 @@ const startServer = async () => {
         console.log("Initializing database tables...");
         // Initialize tables in correct dependency order
         await initCompanyModel();
+        await createDepartmentTables();
         await initUserModel();
         await createUserTypesTable();
         await createUserTypePermissionsTable();
