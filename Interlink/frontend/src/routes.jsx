@@ -21,6 +21,7 @@ import ChatPage from "./pages/chat/ChatPage";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
+import NotesPage from "./pages/notes/NotesPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -79,6 +80,10 @@ export default function AppRoutes() {
                     <Route
                         path="/projects/:id"
                         element={<ProjectWorkspacePage />}
+                    />
+                    <Route
+                        path="/notes"
+                        element={<NotesPage />}
                     />
                     <Route
                         path="/profile"
