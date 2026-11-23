@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { logoutUser } from "../api/authApi";
+import { getCompanies, switchCompany } from "../api/companyApi";
 import { usePermission } from "../context/PermissionContext";
 import Footer from "./Footer";
 
@@ -92,6 +93,43 @@ export function TopBar({ onMenuClick = () => {} }) {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [companies, setCompanies] = useState(user.companies || []);
+    const [activeCompanyId, setActiveCompanyId] = useState(
+        localStorage.getItem("active_company_id") || user.company_id || "1"
+    );
+
+    useEffect(() => {
+        // Always fetch fresh companies list on mount
+        getCompanies()
+            .then((res) => {
+                if (res.data?.success && res.data.companies) {
+                    setCompanies(res.data.companies);
+                    const currentActive = localStorage.getItem("active_company_id") || user.company_id;
+                    if (!currentActive && res.data.companies.length > 0) {
+                        const firstId = String(res.data.companies[0].id);
+                        setActiveCompanyId(firstId);
+                        localStorage.setItem("active_company_id", firstId);
+                    }
+                }
+            })
+            .catch((err) => {
+                console.error("TopBar getCompanies error:", err);
+            });
+    }, []);
+
+    const handleCompanyChange = async (e) => {
+        const newId = e.target.value;
+        setActiveCompanyId(newId);
+        localStorage.setItem("active_company_id", newId);
+        const updatedUser = { ...user, company_id: parseInt(newId, 10) };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        try {
+            await switchCompany(newId);
+        } catch (err) {
+            console.warn("Backend switch notice:", err.message);
+        }
+        window.location.reload();
+    };
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -105,6 +143,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         if (path.startsWith("/projects")) return { title: "Projects & Portfolio", category: "Governance" };
         if (path.startsWith("/tasks")) return { title: "Task Management", category: "Productivity" };
         if (path === "/admin/dashboard") return { title: "User Master", category: "Masters" };
+        if (path === "/admin/companies") return { title: "Company Master", category: "Masters" };
         if (path === "/admin/users/create") return { title: "Create User", category: "Masters" };
         if (path === "/admin/user-types") return { title: "User Types Master", category: "Masters" };
         if (path === "/admin/user-types/create") return { title: "Create User Type", category: "Masters" };
@@ -156,6 +195,25 @@ export function TopBar({ onMenuClick = () => {} }) {
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span>Interlink Connected</span>
                 </div>
+
+                {/* Company Switcher */}
+                {companies.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs">
+                        <i className="fa-regular fa-building text-blue-600 text-[11px]"></i>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase hidden md:inline">Company:</span>
+                        <select
+                            value={activeCompanyId}
+                            onChange={handleCompanyChange}
+                            className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+                        >
+                            {companies.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
 
                 <div className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200/70">
                     <i className="fa-regular fa-clock text-slate-400"></i>
@@ -235,6 +293,45 @@ export default function Sidebar({
     const { hasPermission } = usePermission();
     const isAdmin = user.role === "admin" || user.role === "super admin";
 
+    const [companies, setCompanies] = useState(user.companies || []);
+    const [activeCompanyId, setActiveCompanyId] = useState(
+        localStorage.getItem("active_company_id") || user.company_id || "1"
+    );
+
+    useEffect(() => {
+        getCompanies()
+            .then((res) => {
+                if (res.data?.success && res.data.companies) {
+                    setCompanies(res.data.companies);
+                    const currentActive = localStorage.getItem("active_company_id") || user.company_id;
+                    if (!currentActive && res.data.companies.length > 0) {
+                        const firstId = String(res.data.companies[0].id);
+                        setActiveCompanyId(firstId);
+                        localStorage.setItem("active_company_id", firstId);
+                    }
+                }
+            })
+            .catch((err) => {
+                console.error("Sidebar getCompanies error:", err);
+            });
+    }, []);
+
+    const handleCompanyChange = async (e) => {
+        const newId = e.target.value;
+        setActiveCompanyId(newId);
+        localStorage.setItem("active_company_id", newId);
+        const updatedUser = { ...user, company_id: parseInt(newId, 10) };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+
+        try {
+            await switchCompany(newId);
+        } catch (err) {
+            console.warn("Backend switch notice:", err.message);
+        }
+
+        window.location.reload();
+    };
+
     const isMasterRoute = location.pathname.startsWith("/admin/") && location.pathname !== "/admin/report";
     const [mastersOpen, setMastersOpen] = useState(isMasterRoute);
 
@@ -273,6 +370,13 @@ export default function Sidebar({
             matchPaths: ["/admin/dashboard", "/admin/users/create"],
             icon: "fa-solid fa-users-gear",
             visible: canReadUsers
+        },
+        {
+            name: "Company Master",
+            path: "/admin/companies",
+            matchPaths: ["/admin/companies"],
+            icon: "fa-solid fa-building",
+            visible: isAdmin
         },
         {
             name: "User Types Master",
@@ -330,6 +434,59 @@ export default function Sidebar({
                     >
                         <i className={`fa-solid ${isCollapsed ? "fa-chevron-right" : "fa-chevron-left"} text-xs`}></i>
                     </button>
+                </div>
+
+                {/* Company Switcher in Sidebar */}
+                <div className="px-3 py-3 border-b border-slate-800/80 bg-slate-950/40">
+                    {!isCollapsed ? (
+                        <div>
+                            <div className="flex items-center justify-between px-1 mb-1.5">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                    <i className="fa-solid fa-building text-blue-400 text-[10px]"></i>
+                                    Company
+                                </span>
+                                {isAdmin && (
+                                    <button
+                                        onClick={() => handleNav("/admin/companies")}
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer"
+                                        title="Open Company Master"
+                                    >
+                                        Manage
+                                    </button>
+                                )}
+                            </div>
+                            <div className="relative">
+                                <select
+                                    value={String(activeCompanyId)}
+                                    onChange={handleCompanyChange}
+                                    className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
+                                >
+                                    {companies.length === 0 ? (
+                                        <option value="1">Default Company</option>
+                                    ) : (
+                                        companies.map((c) => (
+                                            <option key={c.id} value={String(c.id)} className="bg-slate-900 text-white py-1">
+                                                {c.name}
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                                    <i className="fa-solid fa-chevron-down text-[10px]"></i>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex justify-center py-0.5">
+                            <button
+                                onClick={() => handleNav("/admin/companies")}
+                                title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Company Workspace"}
+                                className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all cursor-pointer"
+                            >
+                                <i className="fa-solid fa-building text-sm"></i>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Nav Items */}

@@ -426,7 +426,7 @@ export default function TasksPage() {
                     isFilterEmpty={isFilterEmpty}
                     onClearFilters={handleClearFilters}
                     onAction={() => setCreateDrawerOpen(true)}
-                    actionLabel="+ Create First Task"
+                    actionLabel="Create First Task"
                     emptyTitle="No tasks created yet"
                     emptyDescription="Your task workspace is ready. Create a task with assignees, dependencies, and deadlines to begin collaborating."
                 >

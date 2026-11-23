@@ -459,7 +459,7 @@ export default function ProjectsPortfolioPage() {
                 permissionDenied={permissionDenied}
                 isEmpty={projects.length === 0}
                 onAction={() => setCreateModalOpen(true)}
-                actionLabel="+ Create First Project"
+                actionLabel="Create First Project"
                 emptyTitle="No Projects Found in Portfolio"
                 emptyDescription="Launch your organization's first initiative with dedicated phases, budget tracking, and milestones."
             >

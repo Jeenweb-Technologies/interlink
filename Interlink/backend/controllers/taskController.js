@@ -134,6 +134,7 @@ const syncProjectDurationAndCompletion = async (projectId) => {
 // GET /api/tasks - List tasks with filtering, search, sorting & dependency blockers
 exports.getTasks = async (req, res) => {
     try {
+        const companyId = req.user?.company_id || 1;
         const {
             status,
             priority,
@@ -160,10 +161,10 @@ exports.getTasks = async (req, res) => {
             FROM tasks t
             LEFT JOIN projects p ON t.project_id = p.id
             LEFT JOIN users u ON t.owner_id = u.id
-            WHERE t.deleted_at IS NULL
+            WHERE t.deleted_at IS NULL AND (t.company_id = ? OR t.company_id IS NULL)
         `;
 
-        const params = [];
+        const params = [companyId];
 
         // Scope check for non-admins
         if (req.user && req.user.role !== 'admin' && req.user.role !== 'super admin') {
@@ -473,14 +474,16 @@ exports.createTask = async (req, res) => {
         const taskCode = `TSK-${nextNum}`;
 
         const ownerId = req.user ? req.user.id : 1;
+        const companyId = req.user?.company_id || 1;
 
         const [result] = await db.execute(`
             INSERT INTO tasks (
-                tenant_id, task_code, title, description, status, priority, owner_id,
+                tenant_id, company_id, task_code, title, description, status, priority, owner_id,
                 project_id, ticket_id, meeting_id, document_id,
                 start_date, due_date, estimated_hours, is_recurring, recurrence_rule
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
+            companyId,
             taskCode,
             title.trim(),
             description,
@@ -759,6 +762,8 @@ exports.bulkUpdateTasks = async (req, res) => {
 // GET /api/tasks/dashboard - Metrics for TASK-01
 exports.getDashboardMetrics = async (req, res) => {
     try {
+        const companyId = req.user?.company_id || 1;
+
         const [counts] = await db.execute(`
             SELECT 
                 COUNT(*) AS total,
@@ -767,24 +772,24 @@ exports.getDashboardMetrics = async (req, res) => {
                 SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress_count,
                 SUM(CASE WHEN status = 'done' AND YEARWEEK(updated_at, 1) = YEARWEEK(CURDATE(), 1) THEN 1 ELSE 0 END) AS completed_this_week
             FROM tasks
-            WHERE deleted_at IS NULL
-        `);
+            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
+        `, [companyId]);
 
         // Priority breakdown
         const [priorities] = await db.execute(`
             SELECT priority, COUNT(*) AS count
             FROM tasks
-            WHERE deleted_at IS NULL
+            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
             GROUP BY priority
-        `);
+        `, [companyId]);
 
         // Status breakdown
         const [statuses] = await db.execute(`
             SELECT status, COUNT(*) AS count
             FROM tasks
-            WHERE deleted_at IS NULL
+            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
             GROUP BY status
-        `);
+        `, [companyId]);
 
         // Workload distribution by user
         const [workload] = await db.execute(`

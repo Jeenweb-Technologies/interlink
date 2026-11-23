@@ -10,6 +10,8 @@ const createUsersTable = async () => {
             email VARCHAR(150) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL,
             role VARCHAR(50) DEFAULT 'user',
+            organization_id INT DEFAULT 1,
+            company_id INT DEFAULT 1,
             user_type_id INT DEFAULT NULL,
             mob_no VARCHAR(20) DEFAULT NULL,
             date_of_join DATE DEFAULT NULL,
@@ -49,6 +51,14 @@ const createUsersTable = async () => {
         {
             name: 'active',
             query: 'ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT TRUE'
+        },
+        {
+            name: 'organization_id',
+            query: 'ALTER TABLE users ADD COLUMN organization_id INT DEFAULT 1'
+        },
+        {
+            name: 'company_id',
+            query: 'ALTER TABLE users ADD COLUMN company_id INT DEFAULT 1'
         }
     ];
 
@@ -91,13 +101,15 @@ const createUser = async (
     dateOfJoin = null,
     deviceVerificationRequired = true,
     active = true,
-    role = 'user'
+    role = 'user',
+    organizationId = 1,
+    companyId = 1
 ) => {
 
     const query = `
         INSERT INTO users
-        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role, organization_id, company_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.execute(query, [
@@ -110,7 +122,9 @@ const createUser = async (
         dateOfJoin,
         deviceVerificationRequired ? 1 : 0,
         active ? 1 : 0,
-        role
+        role,
+        organizationId,
+        companyId
     ]);
 
     return result;
