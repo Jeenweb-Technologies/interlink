@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getDeviceId } from "../utils/device";
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_URL || "/api",
     withCredentials: true
 });
@@ -10,6 +10,12 @@ apiClient.interceptors.request.use(async (config) => {
     const token = localStorage.getItem("token");
     if (token && token !== "null" && token !== "undefined" && token.trim()) {
         config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    const activeCompanyId = localStorage.getItem("active_company_id");
+    if (activeCompanyId) {
+        config.headers["x-company-id"] = activeCompanyId;
+        config.headers["company-id"] = activeCompanyId;
     }
 
     try {
@@ -54,6 +60,18 @@ apiClient.interceptors.response.use(
 
 export const loginUser = async (data) => {
     return apiClient.post("/auth/login", data);
+};
+
+export const registerOrganization = async (data) => {
+    return apiClient.post("/auth/register-org", data);
+};
+
+export const getCompanies = async () => {
+    return apiClient.get("/companies");
+};
+
+export const createCompany = async (data) => {
+    return apiClient.post("/companies", data);
 };
 
 export const requestDeviceRegistration = async (data) => {

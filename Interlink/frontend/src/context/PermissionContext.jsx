@@ -1,7 +1,25 @@
 import React, { createContext, useState, useEffect, useContext } from "react";
 import { getMyPermissions } from "../api/authApi";
 
-const PermissionContext = createContext(null);
+const defaultPermissionContext = {
+    permissions: {},
+    isAdmin: false,
+    loading: false,
+    hasPermission: (masterName, action) => {
+        try {
+            const user = JSON.parse(localStorage.getItem("user") || "null");
+            if (user && (user.role === "admin" || user.role === "super_admin" || user.role === "super admin" || user.role === "developer")) {
+                return true;
+            }
+        } catch {
+            return false;
+        }
+        return false;
+    },
+    refreshPermissions: () => {}
+};
+
+const PermissionContext = createContext(defaultPermissionContext);
 
 export function PermissionProvider({ children }) {
     const [permissions, setPermissions] = useState({});
@@ -19,7 +37,7 @@ export function PermissionProvider({ children }) {
             return;
         }
 
-        if (user.role === "admin") {
+        if (user.role === "admin" || user.role === "super_admin" || user.role === "super admin" || user.role === "developer") {
             setIsAdmin(true);
             setPermissions({});
             setLoading(false);
@@ -62,10 +80,10 @@ export function PermissionProvider({ children }) {
     }, []);
 
     const hasPermission = (masterName, action) => {
-        // Admins always have all permissions
+        // Admins and developers always have all permissions
         if (isAdmin) return true;
         const user = JSON.parse(localStorage.getItem("user") || "null");
-        if (user && user.role === "admin") return true;
+        if (user && (user.role === "admin" || user.role === "super_admin" || user.role === "super admin" || user.role === "developer")) return true;
 
         const perm = permissions[masterName];
         if (!perm) return false;
@@ -83,7 +101,7 @@ export function PermissionProvider({ children }) {
 export function usePermission() {
     const context = useContext(PermissionContext);
     if (!context) {
-        throw new Error("usePermission must be used within a PermissionProvider");
+        return defaultPermissionContext;
     }
     return context;
 }

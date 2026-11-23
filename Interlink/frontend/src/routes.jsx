@@ -1,8 +1,11 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
+import RegisterOrg from "./pages/RegisterOrg";
 import DeviceRegistration from "./pages/DeviceRegistration";
 import PendingApproval from "./pages/PendingApproval";
+import OrgPendingApproval from "./pages/OrgPendingApproval";
+import DeveloperPanel from "./pages/admin/DeveloperPanel";
 
 import UserHome from "./pages/user/UserHome";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -11,13 +14,13 @@ import CreateUser from "./pages/admin/user/CreateUser";
 import CreateUserType from "./pages/admin/user/CreateUserType";
 import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
+import CompanyMaster from "./pages/admin/CompanyMaster";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
 import ChatApp from "./pages/chat/ChatApp";
 import EmployeeDirectory from "./pages/peoples/EmployeeDirectory";
 import CreateEmployee from "./pages/peoples/CreateEmployee";
-import CompanyMaster from "./pages/admin/CompanyMaster";
 import CreateCompany from "./pages/admin/CreateCompany";
 import DepartmentMaster from "./pages/admin/DepartmentMaster";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -32,6 +35,16 @@ export default function AppRoutes() {
             />
 
             <Route
+                path="/register"
+                element={<RegisterOrg />}
+            />
+
+            <Route
+                path="/register-org"
+                element={<RegisterOrg />}
+            />
+
+            <Route
                 path="/device-registration"
                 element={<DeviceRegistration />}
             />
@@ -39,6 +52,11 @@ export default function AppRoutes() {
             <Route
                 path="/pending-approval"
                 element={<PendingApproval />}
+            />
+
+            <Route
+                path="/org-pending"
+                element={<OrgPendingApproval />}
             />
 
             {/* Authenticated routes wrapped with ProtectedRoute and DashboardLayout */}
@@ -103,6 +121,13 @@ export default function AppRoutes() {
                         />
                     </Route>
 
+                    <Route element={<ProtectedRoute allowedRole="admin" />}>
+                        <Route
+                            path="/admin/companies"
+                            element={<CompanyMaster />}
+                        />
+                    </Route>
+
                     <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="activity_report" requiredAction="read" />}>
                         <Route
                             path="/admin/report"
@@ -131,11 +156,7 @@ export default function AppRoutes() {
                         />
                     </Route>
 
-                    {/* Backward-compatible redirects from legacy admin paths to Peoples module */}
-                    <Route
-                        path="/admin/companies"
-                        element={<Navigate to="/peoples/companies" replace />}
-                    />
+                    {/* Backward-compatible redirects from legacy admin paths */}
                     <Route
                         path="/admin/companies/create"
                         element={<Navigate to="/peoples/companies/create" replace />}
@@ -144,6 +165,18 @@ export default function AppRoutes() {
                         path="/admin/departments"
                         element={<Navigate to="/peoples/departments" replace />}
                     />
+
+                    {/* Developer / Super Admin Console */}
+                    <Route element={<ProtectedRoute allowedRole={["super_admin", "super admin", "developer"]} />}>
+                        <Route
+                            path="/developer"
+                            element={<DeveloperPanel />}
+                        />
+                        <Route
+                            path="/admin/developer"
+                            element={<DeveloperPanel />}
+                        />
+                    </Route>
                 </Route>
             </Route>
         </Routes>

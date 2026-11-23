@@ -24,9 +24,9 @@ const verifyToken = async (req, res, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
 
-        if (!req.user.username || !req.user.name) {
+        if (!req.user.username || !req.user.name || !req.user.organization_id) {
             const [rows] = await db.execute(
-                "SELECT name, username, role FROM users WHERE id = ?",
+                "SELECT name, username, role, organization_id, company_id FROM users WHERE id = ?",
                 [req.user.id]
             );
 
@@ -35,8 +35,24 @@ const verifyToken = async (req, res, next) => {
                     ...req.user,
                     name: rows[0].name,
                     username: rows[0].username,
-                    role: rows[0].role || req.user.role
+                    role: rows[0].role || req.user.role,
+                    organization_id: rows[0].organization_id || 1,
+                    company_id: rows[0].company_id || 1
                 };
+            }
+        }
+
+        // Default fallbacks
+        req.user.organization_id = req.user.organization_id || 1;
+        req.user.tenant_id = req.user.organization_id;
+        req.user.company_id = req.user.company_id || 1;
+
+        // Allow frontend header override for switching companies dynamically
+        const headerCompId = req.headers["x-company-id"] || req.headers["company-id"];
+        if (headerCompId) {
+            const parsed = parseInt(headerCompId, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+                req.user.company_id = parsed;
             }
         }
 
@@ -292,4 +308,14 @@ const verifyAnyPermission = (permissions = []) => {
     };
 };
 
-module.exports = { isUserAdmin, verifyToken, verifyAdmin, verifyPermission, verifyReportPermission, verifyAnyPermission };
+const verifySuperAdmin = (req, res, next) => {
+    if (!req.user || (req.user.role !== "super admin" && req.user.role !== "super_admin" && req.user.role !== "developer")) {
+        return res.status(403).json({
+            success: false,
+            message: "Access Denied. Developer / Superadmin access only."
+        });
+    }
+    next();
+};
+
+module.exports = { isUserAdmin, verifyToken, verifyAdmin, verifyPermission, verifyReportPermission, verifyAnyPermission, verifySuperAdmin };

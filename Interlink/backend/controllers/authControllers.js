@@ -7,6 +7,8 @@ const {
     updateUserProfile
 } = require("../models/userModel.js");
 
+const { findCompaniesByOrgId } = require("../models/companyModel.js");
+
 const { createAuditLog } = require("../models/auditLogModel.js");
 
 const {
@@ -161,7 +163,6 @@ const login = async (req, res) => {
 
         // Compare Password (supports plain-text, bcrypt hash, and admin fallbacks)
         const isPasswordCorrect = await verifyUserPassword(cleanPassword, user);
-
         if (!isPasswordCorrect) {
             console.warn(`[AUTH-LOGIN] FAILED: Password mismatch for user "${cleanUsername}" (ID: ${user.id})`);
             return res.status(401).json({
@@ -174,9 +175,60 @@ const login = async (req, res) => {
         const userDepartments = await getUserDepartments(user.id);
         const departmentIds = userDepartments.map(d => d.department_id);
 
+        // ================= ORGANIZATION STATUS GUARD =================
+        // Check organization approval status (unless platform developer / superadmin)
+        const isDeveloper = user.role === "super_admin" || user.role === "super admin" || user.role === "developer";
+        if (!isDeveloper && user.organization_id) {
+            const [orgRows] = await db.execute(
+                "SELECT name, status FROM organizations WHERE id = ?",
+                [user.organization_id]
+            );
+            const org = orgRows[0];
+            if (org) {
+                if (org.status === 'pending') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_PENDING_APPROVAL",
+                        message: `The registration for "${org.name}" is awaiting developer approval. You will be able to log in once approved.`
+                    });
+                }
+                if (org.status === 'rejected') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_REJECTED",
+                        message: `The registration request for "${org.name}" was declined. Please contact support.`
+                    });
+                }
+                if (org.status === 'suspended') {
+                    return res.status(403).json({
+                        success: false,
+                        status: "ORG_SUSPENDED",
+                        message: `Organization "${org.name}" has been suspended by the platform administrator.`
+                    });
+                }
+            }
+        }
+
+        if (user.active === 0 || user.active === false) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is deactivated. Please contact an administrator."
+            });
+        }
+
         // ================= ADMIN LOGIN =================
-        const isAdminRole = (user.role && ['admin', 'master_admin', 'super admin', 'administrator', 'master'].includes(String(user.role).toLowerCase().trim())) ||
+        const userOrgId = user.organization_id || 1;
+        const userCompId = user.company_id || 1;
+        let userCompanies = [];
+        try {
+            userCompanies = await findCompaniesByOrgId(userOrgId);
+        } catch (e) {
+            console.warn("Could not fetch user companies:", e.message);
+        }
+
+        const isAdminRole = (user.role && ['admin', 'master_admin', 'super admin', 'super_admin', 'administrator', 'master', 'developer'].includes(String(user.role).toLowerCase().trim())) ||
                             user.username === 'admin' ||
+                            user.username === 'developer' ||
                             Number(user.user_type_id) === 1 ||
                             Number(user.role_id) === 1;
 
@@ -184,11 +236,13 @@ const login = async (req, res) => {
             const token = jwt.sign(
                 {
                     id: user.id,
-                    role: 'admin',
+                    role: user.role || 'admin',
                     name: user.name || user.full_name,
                     username: user.username,
                     mob_no: user.mob_no,
                     user_type_id: user.user_type_id || 1,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
                     department_ids: departmentIds,
                     departments: userDepartments
                 },
@@ -211,6 +265,9 @@ const login = async (req, res) => {
                     user_type_id: user.user_type_id || 1,
                     user_type_name: user.user_type_name || "Super Admin",
                     mob_no: user.mob_no,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
+                    companies: userCompanies,
                     modules: user.modules || [],
                     departments: userDepartments,
                     department_ids: departmentIds,
@@ -237,6 +294,8 @@ const login = async (req, res) => {
                     username: user.username,
                     mob_no: user.mob_no,
                     user_type_id: user.user_type_id,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
                     department_ids: departmentIds,
                     departments: userDepartments,
                     device_allow_download: true,
@@ -263,6 +322,9 @@ const login = async (req, res) => {
                     user_type_id: user.user_type_id,
                     user_type_name: user.user_type_name || 'Standard User',
                     mob_no: user.mob_no,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
+                    companies: userCompanies,
                     modules: user.modules || [],
                     departments: userDepartments,
                     department_ids: departmentIds,
@@ -288,6 +350,8 @@ const login = async (req, res) => {
                         username: user.username,
                         mob_no: user.mob_no,
                         user_type_id: user.user_type_id,
+                        organization_id: userOrgId,
+                        company_id: userCompId,
                         department_ids: departmentIds,
                         departments: userDepartments,
                         device_allow_download: allowDownload,
@@ -314,6 +378,9 @@ const login = async (req, res) => {
                         user_type_id: user.user_type_id,
                         user_type_name: user.user_type_name || 'Standard User',
                         mob_no: user.mob_no,
+                        organization_id: userOrgId,
+                        company_id: userCompId,
+                        companies: userCompanies,
                         modules: user.modules || [],
                         departments: userDepartments,
                         department_ids: departmentIds,
@@ -761,9 +828,137 @@ const changeFirstPasswordController = async (req, res) => {
     }
 };
 
+const registerOrganization = async (req, res) => {
+    try {
+        const {
+            orgName,
+            companyName,
+            name,
+            username,
+            email,
+            password,
+            mob_no
+        } = req.body;
+
+        if (!orgName || !name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "Organization name, admin name, email, and password are required"
+            });
+        }
+
+        const finalUsername = username || email.split("@")[0];
+
+        // Check if user already exists
+        const existingUser = await findUserByUsername(finalUsername);
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "Username or email is already registered"
+            });
+        }
+
+        // 1. Create Organization (Default status: pending)
+        let orgId;
+        try {
+            const [orgResult] = await db.execute(
+                "INSERT INTO organizations (name, email, status) VALUES (?, ?, 'pending')",
+                [orgName.trim(), email.trim()]
+            );
+            orgId = orgResult.insertId;
+        } catch (orgErr) {
+            if (orgErr.code === 'ER_BAD_FIELD_ERROR') {
+                const [orgResult] = await db.execute(
+                    "INSERT INTO organizations (name) VALUES (?)",
+                    [orgName.trim()]
+                );
+                orgId = orgResult.insertId;
+                db.execute("ALTER TABLE organizations ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
+                db.execute("ALTER TABLE organizations ADD COLUMN status VARCHAR(50) DEFAULT 'pending'").catch(() => {});
+            } else {
+                throw orgErr;
+            }
+        }
+
+        // 2. Create First Company under this Organization
+        const compName = (companyName && companyName.trim()) ? companyName.trim() : `${orgName.trim()} Main`;
+        let companyId;
+        try {
+            const [compResult] = await db.execute(
+                "INSERT INTO companies (organization_id, name, email) VALUES (?, ?, ?)",
+                [orgId, compName, email.trim()]
+            );
+            companyId = compResult.insertId;
+        } catch (compErr) {
+            if (compErr.code === 'ER_BAD_FIELD_ERROR') {
+                const [compResult] = await db.execute(
+                    "INSERT INTO companies (organization_id, name) VALUES (?, ?)",
+                    [orgId, compName]
+                );
+                companyId = compResult.insertId;
+                db.execute("ALTER TABLE companies ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
+                db.execute("ALTER TABLE companies ADD COLUMN phone VARCHAR(50) DEFAULT NULL").catch(() => {});
+            } else {
+                throw compErr;
+            }
+        }
+
+        // 3. Create Admin User (Created with active=0 until developer approves org)
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const [userResult] = await db.execute(`
+            INSERT INTO users (
+                name, username, email, password, role,
+                organization_id, company_id,
+                mob_no, device_verification_required, active
+            ) VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, 0, 0)
+        `, [
+            name.trim(),
+            finalUsername,
+            email.trim(),
+            hashedPassword,
+            orgId,
+            companyId,
+            mob_no || null
+        ]);
+
+        const newUserId = userResult.insertId;
+
+        // Create audit log
+        try {
+            await createAuditLog(
+                newUserId,
+                finalUsername,
+                "WEB_REGISTER",
+                "organizations",
+                "PENDING_APPROVAL",
+                null,
+                JSON.stringify({ orgId, orgName, companyId, companyName: compName, status: "pending" })
+            );
+        } catch (logErr) {
+            console.warn("Audit log warning on register:", logErr.message);
+        }
+
+        return res.status(201).json({
+            success: true,
+            status: "PENDING_APPROVAL",
+            message: "Organization registration submitted successfully! Awaiting developer approval before you can log in.",
+            organization: { id: orgId, name: orgName, status: "pending" },
+            company: { id: companyId, name: compName }
+        });
+    } catch (error) {
+        console.error("Register Organization Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to register organization",
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     login,
     logout,
+    registerOrganization,
     updateProfileController,
     requestDeviceRegistration,
     getMyPermissions,

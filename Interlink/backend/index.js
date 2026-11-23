@@ -11,15 +11,18 @@ const { connectDB, db } = require("./config/db.js");
 
 // Routes
 const authRoutes = require("./routes/authRoutes.js");
+const companyRoutes = require("./routes/companyRoutes.js");
+const superadminRoutes = require("./routes/superadminRoutes.js");
 const adminRoutes = require("./routes/adminRoutes.js");
 const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
 const chatRoutes = require("./routes/chatRoutes.js");
-const companyRoutes = require("./routes/companyRoutes.js");
 const departmentRoutes = require("./routes/departmentRoutes.js");
+const searchRoutes = require("./routes/searchRoutes.js");
 
 // Model Initializations
+const { initCompanyModel } = require("./models/companyModel.js");
 const { initUserModel } = require("./models/userModel.js");
 const { createCompaniesTable } = require("./models/companyModel.js");
 const { createDepartmentTables } = require("./models/departmentModel.js");
@@ -80,6 +83,8 @@ const corsOptions = {
         "X-HTTP-Method-Override", 
         "x-device-id", 
         "device-id", 
+        "x-company-id", 
+        "company-id", 
         "Accept", 
         "Origin", 
         "X-Requested-With"
@@ -100,7 +105,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
     res.setHeader(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, X-HTTP-Method-Override, x-device-id, device-id, Accept, Origin, X-Requested-With"
+        "Content-Type, Authorization, X-HTTP-Method-Override, x-device-id, device-id, x-company-id, company-id, Accept, Origin, X-Requested-With"
     );
     res.setHeader("Access-Control-Max-Age", "86400");
 
@@ -520,6 +525,8 @@ io.on("connection", (socket) => {
 
 // App Endpoints
 app.use(["/api/auth", "/auth"], authRoutes);
+app.use(["/api/companies", "/companies"], companyRoutes);
+app.use(["/api/superadmin", "/superadmin"], superadminRoutes);
 app.use(["/api/admin", "/admin"], adminRoutes);
 app.use(["/api/usertypes", "/usertypes", "/api/user-types", "/user-types"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);
@@ -527,6 +534,7 @@ app.use(["/api/projects", "/projects"], projectRoutes);
 app.use(["/api/chat", "/chat"], chatRoutes);
 app.use(["/api/admin/companies", "/api/companies", "/companies"], companyRoutes);
 app.use(["/api/admin/departments", "/api/departments", "/departments"], departmentRoutes);
+app.use(["/api/search", "/search"], searchRoutes);
 
 // Global 404 handler
 app.use((req, res) => {
@@ -545,6 +553,7 @@ const startServer = async () => {
 
         console.log("Initializing database tables...");
         // Initialize tables in correct dependency order
+        await initCompanyModel();
         await initUserModel();
         await createCompaniesTable();
         await createDepartmentTables();

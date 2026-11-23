@@ -30,13 +30,35 @@ const {
 
 const fetchUsers = async (req, res) => {
     try {
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
         const includeInactive = req.query.includeInactive === 'true';
-        const whereClause = includeInactive ? '' : 'WHERE u.active = TRUE';
+        let whereClauses = [];
+        let params = [];
+
+        if (!includeInactive) {
+            whereClauses.push('u.active = TRUE');
+        }
+
+        if (!isSuper) {
+            whereClauses.push('u.organization_id = ?');
+            params.push(organizationId);
+            whereClauses.push('u.company_id = ?');
+            params.push(companyId);
+        } else if (req.headers["x-company-id"] || req.headers["company-id"]) {
+            whereClauses.push('u.company_id = ?');
+            params.push(companyId);
+        }
+
+        const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
         // Fetch users along with their active device status
         const query = `
             SELECT 
                 u.id, COALESCE(u.name, u.full_name) AS name, u.username, u.email, u.mob_no, u.role,
-                u.company_id, comp.company_name, comp.company_code,
+                u.organization_id, u.company_id, comp.company_name, comp.company_code,
                 d.status AS device_status, COALESCE(ut.type_name, ut.name) AS type_name, COALESCE(ut.type_name, ut.name) AS user_type_name,
                 u.user_type_id, d.device_id, device_verification_required, COALESCE(u.active, u.is_active, 1) AS active,
                 u.can_chat_all_departments, u.allowed_chat_departments,
@@ -45,10 +67,10 @@ const fetchUsers = async (req, res) => {
             LEFT JOIN user_devices d ON d.user_id = u.id AND d.closed_at IS NULL
             LEFT JOIN user_types ut ON u.user_type_id = ut.id
             LEFT JOIN companies comp ON u.company_id = comp.id
-            ${whereClause}
+            ${whereSQL}
             ORDER BY COALESCE(u.name, u.full_name) ASC
         `;
-        const [users] = await db.execute(query);
+        const [users] = await db.execute(query, params);
 
         // Fetch department assignments for all users
         const [deptRows] = await db.execute(`
@@ -146,6 +168,9 @@ const createUserByAdmin = async (req, res) => {
         }
         
         const hashedPassword = await bcrypt.hash(password, 10);
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : (req.body.company_id ? parseInt(req.body.company_id, 10) : (req.user?.company_id || 1));
+
         const rawDeviceVerif = deviceVerificationRequired !== undefined ? deviceVerificationRequired : req.body.device_verification_required;
         const finalDeviceVerif = rawDeviceVerif === true || rawDeviceVerif === 1 || rawDeviceVerif === '1' || rawDeviceVerif === 'true';
 
@@ -179,7 +204,9 @@ const createUserByAdmin = async (req, res) => {
             true,
             finalMustChange,
             isVendorUser,
-            finalCanChatWithVendors
+            finalCanChatWithVendors,
+            organizationId,
+            companyId
         );
 
         if (newUser && newUser.insertId) {
@@ -267,8 +294,11 @@ const createUserByAdmin = async (req, res) => {
                 date_of_join: dateOfJoin || null,
                 device_verification_required: deviceVerificationRequired,
                 role: role || 'user',
-                departments: departments || departmentId
-            }
+                departments: departments || departmentId,
+                company_id: companyId
+            },
+            null,
+            companyId
         );
 
         return res.status(201).json({ success: true, message: "User created successfully", userId: newUser.insertId });
@@ -517,7 +547,11 @@ const revokeDeviceController = async (req, res) => {
 
 const fetchAuditLogs = async (req, res) => {
     try {
-        const logs = await getAllDeviceHistory();
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
+        const logs = await getAllDeviceHistory(isSuper ? null : organizationId, isSuper ? null : companyId);
         return res.status(200).json({ success: true, logs });
     } catch (error) {
         console.log("Fetch Audit Logs Error:", error);
@@ -539,10 +573,11 @@ const fetchUserAuditLogs = async (req, res) => {
 const fetchActivityLogs = async (req, res) => {
     try {
         const isAdmin = req.user.role === "admin" || req.user.role === "super admin";
+        const companyId = req.user?.company_id || 1;
         let logs = [];
 
         if (isAdmin) {
-            logs = await getAllAuditLogs(null);
+            logs = await getAllAuditLogs(null, companyId);
         } else {
             const userId = req.user.id;
             const [userRows] = await db.execute(
@@ -560,7 +595,7 @@ const fetchActivityLogs = async (req, res) => {
                 const hasClosed = permRows.some(r => r.master_name === 'closed_inquiry_report' && r.permitted === 1);
 
                 if (hasActivity || hasClosed) {
-                    const rawLogs = await getAllAuditLogs(userId);
+                    const rawLogs = await getAllAuditLogs(userId, companyId);
                     logs = rawLogs.filter(row => {
                         const isClosedInquiry = row.master_name === 'Inquiry' && 
                                                 row.change_type === 'status_updated' && 
@@ -589,7 +624,11 @@ const fetchActivityLogs = async (req, res) => {
 
 const fetchPendingDevices = async (req, res) => {
     try {
-        const devices = await getPendingDevicesAllUsers();
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+        const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+
+        const devices = await getPendingDevicesAllUsers(isSuper ? null : organizationId, isSuper ? null : companyId);
         return res.status(200).json({ success: true, devices });
     } catch (error) {
         console.log("Fetch Pending Devices Error:", error);

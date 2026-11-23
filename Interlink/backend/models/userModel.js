@@ -12,6 +12,8 @@ const createUsersTable = async () => {
             password_hash VARCHAR(255) DEFAULT NULL,
             role VARCHAR(50) DEFAULT 'user',
             role_id INT DEFAULT NULL,
+            organization_id INT DEFAULT 1,
+            company_id INT DEFAULT 1,
             user_type_id INT DEFAULT NULL,
             mob_no VARCHAR(20) DEFAULT NULL,
             date_of_join DATE DEFAULT NULL,
@@ -82,6 +84,18 @@ const createUsersTable = async () => {
             query: 'ALTER TABLE users ADD COLUMN role_id INT DEFAULT NULL'
         },
         {
+            name: 'organization_id',
+            query: 'ALTER TABLE users ADD COLUMN organization_id INT DEFAULT 1'
+        },
+        {
+            name: 'company_id',
+            query: 'ALTER TABLE users ADD COLUMN company_id INT DEFAULT 1'
+        },
+        {
+            name: 'active',
+            query: 'ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT TRUE'
+        },
+        {
             name: 'modules',
             query: 'ALTER TABLE users ADD COLUMN modules JSON DEFAULT NULL'
         },
@@ -96,10 +110,6 @@ const createUsersTable = async () => {
         {
             name: 'allowed_chat_departments',
             query: 'ALTER TABLE users ADD COLUMN allowed_chat_departments JSON DEFAULT NULL'
-        },
-        {
-            name: 'company_id',
-            query: 'ALTER TABLE users ADD COLUMN company_id INT DEFAULT NULL'
         },
         {
             name: 'can_chat_all_companies',
@@ -190,7 +200,9 @@ const createUser = async (
     allowWhatsapp = true,
     mustChangePassword = true,
     isVendor = false,
-    canChatWithVendors = false
+    canChatWithVendors = false,
+    organizationId = 1,
+    companyId = 1
 ) => {
     const roleId = (role === 'admin' || role === 'super admin' || role === 'master_admin') ? 1 : 2;
     const displayName = name || username || "User";
@@ -198,8 +210,8 @@ const createUser = async (
 
     const query = `
         INSERT INTO users
-        (name, full_name, username, email, password, password_hash, user_type_id, mob_no, date_of_join, device_verification_required, active, is_active, role, role_id, allow_whatsapp, must_change_password, is_vendor, can_chat_with_vendors)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, full_name, username, email, password, password_hash, user_type_id, mob_no, date_of_join, device_verification_required, active, is_active, role, role_id, allow_whatsapp, must_change_password, is_vendor, can_chat_with_vendors, organization_id, company_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.execute(query, [
@@ -220,7 +232,9 @@ const createUser = async (
         allowWhatsapp ? 1 : 0,
         mustChangePassword ? 1 : 0,
         isVendor ? 1 : 0,
-        canChatWithVendors ? 1 : 0
+        canChatWithVendors ? 1 : 0,
+        organizationId || 1,
+        companyId || 1
     ]);
 
     return result;
@@ -256,8 +270,23 @@ const findUserByUsername = async (username) => {
     return u;
 };
 
-const getAllUsers = async (includeInactive = false) => {
-    const whereClause = includeInactive ? '' : 'WHERE (u.active = TRUE OR u.is_active = TRUE)';
+const getAllUsers = async (includeInactive = false, organizationId = null, companyId = null) => {
+    let whereClauses = [];
+    let params = [];
+
+    if (!includeInactive) {
+        whereClauses.push('(u.active = TRUE OR u.is_active = TRUE)');
+    }
+    if (organizationId) {
+        whereClauses.push('(u.organization_id = ? OR u.organization_id IS NULL)');
+        params.push(organizationId);
+    }
+    if (companyId) {
+        whereClauses.push('(u.company_id = ? OR u.company_id IS NULL)');
+        params.push(companyId);
+    }
+
+    const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const query = `
         SELECT 
             u.id, COALESCE(u.name, u.full_name) AS name, u.username, u.email,
@@ -267,7 +296,7 @@ const getAllUsers = async (includeInactive = false) => {
             COALESCE(u.is_vendor, 0) AS is_vendor,
             COALESCE(u.can_chat_with_vendors, 0) AS can_chat_with_vendors,
             COALESCE(u.must_change_password, 0) AS must_change_password,
-            u.company_id, comp.company_name
+            u.organization_id, u.company_id, comp.company_name
         FROM users u
         LEFT JOIN user_types ut ON u.user_type_id = ut.id
         LEFT JOIN companies comp ON u.company_id = comp.id
@@ -275,7 +304,7 @@ const getAllUsers = async (includeInactive = false) => {
         ORDER BY COALESCE(u.name, u.full_name) ASC
     `;
 
-    const [rows] = await db.execute(query);
+    const [rows] = await db.execute(query, params);
 
     // Fetch user department assignments
     const [deptRows] = await db.execute(`

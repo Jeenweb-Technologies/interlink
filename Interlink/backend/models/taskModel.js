@@ -42,6 +42,7 @@ const createTaskTables = async () => {
         CREATE TABLE IF NOT EXISTS tasks (
             id INT AUTO_INCREMENT PRIMARY KEY,
             tenant_id INT NOT NULL DEFAULT 1,
+            company_id INT NOT NULL DEFAULT 1,
             task_code VARCHAR(32) NOT NULL,
             title VARCHAR(255) NOT NULL,
             description LONGTEXT NULL,
@@ -267,6 +268,7 @@ const createTaskTables = async () => {
     `);
 
     // Ensure project duration and task completion columns exist
+    await ensureColumn("tasks", "company_id", "INT DEFAULT 1");
     await ensureColumn("tasks", "completed_at", "DATETIME NULL");
     await ensureColumn("projects", "completed_at", "DATETIME NULL");
     await ensureColumn("projects", "actual_completion_duration_days", "DECIMAL(6,1) NULL");

@@ -40,12 +40,13 @@ const createAuditLog = async (
     changeType,
     beforeData = null,
     afterData = null,
-    inProcessFranchiseId = null
+    inProcessFranchiseId = null,
+    companyId = null
 ) => {
     const query = `
         INSERT INTO audit_logs
-            (user_id, username, device_id, master_name, change_type, before_data, after_data, in_process_franchise_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, username, device_id, master_name, change_type, before_data, after_data, in_process_franchise_id, company_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.execute(query, [
@@ -56,21 +57,30 @@ const createAuditLog = async (
         changeType ?? null,
         beforeData ? JSON.stringify(beforeData) : null,
         afterData ? JSON.stringify(afterData) : null,
-        inProcessFranchiseId ?? null
+        inProcessFranchiseId ?? null,
+        companyId ?? null
     ]);
 
     return result;
 };
 
-const getAllAuditLogs = async (userId = null) => {
+const getAllAuditLogs = async (userId = null, companyId = null) => {
     let query = `
-        SELECT id, user_id, username, device_id, master_name, change_type, before_data, after_data, created_at, in_process_franchise_id
+        SELECT id, user_id, username, device_id, master_name, change_type, before_data, after_data, created_at, in_process_franchise_id, company_id
         FROM audit_logs
     `;
+    let conditions = [];
     let params = [];
     if (userId) {
-        query += ` WHERE user_id = ?`;
+        conditions.push(`user_id = ?`);
         params.push(userId);
+    }
+    if (companyId) {
+        conditions.push(`(company_id = ? OR company_id IS NULL)`);
+        params.push(companyId);
+    }
+    if (conditions.length > 0) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
     }
     query += ` ORDER BY created_at DESC`;
 

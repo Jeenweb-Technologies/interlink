@@ -1,32 +1,45 @@
 const express = require("express");
 const {
+    getCompanies,
     getCompaniesController,
+    getCompanyDetails,
     getCompanyByIdController,
+    createCompany,
     createCompanyController,
+    updateCompany,
     updateCompanyController,
+    deleteCompany,
     deleteCompanyController,
+    switchActiveCompany,
+    toggleCompanyStatus,
     toggleCompanyStatusController
 } = require("../controllers/companyController.js");
 const { verifyToken, verifyPermission } = require("../middleware/authMiddleware.js");
 
 const router = express.Router();
 
+// All company routes require authentication
+router.use(verifyToken);
+
+// Switch active company
+router.post("/switch", switchActiveCompany);
+
 // List & Read Companies
-router.get("/", verifyToken, getCompaniesController);
-router.get("/all", verifyToken, getCompaniesController);
-router.get("/list", verifyToken, getCompaniesController);
-router.get("/:id", verifyToken, getCompanyByIdController);
+router.get("/", getCompanies);
+router.get("/all", getCompanies);
+router.get("/list", getCompanies);
+router.get("/:id", getCompanyDetails);
 
 // Write / Create Company
-router.post("/", verifyToken, verifyPermission("company_master", "write"), createCompanyController);
-router.post("/create", verifyToken, verifyPermission("company_master", "write"), createCompanyController);
+router.post("/", verifyPermission("company_master", "write"), createCompany);
+router.post("/create", verifyPermission("company_master", "write"), createCompany);
 
 // Update Company
-router.put("/:id", verifyToken, verifyPermission("company_master", "update"), updateCompanyController);
-router.patch("/:id", verifyToken, verifyPermission("company_master", "update"), updateCompanyController);
-router.patch("/:id/status", verifyToken, verifyPermission("company_master", "update"), toggleCompanyStatusController);
+router.put("/:id", verifyPermission("company_master", "update"), updateCompany);
+router.patch("/:id", verifyPermission("company_master", "update"), updateCompany);
+router.patch("/:id/status", verifyPermission("company_master", "update"), toggleCompanyStatus);
 
 // Delete Company
-router.delete("/:id", verifyToken, verifyPermission("company_master", "delete"), deleteCompanyController);
+router.delete("/:id", verifyPermission("company_master", "delete"), deleteCompany);
 
 module.exports = router;

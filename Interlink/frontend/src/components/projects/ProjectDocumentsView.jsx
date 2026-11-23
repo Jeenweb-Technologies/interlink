@@ -99,7 +99,7 @@ export default function ProjectDocumentsView({ projectId }) {
                     className="px-3.5 py-2 text-xs font-bold text-white bg-[#17365D] hover:bg-[#102642] rounded-lg shadow-sm cursor-pointer flex items-center gap-1.5"
                 >
                     <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
-                    <span>+ Upload Document</span>
+                    <span>Upload Document</span>
                 </button>
             </div>
 
