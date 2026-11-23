@@ -423,12 +423,12 @@ export default function ChatSettingsMaster() {
     ], [departmentMap]);
 
     return (
-        <div className="space-y-6">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
             {/* Standard Master Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                        <i className="fa-solid fa-comments text-[#2878C7]"></i>
+                    <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
+                        <i className="fa-solid fa-comments text-blue-600"></i>
                         <span>Chat Settings & Governance</span>
                     </h1>
                     <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -437,159 +437,167 @@ export default function ChatSettingsMaster() {
                 </div>
             </div>
 
-            {/* Standard Nav Tabs */}
-            <div className="flex items-center gap-2 border-b border-slate-200">
-                <button
-                    type="button"
-                    onClick={() => setActiveTab("policies")}
-                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
-                        activeTab === "policies"
-                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
-                            : "text-slate-500 hover:text-slate-700"
-                    }`}
-                >
-                    <i className="fa-solid fa-sliders mr-2"></i>
-                    Global Policies
-                </button>
+            {/* Standard Nav Tabs matching AdminDashboard & masters */}
+            <div className="border-b border-slate-200">
+                <nav className="-mb-px flex space-x-6 sm:space-x-8">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("policies")}
+                        className={`whitespace-nowrap pb-3 px-1 border-b-2 font-semibold text-xs sm:text-sm transition-colors cursor-pointer flex items-center gap-2 ${
+                            activeTab === "policies"
+                                ? "border-[#0056cf] text-[#0056cf]"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                        }`}
+                    >
+                        <i className="fa-solid fa-sliders text-xs"></i>
+                        <span>Global Policies</span>
+                    </button>
 
-                <button
-                    type="button"
-                    onClick={() => setActiveTab("user_types")}
-                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
-                        activeTab === "user_types"
-                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
-                            : "text-slate-500 hover:text-slate-700"
-                    }`}
-                >
-                    <i className="fa-solid fa-user-shield mr-2"></i>
-                    User Type Permissions
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("user_types")}
+                        className={`whitespace-nowrap pb-3 px-1 border-b-2 font-semibold text-xs sm:text-sm transition-colors cursor-pointer flex items-center gap-2 ${
+                            activeTab === "user_types"
+                                ? "border-[#0056cf] text-[#0056cf]"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                        }`}
+                    >
+                        <i className="fa-solid fa-user-shield text-xs"></i>
+                        <span>User Type Permissions</span>
+                    </button>
 
-                <button
-                    type="button"
-                    onClick={() => setActiveTab("user_scopes")}
-                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
-                        activeTab === "user_scopes"
-                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
-                            : "text-slate-500 hover:text-slate-700"
-                    }`}
-                >
-                    <i className="fa-solid fa-building-user mr-2"></i>
-                    User Department Permissions
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab("user_scopes")}
+                        className={`whitespace-nowrap pb-3 px-1 border-b-2 font-semibold text-xs sm:text-sm transition-colors cursor-pointer flex items-center gap-2 ${
+                            activeTab === "user_scopes"
+                                ? "border-[#0056cf] text-[#0056cf]"
+                                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                        }`}
+                    >
+                        <i className="fa-solid fa-building-user text-xs"></i>
+                        <span>User Department Permissions</span>
+                    </button>
+                </nav>
             </div>
 
             {/* Tab 1: Global Governance Policies */}
             {activeTab === "policies" && (
-                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-6">
+                <div className="bg-white border border-slate-200 rounded-xl p-5 sm:p-6 shadow-sm space-y-5">
                     <div>
-                        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Company-Wide Chat Governance</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Control global communication rules and sharing parameters for all workspace users.</p>
+                        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Company-Wide Chat Governance</h2>
+                        <p className="text-xs text-slate-500 mt-1">Control global communication rules and sharing parameters for all workspace users.</p>
                     </div>
 
-                    <form onSubmit={handleSaveSettings} className="space-y-5">
+                    <form onSubmit={handleSaveSettings} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Allow Direct Messaging */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
-                                <div>
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
                                     <h3 className="text-xs font-bold text-slate-800">1-on-1 Direct Messaging</h3>
-                                    <p className="text-xs text-slate-500 mt-0.5">Allow employees to initiate private direct conversations.</p>
+                                    <p className="text-xs text-slate-500">Allow employees to initiate private direct conversations.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
+                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
                                     <input
                                         type="checkbox"
                                         checked={settings.allow_direct_messaging}
                                         onChange={(e) => setSettings({ ...settings, allow_direct_messaging: e.target.checked })}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
                                 </label>
                             </div>
 
                             {/* Allow File Sharing */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
-                                <div>
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
                                     <h3 className="text-xs font-bold text-slate-800">File & Document Attachments</h3>
-                                    <p className="text-xs text-slate-500 mt-0.5">Permit sharing documents, images, and audio files in chat.</p>
+                                    <p className="text-xs text-slate-500">Permit sharing documents, images, and audio files in chat.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
+                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
                                     <input
                                         type="checkbox"
                                         checked={settings.allow_file_sharing}
                                         onChange={(e) => setSettings({ ...settings, allow_file_sharing: e.target.checked })}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
                                 </label>
                             </div>
 
                             {/* Group Creation Policy */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
-                                <label className="block text-xs font-bold text-slate-800 mb-1">Group Creation Policy</label>
-                                <p className="text-xs text-slate-500 mb-2">Who is authorized to create project and team group channels.</p>
-                                <select
-                                    value={settings.allow_group_creation}
-                                    onChange={(e) => setSettings({ ...settings, allow_group_creation: e.target.value })}
-                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
-                                >
-                                    <option value="ALL">All Active Employees</option>
-                                    <option value="ADMIN_ONLY">Administrators Only</option>
-                                    <option value="DISABLED">Completely Disabled</option>
-                                </select>
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-1.5">
+                                <label className="block text-xs font-bold text-slate-800">Group Creation Policy</label>
+                                <p className="text-xs text-slate-500">Who is authorized to create project and team group channels.</p>
+                                <div className="pt-1">
+                                    <select
+                                        value={settings.allow_group_creation}
+                                        onChange={(e) => setSettings({ ...settings, allow_group_creation: e.target.value })}
+                                        className="w-full text-xs rounded-lg border border-slate-300 bg-white py-2 px-3 text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0056cf] focus:border-[#0056cf]"
+                                    >
+                                        <option value="ALL">All Active Employees</option>
+                                        <option value="ADMIN_ONLY">Administrators Only</option>
+                                        <option value="DISABLED">Completely Disabled</option>
+                                    </select>
+                                </div>
                             </div>
 
                             {/* Broadcast Creation Policy */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
-                                <label className="block text-xs font-bold text-slate-800 mb-1">Broadcast Channel Creation</label>
-                                <p className="text-xs text-slate-500 mb-2">Who is authorized to post corporate-wide announcements.</p>
-                                <select
-                                    value={settings.allow_broadcast_creation}
-                                    onChange={(e) => setSettings({ ...settings, allow_broadcast_creation: e.target.value })}
-                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
-                                >
-                                    <option value="ADMIN_ONLY">Administrators Only (Recommended)</option>
-                                    <option value="ALL">All Active Employees</option>
-                                    <option value="DISABLED">Completely Disabled</option>
-                                </select>
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-1.5">
+                                <label className="block text-xs font-bold text-slate-800">Broadcast Channel Creation</label>
+                                <p className="text-xs text-slate-500">Who is authorized to post corporate-wide announcements.</p>
+                                <div className="pt-1">
+                                    <select
+                                        value={settings.allow_broadcast_creation}
+                                        onChange={(e) => setSettings({ ...settings, allow_broadcast_creation: e.target.value })}
+                                        className="w-full text-xs rounded-lg border border-slate-300 bg-white py-2 px-3 text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0056cf] focus:border-[#0056cf]"
+                                    >
+                                        <option value="ADMIN_ONLY">Administrators Only (Recommended)</option>
+                                        <option value="ALL">All Active Employees</option>
+                                        <option value="DISABLED">Completely Disabled</option>
+                                    </select>
+                                </div>
                             </div>
 
                             {/* Max File Size */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
-                                <label className="block text-xs font-bold text-slate-800 mb-1">Maximum Attachment Size (MB)</label>
-                                <p className="text-xs text-slate-500 mb-2">Limit individual file upload size per message.</p>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max="100"
-                                    value={settings.max_file_size_mb}
-                                    onChange={(e) => setSettings({ ...settings, max_file_size_mb: parseInt(e.target.value, 10) || 10 })}
-                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
-                                />
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-1.5">
+                                <label className="block text-xs font-bold text-slate-800">Maximum Attachment Size (MB)</label>
+                                <p className="text-xs text-slate-500">Limit individual file upload size per message.</p>
+                                <div className="pt-1">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        value={settings.max_file_size_mb}
+                                        onChange={(e) => setSettings({ ...settings, max_file_size_mb: parseInt(e.target.value, 10) || 10 })}
+                                        className="w-full text-xs rounded-lg border border-slate-300 bg-white py-2 px-3 text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0056cf] focus:border-[#0056cf]"
+                                    />
+                                </div>
                             </div>
 
                             {/* Read Receipts */}
-                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
-                                <div>
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
                                     <h3 className="text-xs font-bold text-slate-800">Read Receipts & Double Checks</h3>
-                                    <p className="text-xs text-slate-500 mt-0.5">Show read status checkmarks for sent messages.</p>
+                                    <p className="text-xs text-slate-500">Show read status checkmarks for sent messages.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
+                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
                                     <input
                                         type="checkbox"
                                         checked={settings.read_receipts_enabled}
                                         onChange={(e) => setSettings({ ...settings, read_receipts_enabled: e.target.checked })}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
                                 </label>
                             </div>
                         </div>
 
-                        <div className="flex justify-end pt-3">
+                        <div className="flex justify-end pt-2">
                             <button
                                 type="submit"
                                 disabled={savingSettings}
-                                className="px-4 py-2 rounded-lg text-xs font-medium bg-[#17365D] text-white hover:bg-[#1f477a] transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#17365D] hover:bg-[#102642] text-white transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                             >
                                 {savingSettings ? (
                                     <>
@@ -610,13 +618,10 @@ export default function ChatSettingsMaster() {
 
             {/* Tab 2: User Type Permissions Matrix */}
             {activeTab === "user_types" && (
-                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-4">
-                    <div>
-                        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Role & User Type Permissions</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Control which features are accessible according to user roles.</p>
-                    </div>
-
+                <div className="space-y-4">
                     <DataTable
+                        tableId="chat_user_types_matrix"
+                        title="Role & User Type Permissions"
                         data={userTypePerms}
                         columns={permColumns}
                         loading={loading}
@@ -627,17 +632,10 @@ export default function ChatSettingsMaster() {
 
             {/* Tab 3: User Chat & Department Communication Scope */}
             {activeTab === "user_scopes" && (
-                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">User Chat & Department Permissions</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                                By default, users can only chat with colleagues in their own department. Configure cross-department or company-wide scope per user.
-                            </p>
-                        </div>
-                    </div>
-
+                <div className="space-y-4">
                     <DataTable
+                        tableId="chat_user_department_scopes"
+                        title="User Chat & Department Permissions"
                         data={userScopes}
                         columns={userScopeColumns}
                         loading={loading}
