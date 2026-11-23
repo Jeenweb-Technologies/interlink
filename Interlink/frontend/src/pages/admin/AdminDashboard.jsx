@@ -18,6 +18,8 @@ export default function AdminDashboard() {
     const canReadUsers = hasPermission("user_master", "read");
     const canReadDevices = hasPermission("device_approval", "read");
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
+    const activeCompanyId = localStorage.getItem("active_company_id") || user.company_id || "1";
+    const activeCompanyName = user.companies?.find(c => String(c.id) === String(activeCompanyId))?.name || "Active Company";
 
     const [activeTab, setActiveTab] = useState("users");
     const [users, setUsers] = useState([]);
@@ -396,7 +398,7 @@ export default function AdminDashboard() {
                     <div className="flex-1 flex flex-col mb-8">
                         <DataTable
                             tableId="admin_user_master"
-                            title="User Master"
+                            title={`User Master — ${activeCompanyName}`}
                             data={users}
                             columns={userColumns}
                             searchPlaceholder="Search users by name or email..."

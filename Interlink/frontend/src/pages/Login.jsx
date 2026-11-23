@@ -42,7 +42,15 @@ export default function Login() {
             navigate("/user/home");
 
         } catch (error) {
-            if (error.response?.data?.status === "DEVICE_MISMATCH") {
+            if (error.response?.data?.status === "ORG_PENDING_APPROVAL") {
+                navigate("/org-pending", {
+                    state: {
+                        orgName: form.username,
+                        email: form.username
+                    }
+                });
+                return;
+            } else if (error.response?.data?.status === "DEVICE_MISMATCH") {
                 toast.error("Unauthorized device. Contact admin.");
             } else {
                 toast.error(error.response?.data?.message || (error.code === "ERR_NETWORK" ? "Cannot connect to server. Check backend." : error.message) || "Login failed");

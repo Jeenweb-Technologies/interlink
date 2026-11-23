@@ -55,7 +55,17 @@ export default function RegisterOrg() {
             const response = await registerOrganization(payload);
 
             if (response.data.success) {
-                toast.success(response.data.message || "Registration successful!");
+                toast.success(response.data.message || "Registration submitted!");
+
+                if (response.data.status === "PENDING_APPROVAL") {
+                    navigate("/org-pending", {
+                        state: {
+                            orgName: form.orgName.trim(),
+                            email: form.email.trim()
+                        }
+                    });
+                    return;
+                }
 
                 // If token returned, log them in automatically
                 if (response.data.token && response.data.user) {

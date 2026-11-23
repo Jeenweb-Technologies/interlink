@@ -37,6 +37,7 @@ const verifyToken = async (req, res, next) => {
 
         // Default fallbacks
         req.user.organization_id = req.user.organization_id || 1;
+        req.user.tenant_id = req.user.organization_id;
         req.user.company_id = req.user.company_id || 1;
 
         // Allow frontend header override for switching companies dynamically
@@ -194,4 +195,14 @@ const verifyReportPermission = async (req, res, next) => {
     }
 };
 
-module.exports = { verifyToken, verifyAdmin, verifyPermission, verifyReportPermission };
+const verifySuperAdmin = (req, res, next) => {
+    if (!req.user || (req.user.role !== "super admin" && req.user.role !== "super_admin" && req.user.role !== "developer")) {
+        return res.status(403).json({
+            success: false,
+            message: "Access Denied. Developer / Superadmin access only."
+        });
+    }
+    next();
+};
+
+module.exports = { verifyToken, verifyAdmin, verifyPermission, verifyReportPermission, verifySuperAdmin };

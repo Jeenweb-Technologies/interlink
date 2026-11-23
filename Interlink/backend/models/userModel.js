@@ -152,19 +152,35 @@ const findUserByUsername = async (username) => {
     return rows[0];
 };
 
-const getAllUsers = async (includeInactive = false) => {
-    const whereClause = includeInactive ? '' : 'WHERE u.active = TRUE';
+const getAllUsers = async (includeInactive = false, organizationId = null, companyId = null) => {
+    let whereClauses = [];
+    let params = [];
+
+    if (!includeInactive) {
+        whereClauses.push('u.active = TRUE');
+    }
+    if (organizationId) {
+        whereClauses.push('u.organization_id = ?');
+        params.push(organizationId);
+    }
+    if (companyId) {
+        whereClauses.push('u.company_id = ?');
+        params.push(companyId);
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const query = `
         SELECT 
             u.id, u.name, u.username, u.email,
             u.user_type_id, u.mob_no, u.date_of_join, u.device_verification_required,
-            ut.type_name AS user_type_name, u.active
+            ut.type_name AS user_type_name, u.active, u.organization_id, u.company_id
         FROM users u
         LEFT JOIN user_types ut ON u.user_type_id = ut.id
-        ${whereClause}
+        ${whereSQL}
+        ORDER BY u.id DESC
     `;
 
-    const [rows] = await db.execute(query);
+    const [rows] = await db.execute(query, params);
     return rows;
 };
 
