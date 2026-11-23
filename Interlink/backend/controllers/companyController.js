@@ -1,219 +1,71 @@
 const db = require("../config/db.js");
 const {
-    getCompanies: getCompaniesModel,
-    getCompanyById: getCompanyByIdModel,
+    findCompaniesByOrgId,
     findCompanyById,
-    createCompany: createCompanyModel,
-    updateCompany: updateCompanyModel,
-    deleteCompany: deleteCompanyModel,
-    toggleCompanyStatus: toggleCompanyStatusModel,
-    findCompaniesByOrgId
+    createCompanyRecord
 } = require("../models/companyModel.js");
-const { createAuditLog } = require("../models/auditLogModel.js");
-const { ensureCompanyBroadcastForCompany } = require("../models/conversationModel.js");
 
-// 1. Get all companies
+// 1. Get all companies under the authenticated user's organization
 const getCompanies = async (req, res) => {
     try {
         const organizationId = req.user?.organization_id || 1;
-        const includeInactive = req.query.includeInactive === "true" || req.query.includeInactive === true || req.query.includeInactive === undefined;
-        const search = req.query.search || "";
-
-        const companies = await getCompaniesModel({
-            includeInactive,
-            search,
-            organizationId
-        });
+        const companies = await findCompaniesByOrgId(organizationId);
 
         return res.status(200).json({
             success: true,
-            companies,
-            data: companies
+            companies
         });
     } catch (error) {
-        console.error("getCompanies error:", error);
-        return res.status(500).json({ success: false, message: "Failed to fetch companies", error: error.message });
+        console.error("Error in getCompanies:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch companies",
+            error: error.message
+        });
     }
 };
 
-const getCompaniesController = getCompanies;
-
-// 2. Get single company details
-const getCompanyDetails = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const company = await getCompanyByIdModel(id);
-        if (!company) {
-            return res.status(404).json({ success: false, message: "Company not found" });
-        }
-        return res.status(200).json({
-            success: true,
-            company,
-            data: company
-        });
-    } catch (error) {
-        console.error("getCompanyDetails error:", error);
-        return res.status(500).json({ success: false, message: "Failed to fetch company details", error: error.message });
-    }
-};
-
-const getCompanyByIdController = getCompanyDetails;
-
-// 3. Create company
+// 2. Create a new company under the user's organization
 const createCompany = async (req, res) => {
     try {
+        const { name, email, phone } = req.body;
         const organizationId = req.user?.organization_id || 1;
-        const body = req.body || {};
-        const name = body.name || body.company_name;
 
-        if (!name || !name.trim()) {
+        if (!name || name.trim() === "") {
             return res.status(400).json({
                 success: false,
                 message: "Company name is required"
             });
         }
 
-        const newCompany = await createCompanyModel({
-            ...body,
-            organization_id: organizationId,
-            company_name: name.trim(),
-            name: name.trim(),
-            adminId: req.user?.id || 1
-        });
-
-        // Broadcast channel
-        let broadcastConvId = null;
-        try {
-            if (typeof ensureCompanyBroadcastForCompany === "function") {
-                const bc = await ensureCompanyBroadcastForCompany(newCompany.id, newCompany.company_name, req.user?.id || 1);
-                broadcastConvId = bc?.id || null;
-            }
-        } catch (_) {}
-
-        const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
-        try {
-            await createAuditLog(
-                req.user?.id,
-                req.user?.name || req.user?.username || 'Unknown',
-                adminDeviceId,
-                'Company Master',
-                'created',
-                null,
-                { id: newCompany.id, company_name: newCompany.company_name, company_code: newCompany.company_code, broadcast_channel_id: broadcastConvId }
-            );
-        } catch (_) {}
+        const newCompany = await createCompanyRecord(
+            organizationId,
+            name.trim(),
+            email || null,
+            phone || null
+        );
 
         return res.status(201).json({
             success: true,
-            message: `Company "${newCompany.company_name}" created successfully`,
-            company: { ...newCompany, broadcast_channel_id: broadcastConvId },
-            data: { ...newCompany, broadcast_channel_id: broadcastConvId }
+            message: "Company created successfully",
+            company: newCompany
         });
     } catch (error) {
-        console.error("createCompany error:", error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(400).json({ success: false, message: "A company with this code or name already exists." });
-        }
-        return res.status(500).json({ success: false, message: "Failed to create company", error: error.message });
+        console.error("Error in createCompany:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create company",
+            error: error.message
+        });
     }
 };
 
-const createCompanyController = createCompany;
-
-// 4. Update company
-const updateCompany = async (req, res) => {
+// 3. Get single company details
+const getCompanyDetails = async (req, res) => {
     try {
         const { id } = req.params;
-        const body = req.body || {};
-        const existing = await findCompanyById(id);
-        if (!existing) {
-            return res.status(404).json({ success: false, message: "Company not found" });
-        }
+        const company = await findCompanyById(id);
 
-        const updated = await updateCompanyModel(id, body);
-
-        const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
-        try {
-            await createAuditLog(
-                req.user?.id,
-                req.user?.name || req.user?.username || 'Unknown',
-                adminDeviceId,
-                'Company Master',
-                'updated',
-                { id: existing.id, company_name: existing.company_name || existing.name },
-                { id: updated.id, company_name: updated.company_name || updated.name }
-            );
-        } catch (_) {}
-
-        return res.status(200).json({
-            success: true,
-            message: "Company updated successfully",
-            company: updated,
-            data: updated
-        });
-    } catch (error) {
-        console.error("updateCompany error:", error);
-        return res.status(500).json({ success: false, message: "Failed to update company", error: error.message });
-    }
-};
-
-const updateCompanyController = updateCompany;
-
-// 5. Delete company
-const deleteCompany = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const existing = await findCompanyById(id);
-        if (!existing) {
-            return res.status(404).json({ success: false, message: "Company not found" });
-        }
-
-        if (existing.is_main) {
-            return res.status(400).json({ success: false, message: "Primary / main corporate entity cannot be deleted." });
-        }
-
-        await deleteCompanyModel(id);
-
-        const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
-        try {
-            await createAuditLog(
-                req.user?.id,
-                req.user?.name || req.user?.username || 'Unknown',
-                adminDeviceId,
-                'Company Master',
-                'deleted',
-                { id: existing.id, company_name: existing.company_name || existing.name },
-                null
-            );
-        } catch (_) {}
-
-        return res.status(200).json({
-            success: true,
-            message: "Company deleted successfully"
-        });
-    } catch (error) {
-        console.error("deleteCompany error:", error);
-        return res.status(500).json({ success: false, message: "Failed to delete company", error: error.message });
-    }
-};
-
-const deleteCompanyController = deleteCompany;
-
-// 6. Switch active company
-const switchActiveCompany = async (req, res) => {
-    try {
-        const userId = req.user?.id;
-        const organizationId = req.user?.organization_id || 1;
-        const { companyId } = req.body;
-
-        if (!companyId) {
-            return res.status(400).json({
-                success: false,
-                message: "Company ID is required"
-            });
-        }
-
-        const company = await findCompanyById(companyId);
         if (!company) {
             return res.status(404).json({
                 success: false,
@@ -221,13 +73,41 @@ const switchActiveCompany = async (req, res) => {
             });
         }
 
-        if (req.user?.role !== "super_admin" && req.user?.role !== "super admin" && req.user?.role !== "developer") {
-            if (company.organization_id && company.organization_id !== organizationId) {
-                return res.status(403).json({
-                    success: false,
-                    message: "You do not have access to this company"
-                });
-            }
+        return res.status(200).json({
+            success: true,
+            company
+        });
+    } catch (error) {
+        console.error("Error in getCompanyDetails:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch company details",
+            error: error.message
+        });
+    }
+};
+
+// 4. Switch active company for the logged-in user
+const switchActiveCompany = async (req, res) => {
+    try {
+        const { companyId } = req.body;
+        const userId = req.user?.id;
+        const organizationId = req.user?.organization_id || 1;
+
+        if (!companyId) {
+            return res.status(400).json({
+                success: false,
+                message: "companyId is required"
+            });
+        }
+
+        // Verify company exists under this org
+        const company = await findCompanyById(companyId);
+        if (!company || company.organization_id !== organizationId) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have access to this company"
+            });
         }
 
         await db.execute(
@@ -237,7 +117,7 @@ const switchActiveCompany = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Switched active company to ${company.company_name || company.name}`,
+            message: `Switched active company to ${company.name}`,
             activeCompany: company
         });
     } catch (error) {
@@ -250,51 +130,103 @@ const switchActiveCompany = async (req, res) => {
     }
 };
 
-// 7. Toggle company status
-const toggleCompanyStatus = async (req, res) => {
+// 5. Update company details
+const updateCompany = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
-        const result = await toggleCompanyStatusModel(id, status);
+        const { name, email, phone } = req.body;
+        const organizationId = req.user?.organization_id || 1;
 
-        const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
-        try {
-            await createAuditLog(
-                req.user?.id,
-                req.user?.name || req.user?.username || 'Unknown',
-                adminDeviceId,
-                'Company Master',
-                'status_toggled',
-                null,
-                { id, status: result.status }
-            );
-        } catch (_) {}
+        if (!name || name.trim() === "") {
+            return res.status(400).json({
+                success: false,
+                message: "Company name is required"
+            });
+        }
+
+        // Verify company exists and belongs to this organization
+        const company = await findCompanyById(id);
+        if (!company || company.organization_id !== organizationId) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have access to this company"
+            });
+        }
+
+        await db.execute(
+            "UPDATE companies SET name = ?, email = ?, phone = ? WHERE id = ? AND organization_id = ?",
+            [name.trim(), email ? email.trim() : null, phone ? phone.trim() : null, id, organizationId]
+        );
 
         return res.status(200).json({
             success: true,
-            message: `Company status updated to ${result.status}`,
-            data: result
+            message: "Company updated successfully",
+            company: {
+                id: parseInt(id, 10),
+                organization_id: organizationId,
+                name: name.trim(),
+                email: email ? email.trim() : null,
+                phone: phone ? phone.trim() : null
+            }
         });
     } catch (error) {
-        console.error("toggleCompanyStatus error:", error);
-        return res.status(500).json({ success: false, message: "Failed to update company status" });
+        console.error("Error in updateCompany:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update company",
+            error: error.message
+        });
     }
 };
 
-const toggleCompanyStatusController = toggleCompanyStatus;
+// 6. Delete company
+const deleteCompany = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const organizationId = req.user?.organization_id || 1;
+
+        // Ensure at least one company remains
+        const companies = await findCompaniesByOrgId(organizationId);
+        if (companies.length <= 1) {
+            return res.status(400).json({
+                success: false,
+                message: "You cannot delete the only remaining company in your organization."
+            });
+        }
+
+        // Verify company belongs to this organization
+        const company = await findCompanyById(id);
+        if (!company || company.organization_id !== organizationId) {
+            return res.status(403).json({
+                success: false,
+                message: "Company not found or access denied"
+            });
+        }
+
+        await db.execute(
+            "DELETE FROM companies WHERE id = ? AND organization_id = ?",
+            [id, organizationId]
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Company deleted successfully"
+        });
+    } catch (error) {
+        console.error("Error in deleteCompany:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete company",
+            error: error.message
+        });
+    }
+};
 
 module.exports = {
     getCompanies,
-    getCompaniesController,
-    getCompanyDetails,
-    getCompanyByIdController,
     createCompany,
-    createCompanyController,
-    updateCompany,
-    updateCompanyController,
-    deleteCompany,
-    deleteCompanyController,
+    getCompanyDetails,
     switchActiveCompany,
-    toggleCompanyStatus,
-    toggleCompanyStatusController
+    updateCompany,
+    deleteCompany
 };

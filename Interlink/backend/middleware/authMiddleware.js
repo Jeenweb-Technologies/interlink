@@ -2,23 +2,16 @@ const jwt = require("jsonwebtoken");
 const db = require("../config/db.js");
 
 const verifyToken = async (req, res, next) => {
-    let token = null;
     const authHeader = req.headers.authorization;
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-        token = authHeader.split(" ")[1];
-    } else if (req.query && req.query.token) {
-        token = req.query.token;
-    } else if (req.cookies && req.cookies.token) {
-        token = req.cookies.token;
-    }
-
-    if (!token || token === "null" || token === "undefined" || !token.trim()) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
             success: false,
             message: "No token provided. Unauthorized."
         });
     }
+
+    const token = authHeader.split(" ")[1];
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -56,12 +49,6 @@ const verifyToken = async (req, res, next) => {
             }
         }
 
-        if (req.user?.id) {
-            const activeMap = req.app.get("userLastSeen") || new Map();
-            activeMap.set(String(req.user.id), Date.now());
-            req.app.set("userLastSeen", activeMap);
-        }
-
         next();
     } catch (error) {
         return res.status(403).json({
@@ -71,19 +58,8 @@ const verifyToken = async (req, res, next) => {
     }
 };
 
-const isUserAdmin = (user) => {
-    if (!user) return false;
-    const role = String(user.role || '').toLowerCase().trim();
-    return (
-        ['admin', 'master_admin', 'super admin', 'administrator', 'master'].includes(role) ||
-        user.username === 'admin' ||
-        Number(user.user_type_id) === 1 ||
-        Number(user.role_id) === 1
-    );
-};
-
 const verifyAdmin = (req, res, next) => {
-    if (!req.user || !isUserAdmin(req.user)) {
+    if (!req.user || (req.user.role !== "admin" && req.user.role !== "super admin")) {
         return res.status(403).json({
             success: false,
             message: "Access denied. Admin only."
@@ -103,22 +79,11 @@ const verifyPermission = (masterName, action) => {
             }
 
             // Admins bypass all permission checks
-            if (isUserAdmin(req.user)) {
+            if (req.user.role === "admin" || req.user.role === "super admin") {
                 return next();
             }
 
             const userId = req.user.id;
-
-            // Specific check for WhatsApp permission (checks users table allow_whatsapp flag)
-            if (masterName === 'whatsapp') {
-                const [uRows] = await db.execute("SELECT allow_whatsapp FROM users WHERE id = ?", [userId]);
-                if (uRows.length && (uRows[0].allow_whatsapp === 0 || uRows[0].allow_whatsapp === false)) {
-                    return res.status(403).json({
-                        success: false,
-                        message: "Access Denied. WhatsApp feature has been disabled for your account."
-                    });
-                }
-            }
 
             // Get user's user_type_id
             const [userRows] = await db.execute(
@@ -127,12 +92,6 @@ const verifyPermission = (masterName, action) => {
             );
 
             if (userRows.length === 0 || userRows[0].user_type_id === null) {
-                // By default, chat communications are permitted for all registered coworkers unless explicitly restricted by a user_type
-                const defaultAllowedChatMasters = ['chat', 'document_view', 'document_upload', 'camera_access', 'document_download', 'group_create', 'poll_create'];
-                if (defaultAllowedChatMasters.includes(masterName)) {
-                    return next();
-                }
-
                 return res.status(403).json({
                     success: false,
                     message: `Access Denied. You do not have permission for ${masterName} (${action}).`
@@ -161,19 +120,7 @@ const verifyPermission = (masterName, action) => {
             `;
             const [permRows] = await db.execute(query, [userTypeId, masterName]);
 
-            if (permRows.length > 0) {
-                if (permRows[0].permitted === 1) {
-                    return next();
-                } else {
-                    return res.status(403).json({
-                        success: false,
-                        message: `Access Denied. Insufficient permissions for ${masterName} (${action}).`
-                    });
-                }
-            }
-
-            // Default permit for core chat if not explicitly restricted
-            if (masterName === 'chat') {
+            if (permRows.length > 0 && permRows[0].permitted === 1) {
                 return next();
             }
 
@@ -201,7 +148,7 @@ const verifyReportPermission = async (req, res, next) => {
         }
 
         // Admin/Super Admin bypass all permission checks
-        if (isUserAdmin(req.user)) {
+        if (req.user.role === "admin" || req.user.role === "super admin") {
             return next();
         }
 
@@ -248,66 +195,6 @@ const verifyReportPermission = async (req, res, next) => {
     }
 };
 
-const verifyAnyPermission = (permissions = []) => {
-    return async (req, res, next) => {
-        try {
-            if (!req.user) {
-                return res.status(401).json({
-                    success: false,
-                    message: "Unauthorized. No user information."
-                });
-            }
-
-            // Admins bypass all permission checks
-            if (isUserAdmin(req.user)) {
-                return next();
-            }
-
-            const userId = req.user.id;
-            const [userRows] = await db.execute(
-                "SELECT user_type_id FROM users WHERE id = ?",
-                [userId]
-            );
-
-            if (userRows.length === 0 || userRows[0].user_type_id === null) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Access Denied. No user role assigned."
-                });
-            }
-
-            const userTypeId = userRows[0].user_type_id;
-
-            for (const perm of permissions) {
-                const actionCol = perm.action === "write" ? "can_write"
-                    : perm.action === "update" ? "can_update"
-                    : perm.action === "delete" ? "can_delete"
-                    : "can_read";
-
-                const [permRows] = await db.execute(
-                    `SELECT ${actionCol} AS permitted FROM user_type_permissions WHERE user_type_id = ? AND master_name = ?`,
-                    [userTypeId, perm.master]
-                );
-
-                if (permRows.length > 0 && Number(permRows[0].permitted) === 1) {
-                    return next();
-                }
-            }
-
-            return res.status(403).json({
-                success: false,
-                message: "Access Denied. You do not have sufficient permissions."
-            });
-        } catch (error) {
-            console.error("verifyAnyPermission error:", error);
-            return res.status(500).json({
-                success: false,
-                message: "Internal server error verifying permissions."
-            });
-        }
-    };
-};
-
 const verifySuperAdmin = (req, res, next) => {
     if (!req.user || (req.user.role !== "super admin" && req.user.role !== "super_admin" && req.user.role !== "developer")) {
         return res.status(403).json({
@@ -318,4 +205,4 @@ const verifySuperAdmin = (req, res, next) => {
     next();
 };
 
-module.exports = { isUserAdmin, verifyToken, verifyAdmin, verifyPermission, verifyReportPermission, verifyAnyPermission, verifySuperAdmin };
+module.exports = { verifyToken, verifyAdmin, verifyPermission, verifyReportPermission, verifySuperAdmin };
