@@ -151,6 +151,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         { id: "p-dash", title: "User Dashboard", category: "Navigation", path: "/user/home", icon: "fa-solid fa-gauge-high text-blue-500", visible: true },
         { id: "p-proj", title: "Projects & Portfolio", category: "Navigation", path: "/projects", icon: "fa-solid fa-diagram-project text-indigo-500", visible: true },
         { id: "p-task", title: "Task Management", category: "Navigation", path: "/tasks", icon: "fa-solid fa-list-check text-emerald-500", visible: true },
+        { id: "p-chat", title: "Chat & Communication", category: "Navigation", path: "/chat", icon: "fa-solid fa-comments text-cyan-500", visible: true },
         { id: "p-comp", title: "Company Master", category: "Masters", path: "/admin/companies", icon: "fa-solid fa-building text-blue-500", visible: isAdmin },
         { id: "p-users", title: "User Master Directory", category: "Masters", path: "/admin/dashboard", icon: "fa-solid fa-users-gear text-purple-500", visible: isAdmin || hasPermission("user_master", "read") },
         { id: "p-ucreate", title: "Create New User", category: "Masters", path: "/admin/users/create", icon: "fa-solid fa-user-plus text-sky-500", visible: isAdmin || hasPermission("user_master", "write") },
@@ -188,10 +189,13 @@ export function TopBar({ onMenuClick = () => {} }) {
 
     const getPageTitle = (path) => {
         if (path === "/user/home") return { title: "User Dashboard", category: "Overview" };
+        if (path.startsWith("/chat")) return { title: "Chat & Communication", category: "Collaboration" };
         if (path.startsWith("/projects")) return { title: "Projects & Portfolio", category: "Governance" };
         if (path.startsWith("/tasks")) return { title: "Task Management", category: "Productivity" };
         if (path === "/admin/dashboard") return { title: "User Master", category: "Masters" };
         if (path === "/admin/companies") return { title: "Company Master", category: "Masters" };
+        if (path === "/admin/departments") return { title: "Department Master", category: "Masters" };
+        if (path === "/admin/chat-settings") return { title: "Chat Settings Master", category: "Masters" };
         if (path === "/admin/users/create") return { title: "Create User", category: "Masters" };
         if (path === "/admin/user-types") return { title: "User Types Master", category: "Masters" };
         if (path === "/admin/user-types/create") return { title: "Create User Type", category: "Masters" };
@@ -925,6 +929,20 @@ export default function Sidebar({
             visible: isAdmin
         },
         {
+            name: "Department Master",
+            path: "/admin/departments",
+            matchPaths: ["/admin/departments"],
+            icon: "fa-solid fa-sitemap",
+            visible: canReadUsers
+        },
+        {
+            name: "Chat Settings Master",
+            path: "/admin/chat-settings",
+            matchPaths: ["/admin/chat-settings"],
+            icon: "fa-solid fa-sliders",
+            visible: isAdmin
+        },
+        {
             name: "User Types Master",
             path: "/admin/user-types",
             matchPaths: ["/admin/user-types", "/admin/user-types/create"],
@@ -1097,6 +1115,25 @@ export default function Sidebar({
                                 </span>
                                 {!isCollapsed && (
                                     <span className="truncate">Task Management</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/chat")}
+                                title={isCollapsed ? "Chat & Communication" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/chat")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/chat") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                }`}>
+                                    <i className="fa-solid fa-comments"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Chat &amp; Communication</span>
                                 )}
                             </button>
                         </div>
@@ -1321,4 +1358,5 @@ export function DashboardLayout() {
         </div>
     );
 }
+
 

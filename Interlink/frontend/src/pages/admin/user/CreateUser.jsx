@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { createUserByAdmin } from "../../../api/authApi";
 import { getUserTypes } from "../../../api/userTypeMasterApi";
+import { getDepartments } from "../../../api/departmentApi";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
 export default function CreateUser() {
     const navigate = useNavigate();
     const [userTypes, setUserTypes] = useState([]);
+    const [departments, setDepartments] = useState([]);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const activeCompanyId = localStorage.getItem("active_company_id") || user.company_id || "1";
     const activeCompanyName = user.companies?.find(c => String(c.id) === String(activeCompanyId))?.name || "Active Workspace";
@@ -17,6 +19,7 @@ export default function CreateUser() {
         email: "",
         password: "",
         userTypeId: "",
+        departmentId: "",
         mobNo: "",
         dateOfJoin: "",
         deviceVerificationRequired: true,
@@ -34,9 +37,21 @@ export default function CreateUser() {
         }
     };
 
+    const loadDepartments = async () => {
+        try {
+            const res = await getDepartments(false, activeCompanyId);
+            if (res.data?.success && Array.isArray(res.data.departments)) {
+                setDepartments(res.data.departments);
+            }
+        } catch (error) {
+            console.error("Error loading departments:", error);
+        }
+    };
+
     useEffect(() => {
         loadUserTypes();
-    }, []);
+        loadDepartments();
+    }, [activeCompanyId]);
 
     const handleCreateUser = async (e) => {
         e.preventDefault();
@@ -44,6 +59,7 @@ export default function CreateUser() {
         try {
             await createUserByAdmin({
                 ...newUserForm,
+                departmentId: newUserForm.departmentId ? parseInt(newUserForm.departmentId, 10) : null,
                 companyId: activeCompanyId
             });
             toast.success(`User created successfully for ${activeCompanyName}`);
@@ -53,6 +69,7 @@ export default function CreateUser() {
                 email: "",
                 password: "",
                 userTypeId: "",
+                departmentId: "",
                 mobNo: "",
                 dateOfJoin: "",
                 deviceVerificationRequired: true,
@@ -152,6 +169,21 @@ export default function CreateUser() {
                                     {userTypes.map((type) => (
                                         <option key={type.id} value={type.id}>
                                             {type.type_name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
+                                <select
+                                    value={newUserForm.departmentId}
+                                    onChange={(e) => setNewUserForm({ ...newUserForm, departmentId: e.target.value })}
+                                    className="block w-full px-3 py-2 border border-slate-300 bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                >
+                                    <option value="">None / Unassigned</option>
+                                    {departments.map((dept) => (
+                                        <option key={dept.id} value={dept.id}>
+                                            {dept.department_name}
                                         </option>
                                     ))}
                                 </select>
