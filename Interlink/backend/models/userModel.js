@@ -59,6 +59,10 @@ const createUsersTable = async () => {
         {
             name: 'company_id',
             query: 'ALTER TABLE users ADD COLUMN company_id INT DEFAULT 1'
+        },
+        {
+            name: 'department_id',
+            query: 'ALTER TABLE users ADD COLUMN department_id INT DEFAULT NULL'
         }
     ];
 
@@ -103,13 +107,14 @@ const createUser = async (
     active = true,
     role = 'user',
     organizationId = 1,
-    companyId = 1
+    companyId = 1,
+    departmentId = null
 ) => {
 
     const query = `
         INSERT INTO users
-        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role, organization_id, company_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role, organization_id, company_id, department_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.execute(query, [
@@ -124,7 +129,8 @@ const createUser = async (
         active ? 1 : 0,
         role,
         organizationId,
-        companyId
+        companyId,
+        departmentId || null
     ]);
 
     return result;

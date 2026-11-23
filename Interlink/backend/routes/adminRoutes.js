@@ -3,6 +3,7 @@ const express = require("express");
 const {
     fetchUsers,
     createUserByAdmin,
+    updateUserByAdmin,
     approveDeviceController,
     revokeDeviceController,
     fetchAuditLogs,
@@ -17,6 +18,7 @@ const router = express.Router();
 
 router.get("/users", verifyToken, verifyPermission("user_master", "read"), fetchUsers);
 router.post("/create-user", verifyToken, verifyPermission("user_master", "write"), createUserByAdmin);
+router.put("/user/:id", verifyToken, verifyPermission("user_master", "update"), updateUserByAdmin);
 router.patch("/user/:id/toggle-active", verifyToken, verifyPermission("user_master", "update"), toggleUserActiveController);
 
 router.get("/pending-devices", verifyToken, verifyPermission("device_approval", "read"), fetchPendingDevices);
