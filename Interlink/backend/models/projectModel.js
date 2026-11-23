@@ -26,6 +26,7 @@ const createProjectTables = async () => {
         CREATE TABLE IF NOT EXISTS projects (
             id INT AUTO_INCREMENT PRIMARY KEY,
             tenant_id INT NOT NULL DEFAULT 1,
+            company_id INT NOT NULL DEFAULT 1,
             code VARCHAR(50) NOT NULL,
             name VARCHAR(150) NOT NULL,
             description LONGTEXT NULL,
@@ -54,6 +55,7 @@ const createProjectTables = async () => {
     `);
 
     // Ensure all modern columns exist on projects even if created previously
+    await ensureColumn("projects", "company_id", "INT DEFAULT 1");
     await ensureColumn("projects", "parent_project_id", "INT NULL");
     await ensureColumn("projects", "priority", "ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium'");
     await ensureColumn("projects", "visibility", "ENUM('public', 'private', 'restricted') DEFAULT 'public'");

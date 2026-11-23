@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import { logoutUser } from "../api/authApi";
+import { getCompanies, switchCompany } from "../api/companyApi";
 import { usePermission } from "../context/PermissionContext";
 import { searchAllRecords } from "../api/searchApi";
 import { getProjects } from "../api/projectApi";
@@ -72,6 +73,7 @@ export function InterlinkLogo({
 // ─── Header with Light-Mode Logo, Universal Record Search Dropdown & Notification ───
 export function TopBar({ onMenuClick = () => {} }) {
     const navigate = useNavigate();
+    const location = useLocation();
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const { hasPermission } = usePermission();
     const isAdmin = user.role === "admin" || user.role === "super admin";
@@ -100,6 +102,45 @@ export function TopBar({ onMenuClick = () => {} }) {
         }
     });
 
+    // Company Switcher state
+    const [companies, setCompanies] = useState(user.companies || []);
+    const [activeCompanyId, setActiveCompanyId] = useState(
+        localStorage.getItem("active_company_id") || user.company_id || "1"
+    );
+
+    useEffect(() => {
+        // Always fetch fresh companies list on mount
+        getCompanies()
+            .then((res) => {
+                if (res.data?.success && res.data.companies) {
+                    setCompanies(res.data.companies);
+                    const currentActive = localStorage.getItem("active_company_id") || user.company_id;
+                    if (!currentActive && res.data.companies.length > 0) {
+                        const firstId = String(res.data.companies[0].id);
+                        setActiveCompanyId(firstId);
+                        localStorage.setItem("active_company_id", firstId);
+                    }
+                }
+            })
+            .catch((err) => {
+                console.error("TopBar getCompanies error:", err);
+            });
+    }, []);
+
+    const handleCompanyChange = async (e) => {
+        const newId = e.target.value;
+        setActiveCompanyId(newId);
+        localStorage.setItem("active_company_id", newId);
+        const updatedUser = { ...user, company_id: parseInt(newId, 10) };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        try {
+            await switchCompany(newId);
+        } catch (err) {
+            console.warn("Backend switch notice:", err.message);
+        }
+        window.location.reload();
+    };
+
     const notificationRef = useRef(null);
     const profileRef = useRef(null);
     const searchContainerRef = useRef(null);
@@ -110,6 +151,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         { id: "p-dash", title: "User Dashboard", category: "Navigation", path: "/user/home", icon: "fa-solid fa-gauge-high text-blue-500", visible: true },
         { id: "p-proj", title: "Projects & Portfolio", category: "Navigation", path: "/projects", icon: "fa-solid fa-diagram-project text-indigo-500", visible: true },
         { id: "p-task", title: "Task Management", category: "Navigation", path: "/tasks", icon: "fa-solid fa-list-check text-emerald-500", visible: true },
+        { id: "p-comp", title: "Company Master", category: "Masters", path: "/admin/companies", icon: "fa-solid fa-building text-blue-500", visible: isAdmin },
         { id: "p-users", title: "User Master Directory", category: "Masters", path: "/admin/dashboard", icon: "fa-solid fa-users-gear text-purple-500", visible: isAdmin || hasPermission("user_master", "read") },
         { id: "p-ucreate", title: "Create New User", category: "Masters", path: "/admin/users/create", icon: "fa-solid fa-user-plus text-sky-500", visible: isAdmin || hasPermission("user_master", "write") },
         { id: "p-utypes", title: "User Types Master", category: "Masters", path: "/admin/user-types", icon: "fa-solid fa-user-shield text-amber-500", visible: isAdmin || hasPermission("user_type", "read") },
@@ -144,6 +186,21 @@ export function TopBar({ onMenuClick = () => {} }) {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const getPageTitle = (path) => {
+        if (path === "/user/home") return { title: "User Dashboard", category: "Overview" };
+        if (path.startsWith("/projects")) return { title: "Projects & Portfolio", category: "Governance" };
+        if (path.startsWith("/tasks")) return { title: "Task Management", category: "Productivity" };
+        if (path === "/admin/dashboard") return { title: "User Master", category: "Masters" };
+        if (path === "/admin/companies") return { title: "Company Master", category: "Masters" };
+        if (path === "/admin/users/create") return { title: "Create User", category: "Masters" };
+        if (path === "/admin/user-types") return { title: "User Types Master", category: "Masters" };
+        if (path === "/admin/user-types/create") return { title: "Create User Type", category: "Masters" };
+        if (path === "/admin/report") return { title: "Activity Report", category: "Analytics" };
+        if (path === "/profile") return { title: "Account Profile", category: "Settings" };
+        return { title: "Interlink Suite", category: "Portal" };
+    };
+
+    const pageInfo = getPageTitle(location.pathname);
     // Global shortcut Ctrl+K / Cmd+K listener
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -594,8 +651,27 @@ export function TopBar({ onMenuClick = () => {} }) {
                 )}
             </div>
 
-            {/* Right Area: Notification Bell (Pixel-Matched to User Crop) + User Profile */}
+            {/* Right Area: Company Switcher + Notification Bell + User Profile */}
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                {/* Company Switcher */}
+                {companies.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs">
+                        <i className="fa-regular fa-building text-blue-600 text-[11px]"></i>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase hidden md:inline">Company:</span>
+                        <select
+                            value={activeCompanyId}
+                            onChange={handleCompanyChange}
+                            className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+                        >
+                            {companies.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                    {c.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 {/* Notification Bell with Badge */}
                 <div className="relative" ref={notificationRef}>
                     <button
@@ -685,14 +761,14 @@ export function TopBar({ onMenuClick = () => {} }) {
                             {user.avatar ? (
                                 <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                             ) : (
-                                <span>{user.name ? user.name[0].toUpperCase() : "J"}</span>
+                                <span>{user.name ? user.name[0].toUpperCase() : "U"}</span>
                             )}
                         </div>
 
                         {/* Name & Role */}
                         <div className="hidden sm:flex flex-col text-left leading-tight">
                             <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[130px]">
-                                {user.name || "John Smith"}
+                                {user.name || "User"}
                             </span>
                             <div className="flex items-center gap-1 text-[11px] text-slate-500">
                                 <span>{getDisplayRole(user.role)}</span>
@@ -711,7 +787,7 @@ export function TopBar({ onMenuClick = () => {} }) {
                         <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl py-2 z-50 origin-top-right animate-in fade-in slide-in-from-top-2 duration-150">
                             <div className="px-4 py-2.5 border-b border-slate-100">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Signed in as</p>
-                                <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{user.name || "John Smith"}</p>
+                                <p className="text-sm font-bold text-slate-800 truncate mt-0.5">{user.name || "User"}</p>
                                 {user.email && (
                                     <p className="text-xs text-slate-500 truncate mt-0.5">{user.email}</p>
                                 )}
@@ -761,6 +837,45 @@ export default function Sidebar({
     const { hasPermission } = usePermission();
     const isAdmin = user.role === "admin" || user.role === "super admin";
 
+    const [companies, setCompanies] = useState(user.companies || []);
+    const [activeCompanyId, setActiveCompanyId] = useState(
+        localStorage.getItem("active_company_id") || user.company_id || "1"
+    );
+
+    useEffect(() => {
+        getCompanies()
+            .then((res) => {
+                if (res.data?.success && res.data.companies) {
+                    setCompanies(res.data.companies);
+                    const currentActive = localStorage.getItem("active_company_id") || user.company_id;
+                    if (!currentActive && res.data.companies.length > 0) {
+                        const firstId = String(res.data.companies[0].id);
+                        setActiveCompanyId(firstId);
+                        localStorage.setItem("active_company_id", firstId);
+                    }
+                }
+            })
+            .catch((err) => {
+                console.error("Sidebar getCompanies error:", err);
+            });
+    }, []);
+
+    const handleCompanyChange = async (e) => {
+        const newId = e.target.value;
+        setActiveCompanyId(newId);
+        localStorage.setItem("active_company_id", newId);
+        const updatedUser = { ...user, company_id: parseInt(newId, 10) };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+
+        try {
+            await switchCompany(newId);
+        } catch (err) {
+            console.warn("Backend switch notice:", err.message);
+        }
+
+        window.location.reload();
+    };
+
     const isMasterRoute = location.pathname.startsWith("/admin/") && location.pathname !== "/admin/report";
     const [mastersOpen, setMastersOpen] = useState(isMasterRoute);
 
@@ -799,6 +914,13 @@ export default function Sidebar({
             matchPaths: ["/admin/dashboard", "/admin/users/create"],
             icon: "fa-solid fa-users-gear",
             visible: canReadUsers
+        },
+        {
+            name: "Company Master",
+            path: "/admin/companies",
+            matchPaths: ["/admin/companies"],
+            icon: "fa-solid fa-building",
+            visible: isAdmin
         },
         {
             name: "User Types Master",
@@ -855,6 +977,59 @@ export default function Sidebar({
                             <i className="fa-solid fa-xmark text-sm"></i>
                         </button>
                     </div>
+                </div>
+
+                {/* Company Switcher in Sidebar */}
+                <div className="px-3 py-3 border-b border-slate-800/80 bg-slate-950/40">
+                    {!isCollapsed ? (
+                        <div>
+                            <div className="flex items-center justify-between px-1 mb-1.5">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                    <i className="fa-solid fa-building text-blue-400 text-[10px]"></i>
+                                    Company
+                                </span>
+                                {isAdmin && (
+                                    <button
+                                        onClick={() => handleNav("/admin/companies")}
+                                        className="text-[10px] text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer"
+                                        title="Open Company Master"
+                                    >
+                                        Manage
+                                    </button>
+                                )}
+                            </div>
+                            <div className="relative">
+                                <select
+                                    value={String(activeCompanyId)}
+                                    onChange={handleCompanyChange}
+                                    className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
+                                >
+                                    {companies.length === 0 ? (
+                                        <option value="1">Default Company</option>
+                                    ) : (
+                                        companies.map((c) => (
+                                            <option key={c.id} value={String(c.id)} className="bg-slate-900 text-white py-1">
+                                                {c.name}
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                                    <i className="fa-solid fa-chevron-down text-[10px]"></i>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex justify-center py-0.5">
+                            <button
+                                onClick={() => handleNav("/admin/companies")}
+                                title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Company Workspace"}
+                                className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all cursor-pointer"
+                            >
+                                <i className="fa-solid fa-building text-sm"></i>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Nav Items */}
@@ -1043,7 +1218,7 @@ export default function Sidebar({
                         >
                             <div className="relative shrink-0">
                                 <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-sky-400 text-white flex items-center justify-center font-bold text-xs shadow-md border border-white/10 group-hover:scale-105 transition-transform">
-                                    {user.name ? user.name[0].toUpperCase() : "J"}
+                                    {user.name ? user.name[0].toUpperCase() : "U"}
                                 </div>
                                 <span className="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border border-[#061022] rounded-full"></span>
                             </div>
@@ -1051,10 +1226,10 @@ export default function Sidebar({
                             {!isCollapsed && (
                                 <div className="flex flex-col min-w-0">
                                     <span className="text-xs font-bold text-white truncate group-hover:text-sky-300 transition-colors">
-                                        {user.name || "John Smith"}
+                                        {user.name || "User"}
                                     </span>
                                     <span className="text-[10px] text-slate-400 capitalize truncate">
-                                        {user.role || "Administrator"}
+                                        {user.role || "Member"}
                                     </span>
                                 </div>
                             )}

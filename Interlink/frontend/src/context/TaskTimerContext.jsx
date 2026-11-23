@@ -28,9 +28,16 @@ export function TaskTimerProvider({ children }) {
     const lastActivityRef = useRef(Date.now());
     const isIdleRef = useRef(false);
 
-    // Synchronize running timer from backend on initial mount
+    // Synchronize running timer from backend on mount or auth change
     useEffect(() => {
         const syncWithBackend = async () => {
+            const token = localStorage.getItem("token");
+            if (!token) {
+                setActiveTimer(null);
+                setElapsedSeconds(0);
+                return;
+            }
+
             try {
                 const res = await getActiveTimer();
                 if (res.data?.success && res.data.data) {
@@ -58,11 +65,21 @@ export function TaskTimerProvider({ children }) {
                     });
                 }
             } catch (err) {
-                console.error("Failed to sync timer with backend:", err);
+                // If 401 / unauthenticated, silently ignore
+                if (err.response?.status !== 401 && err.response?.status !== 403) {
+                    console.error("Failed to sync timer with backend:", err);
+                }
             }
         };
 
         syncWithBackend();
+
+        const handleAuthChange = () => {
+            syncWithBackend();
+        };
+
+        window.addEventListener("auth-change", handleAuthChange);
+        return () => window.removeEventListener("auth-change", handleAuthChange);
     }, []);
 
     // Save timer state to localStorage whenever changed

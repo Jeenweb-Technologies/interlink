@@ -63,6 +63,9 @@ const createUserByAdmin = async (req, res) => {
         }
         
         const hashedPassword = await bcrypt.hash(password, 10);
+        const organizationId = req.user?.organization_id || 1;
+        const companyId = req.body.companyId || req.user?.company_id || 1;
+
         const newUser = await createUser(
             name,
             username,
@@ -73,7 +76,9 @@ const createUserByAdmin = async (req, res) => {
             dateOfJoin || null,
             typeof deviceVerificationRequired === 'boolean' ? deviceVerificationRequired : true,
             true,
-            role || 'user'
+            role || 'user',
+            organizationId,
+            companyId
         );
 
         const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';

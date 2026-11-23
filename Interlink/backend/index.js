@@ -9,6 +9,7 @@ const { connectDB } = require("./config/db.js");
 
 // Routes
 const authRoutes = require("./routes/authRoutes.js");
+const companyRoutes = require("./routes/companyRoutes.js");
 const adminRoutes = require("./routes/adminRoutes.js");
 const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
@@ -16,6 +17,7 @@ const projectRoutes = require("./routes/projectRoutes.js");
 const searchRoutes = require("./routes/searchRoutes.js");
 
 // Model Initializations
+const { initCompanyModel } = require("./models/companyModel.js");
 const { initUserModel } = require("./models/userModel.js");
 const { createUserTypesTable, createUserTypePermissionsTable } = require("./models/userTypeModel.js");
 const { createAuditLogsTable } = require("./models/auditLogModel.js");
@@ -42,7 +44,7 @@ app.use(cors({
         return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "X-HTTP-Method-Override", "x-device-id", "device-id"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-HTTP-Method-Override", "x-device-id", "device-id", "x-company-id", "company-id"],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 }));
 app.use(express.json());
@@ -64,6 +66,7 @@ app.use((req, res, next) => {
 });
 
 app.use(["/api/auth", "/auth"], authRoutes);
+app.use(["/api/companies", "/companies"], companyRoutes);
 app.use(["/api/admin", "/admin"], adminRoutes);
 app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);
@@ -88,6 +91,7 @@ const startServer = async () => {
 
         console.log("Initializing database tables...");
         // Initialize tables in correct dependency order
+        await initCompanyModel();
         await initUserModel();
         await createUserTypesTable();
         await createUserTypePermissionsTable();
