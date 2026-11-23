@@ -7,6 +7,8 @@ const {
     updateUserProfile
 } = require("../models/userModel.js");
 
+const { findCompaniesByOrgId } = require("../models/companyModel.js");
+
 const { createAuditLog } = require("../models/auditLogModel.js");
 
 const {
@@ -59,9 +61,18 @@ const login = async (req, res) => {
         }
 
         // ================= ADMIN LOGIN =================
+        const userOrgId = user.organization_id || 1;
+        const userCompId = user.company_id || 1;
+        let userCompanies = [];
+        try {
+            userCompanies = await findCompaniesByOrgId(userOrgId);
+        } catch (e) {
+            console.warn("Could not fetch user companies:", e.message);
+        }
+
         if (user.role === "admin" && (user.device_verification_required === 0 || user.device_verification_required === false)) {
             const token = jwt.sign(
-                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
                 process.env.JWT_SECRET,
                 { expiresIn: "1d" }
             );
@@ -77,6 +88,9 @@ const login = async (req, res) => {
                     email: user.email,
                     role: user.role,
                     mob_no: user.mob_no,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
+                    companies: userCompanies,
                     modules: user.modules || []
                 }
             });
@@ -85,7 +99,7 @@ const login = async (req, res) => {
         // ================= DEVICE MATCHING =================
         if (user.device_verification_required === 0 || user.device_verification_required === false) {
             const token = jwt.sign(
-                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
                 process.env.JWT_SECRET,
                 { expiresIn: "1d" }
             );
@@ -101,6 +115,9 @@ const login = async (req, res) => {
                     email: user.email,
                     role: user.role,
                     mob_no: user.mob_no,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
+                    companies: userCompanies,
                     modules: user.modules || []
                 }
             });
@@ -112,7 +129,7 @@ const login = async (req, res) => {
             if (approvedDevice.device_id === deviceId) {
                 // Device matches, login successful
                 const token = jwt.sign(
-                    { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no },
+                    { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
                     process.env.JWT_SECRET,
                     { expiresIn: "1d" }
                 );
@@ -128,6 +145,9 @@ const login = async (req, res) => {
                         email: user.email,
                         role: user.role,
                         mob_no: user.mob_no,
+                        organization_id: userOrgId,
+                        company_id: userCompId,
+                        companies: userCompanies,
                         modules: user.modules || []
                     }
                 });
@@ -373,9 +393,153 @@ const getActiveUsersController = async (req, res) => {
     }
 };
 
+const registerOrganization = async (req, res) => {
+    try {
+        const {
+            orgName,
+            companyName,
+            name,
+            username,
+            email,
+            password,
+            mob_no
+        } = req.body;
+
+        if (!orgName || !name || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "Organization name, admin name, email, and password are required"
+            });
+        }
+
+        const finalUsername = username || email.split("@")[0];
+
+        // Check if user already exists
+        const existingUser = await findUserByUsername(finalUsername);
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "Username or email is already registered"
+            });
+        }
+
+        // 1. Create Organization
+        let orgId;
+        try {
+            const [orgResult] = await db.execute(
+                "INSERT INTO organizations (name, email) VALUES (?, ?)",
+                [orgName.trim(), email.trim()]
+            );
+            orgId = orgResult.insertId;
+        } catch (orgErr) {
+            if (orgErr.code === 'ER_BAD_FIELD_ERROR') {
+                const [orgResult] = await db.execute(
+                    "INSERT INTO organizations (name) VALUES (?)",
+                    [orgName.trim()]
+                );
+                orgId = orgResult.insertId;
+                db.execute("ALTER TABLE organizations ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
+            } else {
+                throw orgErr;
+            }
+        }
+
+        // 2. Create First Company under this Organization
+        const compName = (companyName && companyName.trim()) ? companyName.trim() : `${orgName.trim()} Main`;
+        let companyId;
+        try {
+            const [compResult] = await db.execute(
+                "INSERT INTO companies (organization_id, name, email) VALUES (?, ?, ?)",
+                [orgId, compName, email.trim()]
+            );
+            companyId = compResult.insertId;
+        } catch (compErr) {
+            if (compErr.code === 'ER_BAD_FIELD_ERROR') {
+                const [compResult] = await db.execute(
+                    "INSERT INTO companies (organization_id, name) VALUES (?, ?)",
+                    [orgId, compName]
+                );
+                companyId = compResult.insertId;
+                db.execute("ALTER TABLE companies ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
+                db.execute("ALTER TABLE companies ADD COLUMN phone VARCHAR(50) DEFAULT NULL").catch(() => {});
+            } else {
+                throw compErr;
+            }
+        }
+
+        // 3. Create Admin User
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const [userResult] = await db.execute(`
+            INSERT INTO users (
+                name, username, email, password, role,
+                organization_id, company_id,
+                mob_no, device_verification_required, active
+            ) VALUES (?, ?, ?, ?, 'admin', ?, ?, ?, 0, 1)
+        `, [
+            name.trim(),
+            finalUsername,
+            email.trim(),
+            hashedPassword,
+            orgId,
+            companyId,
+            mob_no || null
+        ]);
+
+        const newUserId = userResult.insertId;
+
+        // Create audit log
+        try {
+            await createAuditLog(
+                newUserId,
+                finalUsername,
+                "WEB_REGISTER",
+                "organizations",
+                "CREATE",
+                null,
+                JSON.stringify({ orgId, orgName, companyId, companyName: compName })
+            );
+        } catch (logErr) {
+            console.warn("Audit log warning on register:", logErr.message);
+        }
+
+        // Generate token
+        const token = jwt.sign(
+            { id: newUserId, role: "admin", name: name.trim(), username: finalUsername, organization_id: orgId, company_id: companyId },
+            process.env.JWT_SECRET,
+            { expiresIn: "1d" }
+        );
+
+        return res.status(201).json({
+            success: true,
+            message: "Organization and company registered successfully!",
+            token,
+            organization: { id: orgId, name: orgName },
+            company: { id: companyId, name: compName },
+            user: {
+                id: newUserId,
+                name: name.trim(),
+                username: finalUsername,
+                email: email.trim(),
+                role: "admin",
+                organization_id: orgId,
+                company_id: companyId,
+                companies: [{ id: companyId, organization_id: orgId, name: compName }]
+            }
+        });
+    } catch (error) {
+        console.error("Register Organization Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to register organization",
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     login,
     logout,
+    registerOrganization,
     updateProfileController,
     requestDeviceRegistration,
     getMyPermissions,

@@ -6,7 +6,8 @@ const uploadConfig = require("../config/uploadConfig.js");
 // ─── 1. Portfolio Metrics (PROJ-01) ──────────────────────────────────────────
 exports.getPortfolioMetrics = async (req, res) => {
     try {
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
+        const companyId = req.user?.company_id || 1;
 
         // Base project counts
         const [counts] = await db.execute(`
@@ -21,16 +22,16 @@ exports.getPortfolioMetrics = async (req, res) => {
                 SUM(approved_budget) as total_approved_budget,
                 SUM(actual_cost) as total_actual_cost
             FROM projects 
-            WHERE tenant_id = ? AND parent_project_id IS NULL AND deleted_at IS NULL
-        `, [tenantId]);
+            WHERE tenant_id = ? AND (company_id = ? OR company_id IS NULL) AND parent_project_id IS NULL AND deleted_at IS NULL
+        `, [tenantId, companyId]);
 
         // Health distribution (On Track, At Risk, Delayed)
         const [projects] = await db.execute(`
             SELECT p.id, p.end_date, p.progress_percentage, p.approved_budget, p.actual_cost,
                    (SELECT COUNT(*) FROM project_risks r WHERE r.project_id = p.id AND r.severity_score >= 12 AND r.status != 'closed') as high_risks_count
             FROM projects p
-            WHERE p.tenant_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
-        `, [tenantId]);
+            WHERE p.tenant_id = ? AND (p.company_id = ? OR p.company_id IS NULL) AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
+        `, [tenantId, companyId]);
 
         let onTrack = 0;
         let atRisk = 0;
@@ -84,7 +85,8 @@ exports.getPortfolioMetrics = async (req, res) => {
 // ─── 2. List Projects with Filters (PROJ-02) ─────────────────────────────────
 exports.getProjects = async (req, res) => {
     try {
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
+        const companyId = req.user?.company_id || 1;
         const { search, status, priority, owner_id, sponsor_id, visibility, include_subprojects } = req.query;
 
         let query = `
@@ -99,10 +101,10 @@ exports.getProjects = async (req, res) => {
             FROM projects p
             LEFT JOIN users u_owner ON p.owner_id = u_owner.id
             LEFT JOIN users u_sponsor ON p.sponsor_id = u_sponsor.id
-            WHERE p.tenant_id = ? AND p.deleted_at IS NULL
+            WHERE p.tenant_id = ? AND (p.company_id = ? OR p.company_id IS NULL) AND p.deleted_at IS NULL
         `;
 
-        const params = [tenantId];
+        const params = [tenantId, companyId];
 
         // By default show top-level projects unless user requests subprojects explicitly
         if (include_subprojects !== 'true') {
@@ -238,7 +240,8 @@ exports.getProjectById = async (req, res) => {
 // ─── 4. Create Project (PROJ-03) ─────────────────────────────────────────────
 exports.createProject = async (req, res) => {
     try {
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
+        const companyId = req.user?.company_id || 1;
         const userId = req.user?.id || 1;
         const {
             name,
@@ -276,12 +279,13 @@ exports.createProject = async (req, res) => {
 
         const [result] = await db.execute(`
             INSERT INTO projects (
-                tenant_id, code, name, description, parent_project_id, status, priority, visibility,
+                tenant_id, company_id, code, name, description, parent_project_id, status, priority, visibility,
                 owner_id, sponsor_id, start_date, end_date, baseline_start_date, baseline_end_date,
                 currency, estimated_budget, approved_budget, is_budget_approved, actual_cost, progress_percentage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
         `, [
             tenantId,
+            companyId,
             projectCode,
             name.trim(),
             description || null,

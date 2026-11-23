@@ -3,6 +3,7 @@ const express = require("express");
 const {
     login,
     logout,
+    registerOrganization,
     updateProfileController,
     requestDeviceRegistration,
     getMyPermissions,
@@ -13,6 +14,8 @@ const { verifyToken } = require("../middleware/authMiddleware.js");
 const router = express.Router();
 
 router.post("/login", login);
+router.post("/register-org", registerOrganization);
+router.post("/register-company", registerOrganization);
 router.post("/request-device", requestDeviceRegistration);
 router.post("/logout", logout);
 router.put("/update-profile", verifyToken, updateProfileController);
