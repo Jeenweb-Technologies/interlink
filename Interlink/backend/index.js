@@ -15,6 +15,7 @@ const adminRoutes = require("./routes/adminRoutes.js");
 const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
+const searchRoutes = require("./routes/searchRoutes.js");
 
 // Model Initializations
 const { initCompanyModel } = require("./models/companyModel.js");
@@ -72,6 +73,7 @@ app.use(["/api/admin", "/admin"], adminRoutes);
 app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);
 app.use(["/api/projects", "/projects"], projectRoutes);
+app.use(["/api/search", "/search"], searchRoutes);
 
 
 // Global 404 handler
