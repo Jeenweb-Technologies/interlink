@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login";
 import RegisterOrg from "./pages/RegisterOrg";
@@ -18,6 +18,11 @@ import CompanyMaster from "./pages/admin/CompanyMaster";
 import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
+import ChatApp from "./pages/chat/ChatApp";
+import EmployeeDirectory from "./pages/peoples/EmployeeDirectory";
+import CreateEmployee from "./pages/peoples/CreateEmployee";
+import CreateCompany from "./pages/admin/CreateCompany";
+import DepartmentMaster from "./pages/admin/DepartmentMaster";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -74,6 +79,33 @@ export default function AppRoutes() {
                         element={<ProjectWorkspacePage />}
                     />
                     <Route
+                        path="/chat"
+                        element={<ChatApp />}
+                    />
+
+                    {/* Peoples & Organization Module (EMP-01 to EMP-05) */}
+                    <Route
+                        path="/peoples"
+                        element={<EmployeeDirectory />}
+                    />
+                    <Route
+                        path="/peoples/create"
+                        element={<CreateEmployee />}
+                    />
+                    <Route
+                        path="/peoples/departments"
+                        element={<DepartmentMaster />}
+                    />
+                    <Route
+                        path="/peoples/companies"
+                        element={<CompanyMaster />}
+                    />
+                    <Route
+                        path="/peoples/companies/create"
+                        element={<CreateCompany />}
+                    />
+
+                    <Route
                         path="/profile"
                         element={<Profile />}
                     />
@@ -82,6 +114,10 @@ export default function AppRoutes() {
                         <Route
                             path="/admin/dashboard"
                             element={<AdminDashboard />}
+                        />
+                        <Route
+                            path="/admin/users"
+                            element={<Navigate to="/admin/dashboard" replace />}
                         />
                     </Route>
 
@@ -119,6 +155,16 @@ export default function AppRoutes() {
                             element={<CreateUserType />}
                         />
                     </Route>
+
+                    {/* Backward-compatible redirects from legacy admin paths */}
+                    <Route
+                        path="/admin/companies/create"
+                        element={<Navigate to="/peoples/companies/create" replace />}
+                    />
+                    <Route
+                        path="/admin/departments"
+                        element={<Navigate to="/peoples/departments" replace />}
+                    />
 
                     {/* Developer / Super Admin Console */}
                     <Route element={<ProtectedRoute allowedRole={["super_admin", "super admin", "developer"]} />}>
