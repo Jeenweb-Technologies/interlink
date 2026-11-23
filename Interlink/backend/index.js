@@ -16,6 +16,7 @@ const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
 const taskRoutes = require("./routes/taskRoutes.js");
 const projectRoutes = require("./routes/projectRoutes.js");
 const searchRoutes = require("./routes/searchRoutes.js");
+const noteRoutes = require("./routes/noteRoutes.js");
 
 // Model Initializations
 const { initCompanyModel } = require("./models/companyModel.js");
@@ -25,6 +26,7 @@ const { createAuditLogsTable } = require("./models/auditLogModel.js");
 const { createUserDevicesTable } = require("./models/deviceModel.js");
 const { createTaskTables } = require("./models/taskModel.js");
 const { createProjectTables } = require("./models/projectModel.js");
+const { createNoteTables } = require("./models/noteModel.js");
 
 
 const app = express();
@@ -74,6 +76,7 @@ app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
 app.use(["/api/tasks", "/tasks"], taskRoutes);
 app.use(["/api/projects", "/projects"], projectRoutes);
 app.use(["/api/search", "/search"], searchRoutes);
+app.use(["/api/notes", "/notes"], noteRoutes);
 
 
 // Global 404 handler
@@ -101,6 +104,7 @@ const startServer = async () => {
         await createUserDevicesTable();
         await createTaskTables();
         await createProjectTables();
+        await createNoteTables();
 
         console.log("All database tables are initialized and ready.");
 
