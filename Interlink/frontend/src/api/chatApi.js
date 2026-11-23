@@ -64,3 +64,12 @@ export const getChatUserTypePermissions = async () => {
 export const saveChatUserTypePermission = async (userTypeId, perms) => {
     return apiClient.put(`/chat/permissions/${userTypeId}`, perms);
 };
+
+// User Chat Scope & Department Cross-Communication Permissions
+export const getAllUserChatPermissions = async () => {
+    return apiClient.get("/chat/user-permissions");
+};
+
+export const saveUserChatPermission = async (userId, data) => {
+    return apiClient.put(`/chat/user-permissions/${userId}`, data);
+};

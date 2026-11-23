@@ -10,7 +10,9 @@ const {
     getChatSettings,
     updateChatSettings,
     getChatUserTypePermissions,
-    saveChatUserTypePermission
+    saveChatUserTypePermission,
+    getAllUserChatPermissions,
+    saveUserChatPermission
 } = require("../models/chatModel.js");
 const { getIO } = require("../socket.js");
 
@@ -197,12 +199,49 @@ const reactMessage = async (req, res) => {
 
 /**
  * Fetch available users from User Master to chat with
+ * Filtered by user's Chat Scope & Department Permissions
  */
 const getAvailableUsers = async (req, res) => {
     try {
         const currentUserId = req.user.id;
         const companyId = req.user.company_id || 1;
         const isSuper = req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+        const isAdmin = isSuper || req.user?.role === "admin";
+
+        // Check user's communication scope
+        let userScope = "DEPARTMENT_ONLY";
+        let allowedDepts = [];
+        let canDirectChat = true;
+        let currentUserDept = null;
+
+        const [currentUserRows] = await db.execute("SELECT department_id, role FROM users WHERE id = ?", [currentUserId]);
+        if (currentUserRows.length > 0) {
+            currentUserDept = currentUserRows[0].department_id;
+        }
+
+        if (!isAdmin) {
+            const [scopeRows] = await db.execute(
+                "SELECT chat_scope, allowed_department_ids, can_direct_chat FROM chat_user_department_permissions WHERE user_id = ?",
+                [currentUserId]
+            );
+            if (scopeRows.length > 0) {
+                userScope = scopeRows[0].chat_scope || "DEPARTMENT_ONLY";
+                canDirectChat = Boolean(scopeRows[0].can_direct_chat);
+                try {
+                    allowedDepts = typeof scopeRows[0].allowed_department_ids === "string"
+                        ? JSON.parse(scopeRows[0].allowed_department_ids)
+                        : (scopeRows[0].allowed_department_ids || []);
+                } catch (_) {
+                    allowedDepts = [];
+                }
+            }
+        } else {
+            userScope = "COMPANY_WIDE";
+        }
+
+        if (!canDirectChat && !isAdmin) {
+            return res.status(200).json({ success: true, users: [] });
+        }
 
         let query = `
             SELECT 
@@ -221,6 +260,26 @@ const getAvailableUsers = async (req, res) => {
             params.push(companyId, companyId);
         }
 
+        // Apply Scope Filtering if not Company-Wide
+        if (!isAdmin && userScope === "DEPARTMENT_ONLY") {
+            if (currentUserDept) {
+                query += " AND u.department_id = ?";
+                params.push(currentUserDept);
+            } else {
+                // If user has no department, they can only chat with others who also have no department or none
+                query += " AND u.department_id IS NULL";
+            }
+        } else if (!isAdmin && userScope === "MULTI_DEPARTMENT") {
+            const validDepts = [currentUserDept, ...allowedDepts].filter(Boolean);
+            if (validDepts.length > 0) {
+                const placeholders = validDepts.map(() => "?").join(",");
+                query += ` AND u.department_id IN (${placeholders})`;
+                params.push(...validDepts);
+            } else {
+                query += " AND u.department_id IS NULL";
+            }
+        }
+
         query += " ORDER BY u.name ASC";
 
         const [users] = await db.execute(query, params);
@@ -228,6 +287,35 @@ const getAvailableUsers = async (req, res) => {
     } catch (err) {
         console.error("Get Available Users Error:", err);
         return res.status(500).json({ success: false, message: "Failed to fetch users" });
+    }
+};
+
+/**
+ * Get all users with their chat scope & department communication permissions
+ */
+const getAllUserPermissionsController = async (req, res) => {
+    try {
+        const companyId = req.user.company_id || 1;
+        const users = await getAllUserChatPermissions(companyId);
+        return res.status(200).json({ success: true, users });
+    } catch (err) {
+        console.error("Get All User Permissions Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch user permissions" });
+    }
+};
+
+/**
+ * Save user specific chat scope & department communication permission
+ */
+const saveUserPermissionController = async (req, res) => {
+    try {
+        const companyId = req.user.company_id || 1;
+        const { userId } = req.params;
+        const result = await saveUserChatPermission(companyId, parseInt(userId, 10), req.body);
+        return res.status(200).json({ success: true, result, message: "User chat permission updated successfully" });
+    } catch (err) {
+        console.error("Save User Permission Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to save user permission" });
     }
 };
 
@@ -296,5 +384,7 @@ module.exports = {
     getSettings,
     updateSettings,
     getUserTypePermissions,
-    saveUserTypePermission
+    saveUserTypePermission,
+    getAllUserPermissionsController,
+    saveUserPermissionController
 };

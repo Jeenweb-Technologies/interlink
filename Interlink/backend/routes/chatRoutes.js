@@ -16,7 +16,9 @@ const {
     getSettings,
     updateSettings,
     getUserTypePermissions,
-    saveUserTypePermission
+    saveUserTypePermission,
+    getAllUserPermissionsController,
+    saveUserPermissionController
 } = require("../controllers/chatController.js");
 
 // Configure Multer for chat file attachments
@@ -56,5 +58,9 @@ router.get("/settings", getSettings);
 router.put("/settings", updateSettings);
 router.get("/permissions", getUserTypePermissions);
 router.put("/permissions/:userTypeId", saveUserTypePermission);
+
+// User Chat Scope & Department Cross-Communication Permissions
+router.get("/user-permissions", getAllUserPermissionsController);
+router.put("/user-permissions/:userId", saveUserPermissionController);
 
 module.exports = router;

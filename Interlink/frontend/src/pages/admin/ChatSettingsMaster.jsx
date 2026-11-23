@@ -1,23 +1,27 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import toast from "react-hot-toast";
 import DataTable from "../../components/DataTable";
 import {
     getChatSettings,
     updateChatSettings,
     getChatUserTypePermissions,
-    saveChatUserTypePermission
+    saveChatUserTypePermission,
+    getAllUserChatPermissions,
+    saveUserChatPermission
 } from "../../api/chatApi";
+import { getDepartments } from "../../api/departmentApi";
 
 export default function ChatSettingsMaster() {
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
     const activeCompanyId = localStorage.getItem("active_company_id") || user.company_id || "1";
     const activeCompanyName = user.companies?.find(c => String(c.id) === String(activeCompanyId))?.name || "Active Workspace";
 
-    const [activeTab, setActiveTab] = useState("policies"); // "policies" | "permissions"
+    // Tab state: "policies" | "user_types" | "user_scopes"
+    const [activeTab, setActiveTab] = useState("policies");
     const [loading, setLoading] = useState(true);
     const [savingSettings, setSavingSettings] = useState(false);
 
-    // Global Governance Policies
+    // Tab 1: Global Governance Policies
     const [settings, setSettings] = useState({
         allow_direct_messaging: true,
         allow_group_creation: "ALL",
@@ -29,16 +33,36 @@ export default function ChatSettingsMaster() {
         typing_indicators_enabled: true
     });
 
-    // User Type Permissions
+    // Tab 2: User Type Permissions
     const [userTypePerms, setUserTypePerms] = useState([]);
     const [savingPermId, setSavingPermId] = useState(null);
 
-    const loadData = async () => {
+    // Tab 3: User Department Communication Scope
+    const [userScopes, setUserScopes] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [editModalUser, setEditModalUser] = useState(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [savingScope, setSavingScope] = useState(false);
+
+    // Edit Modal Scope Form State
+    const [scopeFormData, setScopeFormData] = useState({
+        chat_scope: "DEPARTMENT_ONLY",
+        allowed_department_ids: [],
+        can_direct_chat: true,
+        can_create_group: true,
+        can_create_broadcast: false,
+        can_send_files: true
+    });
+
+    // Load initial master data
+    const loadData = useCallback(async () => {
         try {
             setLoading(true);
-            const [settingsRes, permsRes] = await Promise.all([
+            const [settingsRes, permsRes, userScopesRes, deptRes] = await Promise.all([
                 getChatSettings().catch(err => { console.error("Error loading chat settings:", err); return null; }),
-                getChatUserTypePermissions().catch(err => { console.error("Error loading chat perms:", err); return null; })
+                getChatUserTypePermissions().catch(err => { console.error("Error loading chat perms:", err); return null; }),
+                getAllUserChatPermissions().catch(err => { console.error("Error loading user scopes:", err); return null; }),
+                getDepartments(false, activeCompanyId).catch(err => { console.error("Error loading depts:", err); return null; })
             ]);
 
             if (settingsRes?.data?.success && settingsRes.data.settings) {
@@ -55,17 +79,25 @@ export default function ChatSettingsMaster() {
             if (permsRes?.data?.success && Array.isArray(permsRes.data.permissions)) {
                 setUserTypePerms(permsRes.data.permissions);
             }
+
+            if (userScopesRes?.data?.success && Array.isArray(userScopesRes.data.users)) {
+                setUserScopes(userScopesRes.data.users);
+            }
+
+            if (deptRes?.data?.success && Array.isArray(deptRes.data.departments)) {
+                setDepartments(deptRes.data.departments);
+            }
         } catch (error) {
             console.error("Failed to load chat governance data:", error);
-            toast.error("Failed to load chat governance settings");
+            toast.error("Failed to load chat settings");
         } finally {
             setLoading(false);
         }
-    };
+    }, [activeCompanyId]);
 
     useEffect(() => {
         loadData();
-    }, [activeCompanyId]);
+    }, [loadData]);
 
     // Save Global Governance Settings
     const handleSaveSettings = async (e) => {
@@ -74,7 +106,7 @@ export default function ChatSettingsMaster() {
         try {
             const res = await updateChatSettings(settings);
             if (res.data?.success) {
-                toast.success("Global chat governance rules saved successfully!");
+                toast.success("Chat policies updated successfully");
             } else {
                 toast.error(res.data?.message || "Failed to update chat settings");
             }
@@ -86,7 +118,7 @@ export default function ChatSettingsMaster() {
         }
     };
 
-    // Toggle Permission in Local State for a User Type
+    // Toggle Permission in Local State for User Types
     const handleTogglePerm = (userTypeId, field) => {
         setUserTypePerms(prev => prev.map(p => {
             if (p.user_type_id === userTypeId) {
@@ -116,18 +148,92 @@ export default function ChatSettingsMaster() {
         }
     };
 
-    // Columns for User Types Permissions Table
+    // Open User Scope Edit Modal
+    const handleOpenEditUserScope = (u) => {
+        setEditModalUser(u);
+        setScopeFormData({
+            chat_scope: u.chat_scope || "DEPARTMENT_ONLY",
+            allowed_department_ids: Array.isArray(u.allowed_department_ids) ? [...u.allowed_department_ids] : [],
+            can_direct_chat: u.can_direct_chat !== false,
+            can_create_group: u.can_create_group !== false,
+            can_create_broadcast: Boolean(u.can_create_broadcast),
+            can_send_files: u.can_send_files !== false
+        });
+        setIsEditModalOpen(true);
+    };
+
+    // Toggle Multi-Department Allowed Dept Selection
+    const handleToggleAllowedDepartment = (deptId) => {
+        setScopeFormData(prev => {
+            const current = prev.allowed_department_ids || [];
+            const exists = current.includes(deptId);
+            return {
+                ...prev,
+                allowed_department_ids: exists
+                    ? current.filter(id => id !== deptId)
+                    : [...current, deptId]
+            };
+        });
+    };
+
+    // Save User Scope Form
+    const handleSaveUserScopeSubmit = async (e) => {
+        e.preventDefault();
+        if (!editModalUser) return;
+        setSavingScope(true);
+        try {
+            const payload = {
+                chat_scope: scopeFormData.chat_scope,
+                allowed_department_ids: scopeFormData.chat_scope === "MULTI_DEPARTMENT"
+                    ? scopeFormData.allowed_department_ids
+                    : null,
+                can_direct_chat: scopeFormData.can_direct_chat,
+                can_create_group: scopeFormData.can_create_group,
+                can_create_broadcast: scopeFormData.can_create_broadcast,
+                can_send_files: scopeFormData.can_send_files
+            };
+
+            const res = await saveUserChatPermission(editModalUser.user_id, payload);
+            if (res.data?.success) {
+                toast.success(`Chat scope updated for ${editModalUser.name}`);
+                setIsEditModalOpen(false);
+                // Refresh user list
+                const refreshed = await getAllUserChatPermissions();
+                if (refreshed.data?.success && Array.isArray(refreshed.data.users)) {
+                    setUserScopes(refreshed.data.users);
+                }
+            } else {
+                toast.error(res.data?.message || "Failed to update user scope");
+            }
+        } catch (err) {
+            console.error("Save user scope error:", err);
+            toast.error(err.response?.data?.message || "Failed to save user chat permission");
+        } finally {
+            setSavingScope(false);
+        }
+    };
+
+    // Department map lookup for labels
+    const departmentMap = useMemo(() => {
+        const map = {};
+        departments.forEach(d => {
+            map[d.id] = d.department_name;
+        });
+        return map;
+    }, [departments]);
+
+    // Columns for User Type Permissions Table
     const permColumns = useMemo(() => [
         {
             key: "type_name",
-            label: "User Type / Role",
+            label: "User Role",
             render: (row) => (
                 <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2878C7] flex items-center justify-center font-bold text-xs">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2878C7] flex items-center justify-center font-bold text-xs shrink-0">
                         <i className="fa-solid fa-user-shield"></i>
                     </div>
                     <div>
-                        <span className="font-bold text-slate-800 text-sm block">{row.type_name}</span>
+                        <span className="font-semibold text-slate-800 text-sm block">{row.type_name}</span>
                         <span className="text-[11px] text-slate-400">ID #{row.user_type_id}</span>
                     </div>
                 </div>
@@ -144,15 +250,15 @@ export default function ChatSettingsMaster() {
                         onChange={() => handleTogglePerm(row.user_type_id, "can_direct_chat")}
                         className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
                     />
-                    <span className={`text-xs font-semibold ${row.can_direct_chat ? "text-emerald-700" : "text-slate-400"}`}>
-                        {row.can_direct_chat ? "Allowed" : "Restricted"}
+                    <span className={`text-xs font-medium ${row.can_direct_chat ? "text-emerald-700" : "text-slate-400"}`}>
+                        {row.can_direct_chat ? "Allowed" : "Disabled"}
                     </span>
                 </label>
             )
         },
         {
             key: "can_create_group",
-            label: "Create Group Channels",
+            label: "Create Groups",
             render: (row) => (
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                     <input
@@ -161,15 +267,15 @@ export default function ChatSettingsMaster() {
                         onChange={() => handleTogglePerm(row.user_type_id, "can_create_group")}
                         className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
                     />
-                    <span className={`text-xs font-semibold ${row.can_create_group ? "text-emerald-700" : "text-slate-400"}`}>
-                        {row.can_create_group ? "Allowed" : "Restricted"}
+                    <span className={`text-xs font-medium ${row.can_create_group ? "text-emerald-700" : "text-slate-400"}`}>
+                        {row.can_create_group ? "Allowed" : "Disabled"}
                     </span>
                 </label>
             )
         },
         {
             key: "can_create_broadcast",
-            label: "Send Broadcasts / Announcements",
+            label: "Create Broadcasts",
             render: (row) => (
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                     <input
@@ -178,15 +284,15 @@ export default function ChatSettingsMaster() {
                         onChange={() => handleTogglePerm(row.user_type_id, "can_create_broadcast")}
                         className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
                     />
-                    <span className={`text-xs font-semibold ${row.can_create_broadcast ? "text-purple-700" : "text-slate-400"}`}>
-                        {row.can_create_broadcast ? "Authorized" : "Disabled"}
+                    <span className={`text-xs font-medium ${row.can_create_broadcast ? "text-emerald-700" : "text-slate-400"}`}>
+                        {row.can_create_broadcast ? "Allowed" : "Disabled"}
                     </span>
                 </label>
             )
         },
         {
             key: "can_send_files",
-            label: "Send Files & Media",
+            label: "Attach Files",
             render: (row) => (
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                     <input
@@ -195,26 +301,25 @@ export default function ChatSettingsMaster() {
                         onChange={() => handleTogglePerm(row.user_type_id, "can_send_files")}
                         className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
                     />
-                    <span className={`text-xs font-semibold ${row.can_send_files ? "text-emerald-700" : "text-slate-400"}`}>
-                        {row.can_send_files ? "Enabled" : "Disabled"}
+                    <span className={`text-xs font-medium ${row.can_send_files ? "text-emerald-700" : "text-slate-400"}`}>
+                        {row.can_send_files ? "Allowed" : "Disabled"}
                     </span>
                 </label>
             )
         },
         {
             key: "actions",
-            label: "Action",
-            sortable: false,
+            label: "Actions",
             render: (row) => (
                 <button
                     onClick={() => handleSaveUserTypePerm(row)}
                     disabled={savingPermId === row.user_type_id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#2878C7] border border-blue-200 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#17365D] text-white hover:bg-[#1f477a] transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-sm"
                 >
                     {savingPermId === row.user_type_id ? (
-                        <i className="fa-solid fa-spinner fa-spin text-xs"></i>
+                        <i className="fa-solid fa-spinner fa-spin"></i>
                     ) : (
-                        <i className="fa-solid fa-floppy-disk text-xs"></i>
+                        <i className="fa-solid fa-check"></i>
                     )}
                     <span>Save</span>
                 </button>
@@ -222,87 +327,173 @@ export default function ChatSettingsMaster() {
         }
     ], [userTypePerms, savingPermId]);
 
+    // Columns for User Chat Scope & Department Cross-Communication Table
+    const userScopeColumns = useMemo(() => [
+        {
+            key: "name",
+            label: "User / Employee",
+            render: (row) => (
+                <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full bg-slate-100 text-[#17365D] border border-slate-200 flex items-center justify-center font-bold text-xs shrink-0">
+                        {row.name ? row.name.charAt(0).toUpperCase() : "U"}
+                    </div>
+                    <div>
+                        <span className="font-semibold text-slate-800 text-sm block leading-snug">{row.name}</span>
+                        <span className="text-[11px] text-slate-400">@{row.username || "user"}</span>
+                    </div>
+                </div>
+            )
+        },
+        {
+            key: "department_name",
+            label: "Assigned Department",
+            render: (row) => (
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+                    <i className="fa-solid fa-building text-slate-400 text-[10px]"></i>
+                    {row.department_name || <span className="text-slate-400 italic">None (Unassigned)</span>}
+                </span>
+            )
+        },
+        {
+            key: "chat_scope",
+            label: "Communication Scope",
+            render: (row) => {
+                const scope = row.chat_scope || "DEPARTMENT_ONLY";
+                if (scope === "COMPANY_WIDE") {
+                    return (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <i className="fa-solid fa-globe text-[10px]"></i>
+                            Company-Wide
+                        </span>
+                    );
+                }
+                if (scope === "MULTI_DEPARTMENT") {
+                    const count = Array.isArray(row.allowed_department_ids) ? row.allowed_department_ids.length : 0;
+                    return (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-[#2878C7] border border-blue-200">
+                            <i className="fa-solid fa-network-wired text-[10px]"></i>
+                            Multi-Department ({count + (row.department_id ? 1 : 0)})
+                        </span>
+                    );
+                }
+                return (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                        <i className="fa-solid fa-lock text-[10px] text-slate-400"></i>
+                        Department Only
+                    </span>
+                );
+            }
+        },
+        {
+            key: "allowed_departments",
+            label: "Accessible Cross-Departments",
+            render: (row) => {
+                const scope = row.chat_scope || "DEPARTMENT_ONLY";
+                if (scope === "COMPANY_WIDE") {
+                    return <span className="text-xs text-emerald-600 font-medium">All Departments (Entire Company)</span>;
+                }
+                if (scope === "DEPARTMENT_ONLY") {
+                    return <span className="text-xs text-slate-400">Restricted to {row.department_name || "own department"}</span>;
+                }
+                const ids = Array.isArray(row.allowed_department_ids) ? row.allowed_department_ids : [];
+                if (ids.length === 0) {
+                    return <span className="text-xs text-slate-400 italic">None selected</span>;
+                }
+                const names = ids.map(id => departmentMap[id] || `Dept #${id}`).join(", ");
+                return (
+                    <span className="text-xs text-slate-700 line-clamp-1 max-w-xs font-medium" title={names}>
+                        + {names}
+                    </span>
+                );
+            }
+        },
+        {
+            key: "actions",
+            label: "Actions",
+            render: (row) => (
+                <button
+                    onClick={() => handleOpenEditUserScope(row)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                    <i className="fa-solid fa-sliders text-slate-500"></i>
+                    <span>Configure</span>
+                </button>
+            )
+        }
+    ], [departmentMap]);
+
     return (
-        <div className="p-4 sm:p-6 lg:p-8 space-y-6 bg-[#F6F8FB] min-h-screen">
-            {/* Header */}
+        <div className="space-y-6">
+            {/* Standard Master Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-xl sm:text-2xl font-black text-[#17365D] tracking-tight flex items-center gap-2.5">
-                            <i className="fa-solid fa-sliders text-[#2878C7]"></i>
-                            <span>Chat Settings Master</span>
-                        </h1>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-[#2878C7] text-xs font-bold">
-                            <i className="fa-solid fa-building text-[10px]"></i>
-                            {activeCompanyName}
-                        </span>
-                    </div>
+                    <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                        <i className="fa-solid fa-comments text-[#2878C7]"></i>
+                        <span>Chat Settings & Governance</span>
+                    </h1>
                     <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                        Govern corporate messaging rules, enforce admin-only broadcast controls, and restrict communication by user type
+                        Configure corporate chat policies, role permissions, and cross-department communication scopes for {activeCompanyName}.
                     </p>
                 </div>
-
-                <div className="flex items-center gap-3 self-start sm:self-auto">
-                    <button
-                        onClick={handleSaveSettings}
-                        disabled={savingSettings}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 hover:shadow-lg transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                        {savingSettings ? (
-                            <i className="fa-solid fa-spinner fa-spin"></i>
-                        ) : (
-                            <i className="fa-solid fa-check-double"></i>
-                        )}
-                        <span>Save Governance Settings</span>
-                    </button>
-                </div>
             </div>
 
-            {/* Navigation Tabs */}
+            {/* Standard Nav Tabs */}
             <div className="flex items-center gap-2 border-b border-slate-200">
                 <button
+                    type="button"
                     onClick={() => setActiveTab("policies")}
-                    className={`px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
                         activeTab === "policies"
-                            ? "border-[#2878C7] text-[#2878C7]"
-                            : "border-transparent text-slate-500 hover:text-slate-800"
+                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
+                            : "text-slate-500 hover:text-slate-700"
                     }`}
                 >
-                    <i className="fa-solid fa-shield-halved"></i>
-                    <span>Global Governance Policies</span>
+                    <i className="fa-solid fa-sliders mr-2"></i>
+                    Global Policies
                 </button>
 
                 <button
-                    onClick={() => setActiveTab("permissions")}
-                    className={`px-4 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
-                        activeTab === "permissions"
-                            ? "border-[#2878C7] text-[#2878C7]"
-                            : "border-transparent text-slate-500 hover:text-slate-800"
+                    type="button"
+                    onClick={() => setActiveTab("user_types")}
+                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
+                        activeTab === "user_types"
+                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
+                            : "text-slate-500 hover:text-slate-700"
                     }`}
                 >
-                    <i className="fa-solid fa-user-lock"></i>
-                    <span>User Type Chat Permissions</span>
+                    <i className="fa-solid fa-user-shield mr-2"></i>
+                    User Type Permissions
+                </button>
+
+                <button
+                    type="button"
+                    onClick={() => setActiveTab("user_scopes")}
+                    className={`pb-3 px-3 text-xs sm:text-sm font-semibold transition-colors relative cursor-pointer ${
+                        activeTab === "user_scopes"
+                            ? "text-[#2878C7] border-b-2 border-[#2878C7]"
+                            : "text-slate-500 hover:text-slate-700"
+                    }`}
+                >
+                    <i className="fa-solid fa-building-user mr-2"></i>
+                    User Department Permissions
                 </button>
             </div>
 
-            {/* TAB 1: Global Policies */}
+            {/* Tab 1: Global Governance Policies */}
             {activeTab === "policies" && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left: Settings Cards */}
-                    <div className="lg:col-span-2 space-y-5">
-                        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                                <i className="fa-solid fa-comments text-[#2878C7]"></i>
-                                <span>Messaging & Communication Access</span>
-                            </h3>
+                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-6">
+                    <div>
+                        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Company-Wide Chat Governance</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Control global communication rules and sharing parameters for all workspace users.</p>
+                    </div>
 
-                            {/* Direct Messaging */}
-                            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+                    <form onSubmit={handleSaveSettings} className="space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Allow Direct Messaging */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
                                 <div>
-                                    <h4 className="text-sm font-bold text-slate-800">1-to-1 Direct Messaging</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">
-                                        Allow colleagues to initiate private one-to-one direct conversations from the User Directory.
-                                    </p>
+                                    <h3 className="text-xs font-bold text-slate-800">1-on-1 Direct Messaging</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">Allow employees to initiate private direct conversations.</p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                     <input
@@ -311,134 +502,15 @@ export default function ChatSettingsMaster() {
                                         onChange={(e) => setSettings({ ...settings, allow_direct_messaging: e.target.checked })}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
                                 </label>
                             </div>
 
-                            {/* Cross-Department Chat */}
-                            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+                            {/* Allow File Sharing */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
                                 <div>
-                                    <h4 className="text-sm font-bold text-slate-800">Cross-Department Chat</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">
-                                        When enabled, members can message users outside their own assigned department.
-                                    </p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={settings.cross_department_chat}
-                                        onChange={(e) => setSettings({ ...settings, cross_department_chat: e.target.checked })}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2878C7]"></div>
-                                </label>
-                            </div>
-
-                            {/* Group Channel Creation Policy */}
-                            <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
-                                <h4 className="text-sm font-bold text-slate-800">Who Can Create Group Channels</h4>
-                                <p className="text-xs text-slate-500">
-                                    Define authorization level required to create collaborative team and project channels.
-                                </p>
-                                <div className="grid grid-cols-2 gap-3 pt-1">
-                                    <label className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
-                                        settings.allow_group_creation === "ALL" ? "border-[#2878C7] bg-blue-50/50 text-[#17365D]" : "border-slate-200 bg-white text-slate-600"
-                                    }`}>
-                                        <input
-                                            type="radio"
-                                            name="group_creation"
-                                            value="ALL"
-                                            checked={settings.allow_group_creation === "ALL"}
-                                            onChange={(e) => setSettings({ ...settings, allow_group_creation: e.target.value })}
-                                            className="text-[#2878C7] focus:ring-[#2878C7]"
-                                        />
-                                        <div>
-                                            <span className="text-xs font-bold block">All Employees & Staff</span>
-                                            <span className="text-[11px] text-slate-400">Any active user can start a group</span>
-                                        </div>
-                                    </label>
-
-                                    <label className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
-                                        settings.allow_group_creation === "ADMIN_ONLY" ? "border-[#2878C7] bg-blue-50/50 text-[#17365D]" : "border-slate-200 bg-white text-slate-600"
-                                    }`}>
-                                        <input
-                                            type="radio"
-                                            name="group_creation"
-                                            value="ADMIN_ONLY"
-                                            checked={settings.allow_group_creation === "ADMIN_ONLY"}
-                                            onChange={(e) => setSettings({ ...settings, allow_group_creation: e.target.value })}
-                                            className="text-[#2878C7] focus:ring-[#2878C7]"
-                                        />
-                                        <div>
-                                            <span className="text-xs font-bold block">Administrators Only</span>
-                                            <span className="text-[11px] text-slate-400">Strict corporate control</span>
-                                        </div>
-                                    </label>
-                                </div>
-                            </div>
-
-                            {/* Broadcast Channel Policy */}
-                            <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-2">
-                                <div className="flex items-center gap-2">
-                                    <h4 className="text-sm font-bold text-slate-800">Broadcast Channel Creation Policy</h4>
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200">
-                                        1-Way Announcements
-                                    </span>
-                                </div>
-                                <p className="text-xs text-slate-500">
-                                    Specifies who can launch department and company-wide broadcast channels where only administrators can post.
-                                </p>
-                                <div className="grid grid-cols-2 gap-3 pt-1">
-                                    <label className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
-                                        settings.allow_broadcast_creation === "ADMIN_ONLY" ? "border-[#2878C7] bg-blue-50/50 text-[#17365D]" : "border-slate-200 bg-white text-slate-600"
-                                    }`}>
-                                        <input
-                                            type="radio"
-                                            name="broadcast_creation"
-                                            value="ADMIN_ONLY"
-                                            checked={settings.allow_broadcast_creation === "ADMIN_ONLY"}
-                                            onChange={(e) => setSettings({ ...settings, allow_broadcast_creation: e.target.value })}
-                                            className="text-[#2878C7] focus:ring-[#2878C7]"
-                                        />
-                                        <div>
-                                            <span className="text-xs font-bold block">Administrators Only (Recommended)</span>
-                                            <span className="text-[11px] text-slate-400">Prevents broadcast spam</span>
-                                        </div>
-                                    </label>
-
-                                    <label className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all ${
-                                        settings.allow_broadcast_creation === "ALL" ? "border-[#2878C7] bg-blue-50/50 text-[#17365D]" : "border-slate-200 bg-white text-slate-600"
-                                    }`}>
-                                        <input
-                                            type="radio"
-                                            name="broadcast_creation"
-                                            value="ALL"
-                                            checked={settings.allow_broadcast_creation === "ALL"}
-                                            onChange={(e) => setSettings({ ...settings, allow_broadcast_creation: e.target.value })}
-                                            className="text-[#2878C7] focus:ring-[#2878C7]"
-                                        />
-                                        <div>
-                                            <span className="text-xs font-bold block">Open to All Staff</span>
-                                            <span className="text-[11px] text-slate-400">Any user can broadcast</span>
-                                        </div>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* File Sharing & Attachments */}
-                        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                                <i className="fa-solid fa-paperclip text-[#2878C7]"></i>
-                                <span>Media & Attachment Governance</span>
-                            </h3>
-
-                            <div className="flex items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/50">
-                                <div>
-                                    <h4 className="text-sm font-bold text-slate-800">Allow File & Media Attachments</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">
-                                        Permits uploading images, documents, spreadsheets, and PDFs in messages.
-                                    </p>
+                                    <h3 className="text-xs font-bold text-slate-800">File & Document Attachments</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">Permit sharing documents, images, and audio files in chat.</p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                     <input
@@ -447,99 +519,356 @@ export default function ChatSettingsMaster() {
                                         onChange={(e) => setSettings({ ...settings, allow_file_sharing: e.target.checked })}
                                         className="sr-only peer"
                                     />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
                                 </label>
                             </div>
 
-                            <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            {/* Group Creation Policy */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
+                                <label className="block text-xs font-bold text-slate-800 mb-1">Group Creation Policy</label>
+                                <p className="text-xs text-slate-500 mb-2">Who is authorized to create project and team group channels.</p>
+                                <select
+                                    value={settings.allow_group_creation}
+                                    onChange={(e) => setSettings({ ...settings, allow_group_creation: e.target.value })}
+                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
+                                >
+                                    <option value="ALL">All Active Employees</option>
+                                    <option value="ADMIN_ONLY">Administrators Only</option>
+                                    <option value="DISABLED">Completely Disabled</option>
+                                </select>
+                            </div>
+
+                            {/* Broadcast Creation Policy */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
+                                <label className="block text-xs font-bold text-slate-800 mb-1">Broadcast Channel Creation</label>
+                                <p className="text-xs text-slate-500 mb-2">Who is authorized to post corporate-wide announcements.</p>
+                                <select
+                                    value={settings.allow_broadcast_creation}
+                                    onChange={(e) => setSettings({ ...settings, allow_broadcast_creation: e.target.value })}
+                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
+                                >
+                                    <option value="ADMIN_ONLY">Administrators Only (Recommended)</option>
+                                    <option value="ALL">All Active Employees</option>
+                                    <option value="DISABLED">Completely Disabled</option>
+                                </select>
+                            </div>
+
+                            {/* Max File Size */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50">
+                                <label className="block text-xs font-bold text-slate-800 mb-1">Maximum Attachment Size (MB)</label>
+                                <p className="text-xs text-slate-500 mb-2">Limit individual file upload size per message.</p>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="100"
+                                    value={settings.max_file_size_mb}
+                                    onChange={(e) => setSettings({ ...settings, max_file_size_mb: parseInt(e.target.value, 10) || 10 })}
+                                    className="w-full text-xs rounded-lg border-slate-300 bg-white py-2 px-2.5 text-slate-700 focus:border-[#2878C7] focus:ring-[#2878C7]"
+                                />
+                            </div>
+
+                            {/* Read Receipts */}
+                            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 flex items-start justify-between gap-4">
                                 <div>
-                                    <h4 className="text-sm font-bold text-slate-800">Maximum Upload Size Limit</h4>
-                                    <p className="text-xs text-slate-500 mt-0.5">
-                                        Per-file attachment threshold for enterprise DLP and bandwidth optimization.
-                                    </p>
+                                    <h3 className="text-xs font-bold text-slate-800">Read Receipts & Double Checks</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">Show read status checkmarks for sent messages.</p>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <label className="relative inline-flex items-center cursor-pointer">
                                     <input
-                                        type="number"
-                                        min="1"
-                                        max="100"
-                                        value={settings.max_file_size_mb}
-                                        onChange={(e) => setSettings({ ...settings, max_file_size_mb: parseInt(e.target.value, 10) || 25 })}
-                                        className="w-20 px-3 py-1.5 border border-slate-300 rounded-lg text-sm text-center font-bold text-slate-800 focus:ring-2 focus:ring-[#2878C7] focus:outline-none"
+                                        type="checkbox"
+                                        checked={settings.read_receipts_enabled}
+                                        onChange={(e) => setSettings({ ...settings, read_receipts_enabled: e.target.checked })}
+                                        className="sr-only peer"
                                     />
-                                    <span className="text-xs font-bold text-slate-500">MB</span>
-                                </div>
+                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2878C7]"></div>
+                                </label>
                             </div>
-                        </div>
-                    </div>
-
-                    {/* Right: Architecture Directive & Summary */}
-                    <div className="space-y-5">
-                        <div className="bg-[#17365D] text-white rounded-2xl p-6 shadow-md space-y-4">
-                            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-xl text-sky-400">
-                                <i className="fa-solid fa-bullhorn"></i>
-                            </div>
-                            <h3 className="text-base font-bold">Mandatory Broadcast Rule</h3>
-                            <p className="text-xs text-slate-200 leading-relaxed">
-                                In accordance with <strong>UI_SPECIFICATION.md § 3.4</strong>, all Announcement Channels and Broadcast Groups enforce:
-                            </p>
-                            <div className="p-3 rounded-xl bg-white/10 border border-white/15 text-xs font-semibold text-amber-300 flex items-center gap-2.5">
-                                <i className="fa-solid fa-lock"></i>
-                                <span>"Only administrators can send messages"</span>
-                            </div>
-                            <p className="text-[11px] text-slate-300">
-                                This rule is strictly validated server-side in the backend controller and reflected client-side with a locked input banner.
-                            </p>
                         </div>
 
-                        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-3">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Governance Quick Summary</h4>
-                            <ul className="text-xs text-slate-600 space-y-2.5">
-                                <li className="flex items-center gap-2">
-                                    <i className="fa-solid fa-circle-check text-emerald-500 text-xs"></i>
-                                    <span>Direct user-to-user chatting: <strong>{settings.allow_direct_messaging ? "Active" : "Disabled"}</strong></span>
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <i className="fa-solid fa-circle-check text-emerald-500 text-xs"></i>
-                                    <span>Cross-department messaging: <strong>{settings.cross_department_chat ? "Enabled" : "Restricted"}</strong></span>
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <i className="fa-solid fa-circle-check text-emerald-500 text-xs"></i>
-                                    <span>File sharing capacity: <strong>{settings.max_file_size_mb} MB max</strong></span>
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <i className="fa-solid fa-circle-check text-emerald-500 text-xs"></i>
-                                    <span>Group channel creation: <strong>{settings.allow_group_creation}</strong></span>
-                                </li>
-                            </ul>
+                        <div className="flex justify-end pt-3">
+                            <button
+                                type="submit"
+                                disabled={savingSettings}
+                                className="px-4 py-2 rounded-lg text-xs font-medium bg-[#17365D] text-white hover:bg-[#1f477a] transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                            >
+                                {savingSettings ? (
+                                    <>
+                                        <i className="fa-solid fa-spinner fa-spin"></i>
+                                        <span>Saving Policies...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <i className="fa-solid fa-check"></i>
+                                        <span>Save Global Policies</span>
+                                    </>
+                                )}
+                            </button>
                         </div>
-                    </div>
+                    </form>
                 </div>
             )}
 
-            {/* TAB 2: User Types Permissions DataTable */}
-            {activeTab === "permissions" && (
-                <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                        <div>
-                            <h3 className="text-sm font-bold text-slate-800">User Types Communication Matrix</h3>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                                Configure which user types (from User Types Master) are authorized to chat, create groups, or post broadcasts
-                            </p>
-                        </div>
-                        <span className="text-xs px-2.5 py-1 rounded-full bg-blue-50 text-[#2878C7] font-bold border border-blue-200">
-                            {userTypePerms.length} User Types Configured
-                        </span>
+            {/* Tab 2: User Type Permissions Matrix */}
+            {activeTab === "user_types" && (
+                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-4">
+                    <div>
+                        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Role & User Type Permissions</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Control which features are accessible according to user roles.</p>
                     </div>
 
                     <DataTable
-                        title="Chat Permissions"
                         data={userTypePerms}
                         columns={permColumns}
                         loading={loading}
-                        searchPlaceholder="Search user types..."
-                        tableId="chat_user_type_permissions_table"
+                        searchPlaceholder="Filter user roles..."
                     />
+                </div>
+            )}
+
+            {/* Tab 3: User Chat & Department Communication Scope */}
+            {activeTab === "user_scopes" && (
+                <div className="bg-white border border-slate-200/80 rounded-xl p-5 sm:p-6 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">User Chat & Department Permissions</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                By default, users can only chat with colleagues in their own department. Configure cross-department or company-wide scope per user.
+                            </p>
+                        </div>
+                    </div>
+
+                    <DataTable
+                        data={userScopes}
+                        columns={userScopeColumns}
+                        loading={loading}
+                        searchPlaceholder="Search employee by name, username or department..."
+                    />
+                </div>
+            )}
+
+            {/* Edit User Scope Modal */}
+            {isEditModalOpen && editModalUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-8">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                            <div>
+                                <h3 className="font-bold text-slate-900 text-sm">Configure User Chat Permissions</h3>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {editModalUser.name} (@{editModalUser.username}) &bull; Dept: {editModalUser.department_name || "Unassigned"}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setIsEditModalOpen(false)}
+                                className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+                            >
+                                <i className="fa-solid fa-xmark text-base"></i>
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <form onSubmit={handleSaveUserScopeSubmit} className="p-6 space-y-5">
+                            {/* Chat Scope Selector */}
+                            <div>
+                                <label className="block text-xs font-bold text-slate-800 mb-2">Department Communication Scope</label>
+                                <div className="space-y-2">
+                                    {/* Option 1: Department Only (Default) */}
+                                    <label
+                                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                            scopeFormData.chat_scope === "DEPARTMENT_ONLY"
+                                                ? "border-[#2878C7] bg-blue-50/30"
+                                                : "border-slate-200 hover:bg-slate-50"
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="chat_scope"
+                                            value="DEPARTMENT_ONLY"
+                                            checked={scopeFormData.chat_scope === "DEPARTMENT_ONLY"}
+                                            onChange={() => setScopeFormData({ ...scopeFormData, chat_scope: "DEPARTMENT_ONLY" })}
+                                            className="mt-0.5 text-[#2878C7] focus:ring-[#2878C7]"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-bold text-slate-800 block">Department Only (Default)</span>
+                                            <span className="text-[11px] text-slate-500">
+                                                Can only chat with members in their own assigned department ({editModalUser.department_name || "Unassigned"}).
+                                            </span>
+                                        </div>
+                                    </label>
+
+                                    {/* Option 2: Multi-Department (Custom Cross Chat) */}
+                                    <label
+                                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                            scopeFormData.chat_scope === "MULTI_DEPARTMENT"
+                                                ? "border-[#2878C7] bg-blue-50/30"
+                                                : "border-slate-200 hover:bg-slate-50"
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="chat_scope"
+                                            value="MULTI_DEPARTMENT"
+                                            checked={scopeFormData.chat_scope === "MULTI_DEPARTMENT"}
+                                            onChange={() => setScopeFormData({ ...scopeFormData, chat_scope: "MULTI_DEPARTMENT" })}
+                                            className="mt-0.5 text-[#2878C7] focus:ring-[#2878C7]"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-bold text-slate-800 block">Multi-Department (Designated Cross-Chat)</span>
+                                            <span className="text-[11px] text-slate-500">
+                                                Can chat with their own department plus specific authorized departments.
+                                            </span>
+                                        </div>
+                                    </label>
+
+                                    {/* Option 3: Company-Wide */}
+                                    <label
+                                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                            scopeFormData.chat_scope === "COMPANY_WIDE"
+                                                ? "border-[#2878C7] bg-blue-50/30"
+                                                : "border-slate-200 hover:bg-slate-50"
+                                        }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="chat_scope"
+                                            value="COMPANY_WIDE"
+                                            checked={scopeFormData.chat_scope === "COMPANY_WIDE"}
+                                            onChange={() => setScopeFormData({ ...scopeFormData, chat_scope: "COMPANY_WIDE" })}
+                                            className="mt-0.5 text-[#2878C7] focus:ring-[#2878C7]"
+                                        />
+                                        <div>
+                                            <span className="text-xs font-bold text-slate-800 block">Company-Wide (All Departments)</span>
+                                            <span className="text-[11px] text-slate-500">
+                                                Full communication clearance with every member and department in the company.
+                                            </span>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Department Multi-Select (Only visible when MULTI_DEPARTMENT is selected) */}
+                            {scopeFormData.chat_scope === "MULTI_DEPARTMENT" && (
+                                <div className="p-3.5 rounded-lg border border-blue-200 bg-blue-50/20 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-xs font-bold text-slate-800">
+                                            Authorized Cross-Departments ({scopeFormData.allowed_department_ids.length} selected)
+                                        </label>
+                                        <span className="text-[11px] text-slate-500">Own department is always accessible</span>
+                                    </div>
+
+                                    {departments.length === 0 ? (
+                                        <p className="text-xs text-slate-400 italic">No departments available in this company.</p>
+                                    ) : (
+                                        <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
+                                            {departments.map(dept => {
+                                                const isOwnDept = dept.id === editModalUser.department_id;
+                                                const isChecked = isOwnDept || scopeFormData.allowed_department_ids.includes(dept.id);
+
+                                                return (
+                                                    <label
+                                                        key={dept.id}
+                                                        className={`flex items-center justify-between py-1.5 px-2 rounded cursor-pointer text-xs select-none ${
+                                                            isOwnDept ? "bg-slate-100/70 opacity-70" : "hover:bg-white"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                disabled={isOwnDept}
+                                                                onChange={() => handleToggleAllowedDepartment(dept.id)}
+                                                                className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                                            />
+                                                            <span className="font-medium text-slate-800">{dept.department_name}</span>
+                                                        </div>
+                                                        {isOwnDept ? (
+                                                            <span className="text-[10px] text-slate-400 font-mono">(User's Dept)</span>
+                                                        ) : (
+                                                            <span className="text-[10px] text-slate-400 font-mono">#{dept.id}</span>
+                                                        )}
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Additional Chat Capabilities */}
+                            <div className="space-y-2 border-t border-slate-100 pt-3">
+                                <label className="block text-xs font-bold text-slate-800">Feature Access for this User</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={scopeFormData.can_direct_chat}
+                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_direct_chat: e.target.checked })}
+                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        />
+                                        <span className="text-xs font-medium text-slate-700">1-on-1 Direct Chat</span>
+                                    </label>
+
+                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={scopeFormData.can_create_group}
+                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_create_group: e.target.checked })}
+                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        />
+                                        <span className="text-xs font-medium text-slate-700">Create Groups</span>
+                                    </label>
+
+                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={scopeFormData.can_create_broadcast}
+                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_create_broadcast: e.target.checked })}
+                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        />
+                                        <span className="text-xs font-medium text-slate-700">Create Broadcasts</span>
+                                    </label>
+
+                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={scopeFormData.can_send_files}
+                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_send_files: e.target.checked })}
+                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        />
+                                        <span className="text-xs font-medium text-slate-700">Send Attachments</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Modal Actions */}
+                            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditModalOpen(false)}
+                                    className="px-4 py-2 rounded-lg text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={savingScope}
+                                    className="px-4 py-2 rounded-lg text-xs font-medium bg-[#17365D] text-white hover:bg-[#1f477a] transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                                >
+                                    {savingScope ? (
+                                        <>
+                                            <i className="fa-solid fa-spinner fa-spin"></i>
+                                            <span>Saving...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-check"></i>
+                                            <span>Save Permissions</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
         </div>

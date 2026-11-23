@@ -107,6 +107,27 @@ const createChatTables = async () => {
     `;
     await db.execute(createUserTypePermsQuery);
 
+    // 6. User Specific Department Communication Permissions Table
+    const createUserDeptPermsQuery = `
+        CREATE TABLE IF NOT EXISTS chat_user_department_permissions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            company_id INT DEFAULT 1,
+            user_id INT NOT NULL,
+            chat_scope ENUM('DEPARTMENT_ONLY', 'MULTI_DEPARTMENT', 'COMPANY_WIDE') NOT NULL DEFAULT 'DEPARTMENT_ONLY',
+            allowed_department_ids JSON DEFAULT NULL,
+            can_direct_chat BOOLEAN DEFAULT TRUE,
+            can_create_group BOOLEAN DEFAULT TRUE,
+            can_create_broadcast BOOLEAN DEFAULT FALSE,
+            can_send_files BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_cudp_user (user_id),
+            INDEX idx_cudp_company (company_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `;
+    await db.execute(createUserDeptPermsQuery);
+
     // Ensure default settings exist for company 1
     try {
         const [settingsRows] = await db.execute("SELECT id FROM chat_settings WHERE company_id = 1");
@@ -157,11 +178,60 @@ const createChatTables = async () => {
 };
 
 /**
- * Get or create 1-to-1 direct conversation between two users
+ * Get or create 1-to-1 direct conversation between two users with department scope enforcement
  */
 const getOrCreateDirectConversation = async (currentUserId, targetUserId, companyId = 1) => {
     if (currentUserId === targetUserId) {
         throw new Error("Cannot create a direct conversation with yourself");
+    }
+
+    // 1. Verify caller communication scope
+    const [senderRows] = await db.execute(
+        "SELECT id, role, department_id FROM users WHERE id = ?",
+        [currentUserId]
+    );
+    const sender = senderRows[0];
+    const isGlobalAdmin = sender?.role === "admin" || sender?.role === "super admin";
+
+    if (!isGlobalAdmin) {
+        const [permRows] = await db.execute(
+            "SELECT chat_scope, allowed_department_ids, can_direct_chat FROM chat_user_department_permissions WHERE user_id = ?",
+            [currentUserId]
+        );
+        const perm = permRows[0] || { chat_scope: "DEPARTMENT_ONLY", allowed_department_ids: null, can_direct_chat: true };
+
+        if (!perm.can_direct_chat) {
+            throw new Error("Direct 1-on-1 messaging is disabled for your account.");
+        }
+
+        const [targetRows] = await db.execute(
+            "SELECT id, department_id FROM users WHERE id = ?",
+            [targetUserId]
+        );
+        const target = targetRows[0];
+
+        if (perm.chat_scope === "DEPARTMENT_ONLY") {
+            const senderDept = sender?.department_id || null;
+            const targetDept = target?.department_id || null;
+            if (senderDept !== targetDept || senderDept === null) {
+                throw new Error("Department Policy: You can only chat with members in your own department.");
+            }
+        } else if (perm.chat_scope === "MULTI_DEPARTMENT") {
+            let allowed = [];
+            if (perm.allowed_department_ids) {
+                try {
+                    allowed = typeof perm.allowed_department_ids === "string"
+                        ? JSON.parse(perm.allowed_department_ids)
+                        : perm.allowed_department_ids;
+                } catch (_) { allowed = []; }
+            }
+            const senderDept = sender?.department_id;
+            const targetDept = target?.department_id;
+            const isMatch = targetDept === senderDept || (targetDept && allowed.includes(targetDept));
+            if (!isMatch) {
+                throw new Error("Department Policy: You are not authorized to message members outside your designated departments.");
+            }
+        }
     }
 
     // Check if direct conversation already exists between these 2 users
@@ -670,6 +740,90 @@ const saveChatUserTypePermission = async (companyId = 1, userTypeId, perms) => {
     return { userTypeId, ...perms };
 };
 
+/**
+ * Fetch all users with their Chat & Department Scope permissions
+ */
+const getAllUserChatPermissions = async (companyId = 1) => {
+    const query = `
+        SELECT 
+            u.id AS user_id, 
+            u.name, 
+            u.username, 
+            u.email, 
+            u.role, 
+            u.active,
+            u.department_id, 
+            dept.department_name, 
+            ut.type_name,
+            COALESCE(cudp.chat_scope, 'DEPARTMENT_ONLY') AS chat_scope,
+            cudp.allowed_department_ids,
+            COALESCE(cudp.can_direct_chat, TRUE) AS can_direct_chat,
+            COALESCE(cudp.can_create_group, TRUE) AS can_create_group,
+            COALESCE(cudp.can_create_broadcast, FALSE) AS can_create_broadcast,
+            COALESCE(cudp.can_send_files, TRUE) AS can_send_files
+        FROM users u
+        LEFT JOIN departments dept ON dept.id = u.department_id
+        LEFT JOIN user_types ut ON ut.id = u.user_type_id
+        LEFT JOIN chat_user_department_permissions cudp ON cudp.user_id = u.id AND cudp.company_id = ?
+        WHERE u.active = TRUE AND (u.company_id = ? OR ? = 1)
+        ORDER BY u.name ASC
+    `;
+    const [rows] = await db.execute(query, [companyId, companyId, companyId]);
+    return rows.map(r => ({
+        ...r,
+        allowed_department_ids: typeof r.allowed_department_ids === 'string'
+            ? (() => { try { return JSON.parse(r.allowed_department_ids); } catch (_) { return []; } })()
+            : (r.allowed_department_ids || []),
+        can_direct_chat: Boolean(r.can_direct_chat),
+        can_create_group: Boolean(r.can_create_group),
+        can_create_broadcast: Boolean(r.can_create_broadcast),
+        can_send_files: Boolean(r.can_send_files)
+    }));
+};
+
+/**
+ * Save / Update User specific Chat & Department Scope permission
+ */
+const saveUserChatPermission = async (companyId = 1, userId, data) => {
+    const {
+        chat_scope = 'DEPARTMENT_ONLY',
+        allowed_department_ids = [],
+        can_direct_chat = true,
+        can_create_group = true,
+        can_create_broadcast = false,
+        can_send_files = true
+    } = data;
+
+    const formattedAllowedDepts = Array.isArray(allowed_department_ids) && allowed_department_ids.length > 0
+        ? JSON.stringify(allowed_department_ids)
+        : null;
+
+    await db.execute(`
+        INSERT INTO chat_user_department_permissions 
+        (company_id, user_id, chat_scope, allowed_department_ids, can_direct_chat, can_create_group, can_create_broadcast, can_send_files)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            chat_scope = VALUES(chat_scope),
+            allowed_department_ids = VALUES(allowed_department_ids),
+            can_direct_chat = VALUES(can_direct_chat),
+            can_create_group = VALUES(can_create_group),
+            can_create_broadcast = VALUES(can_create_broadcast),
+            can_send_files = VALUES(can_send_files),
+            updated_at = NOW()
+    `, [
+        companyId,
+        userId,
+        chat_scope,
+        formattedAllowedDepts,
+        can_direct_chat ? 1 : 0,
+        can_create_group ? 1 : 0,
+        can_create_broadcast ? 1 : 0,
+        can_send_files ? 1 : 0
+    ]);
+
+    return { userId, ...data };
+};
+
 module.exports = {
     createChatTables,
     getOrCreateDirectConversation,
@@ -682,5 +836,7 @@ module.exports = {
     getChatSettings,
     updateChatSettings,
     getChatUserTypePermissions,
-    saveChatUserTypePermission
+    saveChatUserTypePermission,
+    getAllUserChatPermissions,
+    saveUserChatPermission
 };
