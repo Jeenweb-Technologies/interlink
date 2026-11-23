@@ -11,6 +11,9 @@ import CreateUser from "./pages/admin/user/CreateUser";
 import CreateUserType from "./pages/admin/user/CreateUserType";
 import ActivityReport from "./pages/admin/ActivityReport";
 import Profile from "./pages/Profile";
+import TasksPage from "./pages/tasks/TasksPage";
+import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
+import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -38,6 +41,18 @@ export default function AppRoutes() {
                     <Route
                         path="/user/home"
                         element={<UserHome />}
+                    />
+                    <Route
+                        path="/tasks"
+                        element={<TasksPage />}
+                    />
+                    <Route
+                        path="/projects"
+                        element={<ProjectsPortfolioPage />}
+                    />
+                    <Route
+                        path="/projects/:id"
+                        element={<ProjectWorkspacePage />}
                     />
                     <Route
                         path="/profile"

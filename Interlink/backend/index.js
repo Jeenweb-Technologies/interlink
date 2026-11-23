@@ -11,12 +11,16 @@ const { connectDB } = require("./config/db.js");
 const authRoutes = require("./routes/authRoutes.js");
 const adminRoutes = require("./routes/adminRoutes.js");
 const userTypeMasterRoutes = require("./routes/userTypeMasterRoutes.js");
+const taskRoutes = require("./routes/taskRoutes.js");
+const projectRoutes = require("./routes/projectRoutes.js");
 
 // Model Initializations
 const { initUserModel } = require("./models/userModel.js");
 const { createUserTypesTable, createUserTypePermissionsTable } = require("./models/userTypeModel.js");
 const { createAuditLogsTable } = require("./models/auditLogModel.js");
 const { createUserDevicesTable } = require("./models/deviceModel.js");
+const { createTaskTables } = require("./models/taskModel.js");
+const { createProjectTables } = require("./models/projectModel.js");
 
 
 const app = express();
@@ -61,6 +65,8 @@ app.use((req, res, next) => {
 app.use(["/api/auth", "/auth"], authRoutes);
 app.use(["/api/admin", "/admin"], adminRoutes);
 app.use(["/api/usertypes", "/usertypes"], userTypeMasterRoutes);
+app.use(["/api/tasks", "/tasks"], taskRoutes);
+app.use(["/api/projects", "/projects"], projectRoutes);
 
 
 // Global 404 handler
@@ -85,6 +91,8 @@ const startServer = async () => {
         await createUserTypePermissionsTable();
         await createAuditLogsTable();
         await createUserDevicesTable();
+        await createTaskTables();
+        await createProjectTables();
 
         console.log("All database tables are initialized and ready.");
 

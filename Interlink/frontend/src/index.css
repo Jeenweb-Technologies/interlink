@@ -1,7 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
+  --font-sans: "Inter", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  
+  /* Interlink Canonical Design Tokens */
+  --color-brand-primary: #17365D;
+  --color-brand-primary-hover: #102642;
+  --color-brand-accent: #2878C7;
+  --color-brand-accent-hover: #1e63a8;
+  --color-canvas-bg: #F6F8FB;
+  --color-border-subtle: #E2E8F0;
+  --color-text-title: #17212F;
+  --color-text-subtitle: #5B6573;
+  --color-text-placeholder: #94A3B8;
+
+  --color-danger-alert: #EF4444;
+  --color-warning-alert: #F59E0B;
+  --color-success-alert: #10B981;
+  --color-info-alert: #3B82F6;
+
   /* Primary brand color and its variations */
   --color-indigo-50: #f0f7ff;
   --color-indigo-100: #e0efff;
@@ -9,7 +26,7 @@
   --color-indigo-300: #94c6ff;
   --color-indigo-400: #66aeff;
   --color-indigo-500: #0066ff;
-  --color-indigo-600: #0056cf; /* Target primary brand color */
+  --color-indigo-600: #0056cf;
   --color-indigo-700: #0040a1;
   --color-indigo-800: #002d72;
   --color-indigo-900: #001b44;
@@ -23,7 +40,7 @@
   --color-blue-600: #0056cf;
   --color-blue-700: #0040a1;
   --color-blue-800: #002d72;
-  --color-blue-900: #0056cf; /* Target header/pagination color */
+  --color-blue-900: #0056cf;
 }
 
 /* Login page: white placeholder text for glass inputs */

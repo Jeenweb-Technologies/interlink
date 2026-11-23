@@ -277,7 +277,7 @@ export default function DataTable({
         <div className="border-b border-slate-200 bg-white px-4 py-4 rounded-t-2xl">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-blue-900">{title}</h1>
+              <h1 className="text-2xl font-bold text-[#17365D]">{title}</h1>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {/* Search */}
@@ -286,7 +286,7 @@ export default function DataTable({
                 value={search}
                 onChange={(e) => handleSearch(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="h-10 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm outline-none focus:border-blue-600"
+                className="h-10 rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm outline-none focus:border-[#2878C7]"
               />
 
               {/* Toggle actions (e.g. Show Deactivated toggle) */}
@@ -300,13 +300,13 @@ export default function DataTable({
                     title="Show / hide columns"
                     className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border relative transition-colors ${
                       showColumnChooser
-                        ? 'border-blue-900 bg-blue-50 text-blue-900'
+                        ? 'border-[#17365D] bg-slate-100 text-[#17365D]'
                         : 'border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50'
                     }`}
                   >
                     <ColumnsIcon />
                     {hiddenColumns.size > 0 && (
-                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-blue-900 text-white text-[10px] font-bold leading-none shadow">
+                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[#17365D] text-white text-[10px] font-bold leading-none shadow">
                         {hiddenColumns.size}
                       </span>
                     )}
@@ -343,7 +343,7 @@ export default function DataTable({
                                 checked={isVisible}
                                 disabled={isLocked}
                                 onChange={() => !isLocked && handleToggleColumn(col.key)}
-                                className="accent-blue-900 h-3.5 w-3.5 flex-shrink-0"
+                                className="accent-[#17365D] h-3.5 w-3.5 flex-shrink-0"
                               />
                               <span className={`flex-1 font-medium ${isVisible ? 'text-slate-700' : 'text-slate-400'}`}>
                                 {col.label}
@@ -362,7 +362,7 @@ export default function DataTable({
                       <div className="border-t border-slate-100 p-2">
                         <button
                           onClick={handleResetColumns}
-                          className="w-full rounded-lg py-1.5 text-xs font-semibold text-blue-900 hover:bg-blue-50 transition-colors flex items-center justify-center gap-1"
+                          className="w-full rounded-lg py-1.5 text-xs font-semibold text-[#17365D] hover:bg-slate-100 transition-colors flex items-center justify-center gap-1"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="h-3.5 w-3.5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -406,7 +406,7 @@ export default function DataTable({
                       onDragStart={() => setDraggedColumn(column.key)}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={() => handleDrop(column.key)}
-                      className="border-b border-blue-800 bg-blue-900 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-white"
+                      className="border-b border-[#102642] bg-[#17365D] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-white select-none"
                       style={{ minWidth: originalColumn.minWidth || '140px' }}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -469,7 +469,7 @@ export default function DataTable({
             <select
               value={pageSize}
               onChange={(e) => handlePageSize(e.target.value)}
-              className="h-8 rounded-md border border-slate-300 bg-slate-50 px-2 text-sm text-slate-700 outline-none focus:border-blue-500"
+              className="h-8 rounded-md border border-slate-300 bg-slate-50 px-2 text-sm text-slate-700 outline-none focus:border-[#2878C7]"
             >
               <option value={8}>8</option>
               <option value={25}>25</option>
@@ -515,7 +515,7 @@ export default function DataTable({
                     onClick={() => setCurrentPage(p)}
                     className={`flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium transition-colors ${
                       p === currentPage
-                        ? 'bg-blue-900 text-white'
+                        ? 'bg-[#17365D] text-white'
                         : 'border border-slate-200 text-slate-600 hover:border-slate-400 hover:text-slate-900'
                     }`}
                   >

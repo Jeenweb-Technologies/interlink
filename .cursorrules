@@ -1,0 +1,18 @@
+# Project UI/UX & Frontend Development Rules
+
+All future UI development across Web, Android, and iOS MUST strictly follow the specifications, design tokens, component standards, screen inventories, and behavioral rules defined in:
+- `c:\Interlink\UI_SPECIFICATION.md`
+
+### Key Non-Negotiables:
+1. Strict Design Tokens:
+   - Primary: Deep Navy `#17365D`
+   - Accent: Blue `#2878C7`
+   - Canvas: `#F6F8FB`
+   - Text: `#17212F` (Primary), `#5B6573` (Secondary)
+   - Borders: `#E2E8F0`
+   - Spacing: 4px base scale (8, 12, 16, 24, 32px)
+2. Every screen must have a valid screen ID (`AUTH-01..05`, `DASH-01..03`, `EMP-01..05`, `CHAT-01..07`, `MEET-01..05`, `MAIL-01..07`, `TASK-01..05`, `PROJ-01..06`, `CAL-01..04`, `NOTE-01..03`, `KB-01..04`, `DOC-01..16`, `FORM-01..04`, `TICKET-01..04`, `ATT-01..03`, `TIME-01..03`, `EXP-01..04`, `PERF-01..04`, `WF-01..03`, `REP-01..03`, `INT-01..02`, `SET-01..05`, `SAAS-01..05`).
+3. Every screen must implement all 6 states: `loading skeleton`, `empty`, `no search results`, `error/retry`, `permission-denied`, and `success`.
+4. Chat group setting: "Only administrators can send messages" must be strictly supported on UI and backend.
+5. Documents: Granular permissions, watermarking, versions, audit trail, and secure viewer without exposing raw public file URLs.
+6. **STRICT EXCLUSION**: Do NOT implement purchase-request approvals anywhere.
