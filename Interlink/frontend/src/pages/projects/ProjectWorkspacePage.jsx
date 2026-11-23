@@ -152,14 +152,14 @@ export default function ProjectWorkspacePage() {
     };
 
     const tabs = [
-        { id: "overview", label: "Overview" },
-        { id: "tasks", label: `Tasks (${tasks.length})` },
-        { id: "subprojects", label: `Sub-projects (${project?.metrics?.subprojects_count || 0})` },
-        { id: "gantt", label: "Gantt & Timeline" },
-        { id: "milestones_risks", label: "Milestones & Risks" },
-        { id: "workload", label: "Team Workload" },
-        { id: "documents", label: `Files (${project?.metrics?.total_documents || 0})` },
-        { id: "report", label: "Status Report" }
+        { id: "overview", label: "Overview", icon: "fa-solid fa-gauge-high" },
+        { id: "tasks", label: `Tasks (${tasks.length})`, icon: "fa-solid fa-list-check" },
+        { id: "subprojects", label: `Sub-projects (${project?.metrics?.subprojects_count || 0})`, icon: "fa-solid fa-folder-tree" },
+        { id: "gantt", label: "Gantt & Timeline", icon: "fa-solid fa-chart-gantt" },
+        { id: "milestones_risks", label: "Milestones & Risks", icon: "fa-solid fa-shield-halved" },
+        { id: "workload", label: "Team Workload", icon: "fa-solid fa-users-gear" },
+        { id: "documents", label: `Files (${project?.metrics?.total_documents || 0})`, icon: "fa-regular fa-folder-open" },
+        { id: "report", label: "Status Report", icon: "fa-solid fa-file-contract" }
     ];
 
     return (
@@ -180,25 +180,23 @@ export default function ProjectWorkspacePage() {
                             onOpenBaselineModal={handleFreezeBaseline}
                         />
 
-                        {/* Navigation Filter / Workspace Tabs Bar: Full width, strictly equal spacing, clean typography without icons */}
+                        {/* Navigation Tabs Bar: Full width, strictly equal spacing across all 8 tabs */}
                         <div className="w-full bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-x-auto scrollbar-none">
-                            <div className="grid grid-cols-8 w-full min-w-[820px] text-xs font-semibold">
-                                {tabs.map((tab) => {
-                                    const isActive = activeTab === tab.id;
-                                    return (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => setActiveTab(tab.id)}
-                                            className={`py-3.5 px-3 border-b-2 transition-all cursor-pointer flex items-center justify-center whitespace-nowrap text-center select-none ${
-                                                isActive
-                                                    ? "border-[#17365D] text-[#17365D] font-bold bg-slate-50/50"
-                                                    : "border-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/30"
-                                            }`}
-                                        >
-                                            <span>{tab.label}</span>
-                                        </button>
-                                    );
-                                })}
+                            <div className="grid grid-cols-8 w-full min-w-[800px] text-xs font-bold divide-x divide-slate-100">
+                                {tabs.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`py-3.5 px-2 border-b-2 transition-all cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap text-center ${
+                                            activeTab === tab.id
+                                                ? "border-[#17365D] text-[#17365D] bg-blue-50/20"
+                                                : "border-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/50"
+                                        }`}
+                                    >
+                                        <i className={`${tab.icon} text-xs`}></i>
+                                        <span>{tab.label}</span>
+                                    </button>
+                                ))}
                             </div>
                         </div>
 

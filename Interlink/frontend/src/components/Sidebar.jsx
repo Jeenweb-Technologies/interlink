@@ -1099,44 +1099,6 @@ export default function Sidebar({
                                     <span className="truncate">Task Management</span>
                                 )}
                             </button>
-
-                            <button
-                                onClick={() => handleNav("/chat")}
-                                title={isCollapsed ? "Chat & Channels" : ""}
-                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
-                                    location.pathname.startsWith("/chat")
-                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
-                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
-                                } ${isCollapsed ? "justify-center" : ""}`}
-                            >
-                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                    location.pathname.startsWith("/chat") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
-                                }`}>
-                                    <i className="fa-solid fa-comments"></i>
-                                </span>
-                                {!isCollapsed && (
-                                    <span className="truncate">Chat &amp; Channels</span>
-                                )}
-                            </button>
-
-                            <button
-                                onClick={() => handleNav("/peoples")}
-                                title={isCollapsed ? "People & Directory" : ""}
-                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
-                                    location.pathname.startsWith("/peoples")
-                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
-                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
-                                } ${isCollapsed ? "justify-center" : ""}`}
-                            >
-                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                    location.pathname.startsWith("/peoples") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
-                                }`}>
-                                    <i className="fa-solid fa-address-book"></i>
-                                </span>
-                                {!isCollapsed && (
-                                    <span className="truncate">People &amp; Directory</span>
-                                )}
-                            </button>
                         </div>
                     </div>
 
@@ -1359,3 +1321,4 @@ export function DashboardLayout() {
         </div>
     );
 }
+
