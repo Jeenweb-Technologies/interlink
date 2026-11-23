@@ -4,7 +4,7 @@ import { useLocation } from "react-router-dom";
 
 function App() {
     const location = useLocation();
-    const standaloneFooterPaths = ["/device-registration", "/pending-approval"];
+    const standaloneFooterPaths = ["/device-registration", "/pending-approval", "/org-pending"];
     const showStandaloneFooter = standaloneFooterPaths.includes(location.pathname);
 
     return (

@@ -21,8 +21,12 @@ export default function ProtectedRoute({ allowedRole, allowedModule, requiredMas
         );
     }
 
-    // Role check (admin or specific master permission)
-    if (allowedRole && user.role !== allowedRole && !(allowedRole === "admin" && user.role === "super admin")) {
+    // Role check (admin, developer, or specific master permission)
+    const roleMatches = Array.isArray(allowedRole)
+        ? allowedRole.includes(user.role)
+        : (user.role === allowedRole || (allowedRole === "admin" && (user.role === "super admin" || user.role === "super_admin")));
+
+    if (allowedRole && !roleMatches) {
         const isAllowedByMaster = (requiredMaster && hasPermission(requiredMaster, requiredAction)) ||
                                   (requiredMasters && requiredMasters.some(m => hasPermission(m, requiredAction)));
         if (!isAllowedByMaster) {
@@ -40,8 +44,8 @@ export default function ProtectedRoute({ allowedRole, allowedModule, requiredMas
 
     // Module check
     if (allowedModule) {
-        // Admin has access to everything
-        if (user.role !== "admin" && user.role !== "super admin") {
+        // Admin or developer has access to everything
+        if (user.role !== "admin" && user.role !== "super admin" && user.role !== "super_admin" && user.role !== "developer") {
             const hasModule = user.modules && user.modules.includes(allowedModule);
             if (!hasModule) {
                 return <Navigate to="/user/home" replace />;

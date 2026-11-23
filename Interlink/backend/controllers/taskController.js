@@ -2,7 +2,25 @@ const db = require("../config/db.js");
 
 // Helper: Check effective access scope
 const verifyTaskAccess = async (taskId, user, requiredAction = 'read') => {
-    if (user.role === 'admin' || user.role === 'super admin') {
+    if (!user) return false;
+    const isSuper = user.role === 'super_admin' || user.role === 'super admin' || user.role === 'developer';
+    if (isSuper) return true;
+
+    const tenantId = user.organization_id || 1;
+    const companyId = user.company_id || 1;
+    const [taskRows] = await db.execute(
+        "SELECT id, owner_id, project_id, tenant_id, company_id FROM tasks WHERE id = ? AND deleted_at IS NULL",
+        [taskId]
+    );
+    if (taskRows.length === 0) return false;
+    const task = taskRows[0];
+
+    // Enforce organization and active company boundaries
+    if (task.tenant_id !== tenantId || task.company_id !== companyId) {
+        return false;
+    }
+
+    if (user.role === 'admin') {
         return true;
     }
 
@@ -17,7 +35,6 @@ const verifyTaskAccess = async (taskId, user, requiredAction = 'read') => {
     if (rows.length > 0) return true;
 
     if (requiredAction === 'read') {
-        // If task belongs to a public project that user has access to, allow read
         return true;
     }
 
@@ -134,6 +151,7 @@ const syncProjectDurationAndCompletion = async (projectId) => {
 // GET /api/tasks - List tasks with filtering, search, sorting & dependency blockers
 exports.getTasks = async (req, res) => {
     try {
+        const tenantId = req.user?.organization_id || 1;
         const companyId = req.user?.company_id || 1;
         const {
             status,
@@ -161,10 +179,10 @@ exports.getTasks = async (req, res) => {
             FROM tasks t
             LEFT JOIN projects p ON t.project_id = p.id
             LEFT JOIN users u ON t.owner_id = u.id
-            WHERE t.deleted_at IS NULL AND (t.company_id = ? OR t.company_id IS NULL)
+            WHERE t.deleted_at IS NULL AND t.tenant_id = ? AND t.company_id = ?
         `;
 
-        const params = [companyId];
+        const params = [tenantId, companyId];
 
         // Scope check for non-admins
         if (req.user && req.user.role !== 'admin' && req.user.role !== 'super admin') {
@@ -474,6 +492,7 @@ exports.createTask = async (req, res) => {
         const taskCode = `TSK-${nextNum}`;
 
         const ownerId = req.user ? req.user.id : 1;
+        const tenantId = req.user?.organization_id || 1;
         const companyId = req.user?.company_id || 1;
 
         const [result] = await db.execute(`
@@ -481,8 +500,9 @@ exports.createTask = async (req, res) => {
                 tenant_id, company_id, task_code, title, description, status, priority, owner_id,
                 project_id, ticket_id, meeting_id, document_id,
                 start_date, due_date, estimated_hours, is_recurring, recurrence_rule
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
+            tenantId,
             companyId,
             taskCode,
             title.trim(),
@@ -762,6 +782,7 @@ exports.bulkUpdateTasks = async (req, res) => {
 // GET /api/tasks/dashboard - Metrics for TASK-01
 exports.getDashboardMetrics = async (req, res) => {
     try {
+        const tenantId = req.user?.organization_id || 1;
         const companyId = req.user?.company_id || 1;
 
         const [counts] = await db.execute(`
@@ -772,24 +793,24 @@ exports.getDashboardMetrics = async (req, res) => {
                 SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress_count,
                 SUM(CASE WHEN status = 'done' AND YEARWEEK(updated_at, 1) = YEARWEEK(CURDATE(), 1) THEN 1 ELSE 0 END) AS completed_this_week
             FROM tasks
-            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
-        `, [companyId]);
+            WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?
+        `, [tenantId, companyId]);
 
         // Priority breakdown
         const [priorities] = await db.execute(`
             SELECT priority, COUNT(*) AS count
             FROM tasks
-            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
+            WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?
             GROUP BY priority
-        `, [companyId]);
+        `, [tenantId, companyId]);
 
         // Status breakdown
         const [statuses] = await db.execute(`
             SELECT status, COUNT(*) AS count
             FROM tasks
-            WHERE deleted_at IS NULL AND (company_id = ? OR company_id IS NULL)
+            WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?
             GROUP BY status
-        `, [companyId]);
+        `, [tenantId, companyId]);
 
         // Workload distribution by user
         const [workload] = await db.execute(`
@@ -802,12 +823,12 @@ exports.getDashboardMetrics = async (req, res) => {
                 COALESCE(SUM(t.actual_hours), 0) AS total_logged_hours
             FROM users u
             LEFT JOIN task_assignees ta ON u.id = ta.user_id
-            LEFT JOIN tasks t ON ta.task_id = t.id AND t.deleted_at IS NULL AND t.status NOT IN ('done', 'cancelled')
-            WHERE u.active = 1
+            LEFT JOIN tasks t ON ta.task_id = t.id AND t.deleted_at IS NULL AND t.status NOT IN ('done', 'cancelled') AND t.tenant_id = ? AND t.company_id = ?
+            WHERE u.active = 1 AND u.organization_id = ? AND u.company_id = ?
             GROUP BY u.id, u.name, u.email
             ORDER BY total_estimated_hours DESC
             LIMIT 10
-        `);
+        `, [tenantId, companyId, tenantId, companyId]);
 
         // Critical / Blocked tasks stream
         const [blockedStream] = await db.execute(`
@@ -1215,11 +1236,20 @@ exports.deleteTimeEntry = async (req, res) => {
     }
 };
 
-// GET /api/tasks/metadata - Dropdown options for projects, users, labels
+// GET /api/tasks/metadata - Dropdown options for projects, users, labels (scoped to company)
 exports.getTaskMetadata = async (req, res) => {
     try {
-        const [projects] = await db.execute("SELECT id, name, code, status FROM projects ORDER BY name ASC");
-        const [users] = await db.execute("SELECT id, name, username, email, role FROM users WHERE active = 1 ORDER BY name ASC");
+        const tenantId = req.user?.organization_id || 1;
+        const companyId = req.user?.company_id || 1;
+
+        const [projects] = await db.execute(
+            "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ? ORDER BY name ASC",
+            [tenantId, companyId]
+        );
+        const [users] = await db.execute(
+            "SELECT id, name, username, email, role FROM users WHERE active = 1 AND organization_id = ? AND company_id = ? ORDER BY name ASC",
+            [tenantId, companyId]
+        );
         const [labels] = await db.execute("SELECT id, name, color FROM task_labels ORDER BY name ASC");
 
         res.status(200).json({

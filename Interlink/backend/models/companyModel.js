@@ -1,4 +1,5 @@
 const db = require("../config/db.js");
+const bcrypt = require("bcryptjs");
 
 // Helper to safely add column if it doesn't already exist
 const ensureColumn = async (tableName, columnName, columnDef) => {
@@ -27,6 +28,7 @@ const createOrganizationAndCompanyTables = async () => {
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(150) NOT NULL,
             email VARCHAR(150) DEFAULT NULL,
+            status VARCHAR(50) DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -65,6 +67,7 @@ const createOrganizationAndCompanyTables = async () => {
 
     // 4. Automatically ensure columns on existing tables
     await ensureColumn('organizations', 'email', 'VARCHAR(150) DEFAULT NULL');
+    await ensureColumn('organizations', 'status', "VARCHAR(50) DEFAULT 'pending'");
     await ensureColumn('companies', 'email', 'VARCHAR(150) DEFAULT NULL');
     await ensureColumn('companies', 'phone', 'VARCHAR(50) DEFAULT NULL');
 
@@ -83,9 +86,21 @@ const createOrganizationAndCompanyTables = async () => {
 
     // 5. Backfill any existing NULL rows to default 1 so nothing breaks
     try {
+        await db.execute("UPDATE organizations SET status = 'approved' WHERE id = 1");
         await db.execute("UPDATE users SET organization_id = 1, company_id = 1 WHERE organization_id IS NULL OR company_id IS NULL");
         await db.execute("UPDATE projects SET company_id = 1 WHERE company_id IS NULL");
         await db.execute("UPDATE tasks SET company_id = 1 WHERE company_id IS NULL");
+
+        // Seed Platform Developer / Superadmin account if not already present
+        const [devUsers] = await db.execute("SELECT id FROM users WHERE role = 'super_admin' OR username = 'developer'");
+        if (devUsers.length === 0) {
+            const hashedDevPassword = await bcrypt.hash("developer123", 10);
+            await db.execute(`
+                INSERT INTO users (name, username, email, password, role, organization_id, company_id, device_verification_required, active)
+                VALUES ('Platform Developer', 'developer', 'developer@interlink.com', ?, 'super_admin', 1, 1, 0, 1)
+            `, [hashedDevPassword]);
+            console.log("[Auto-Schema] Seeded default Developer account (Username: developer, Password: developer123)");
+        }
     } catch (backfillErr) {
         // Suppress backfill errors if tables do not exist yet (they will be created sequentially)
     }
