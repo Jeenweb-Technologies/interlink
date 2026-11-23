@@ -125,6 +125,22 @@ const getCompanyById = async (id) => {
     );
     company.departments = depts;
 
+    // Also fetch employees assigned to this company
+    try {
+        const [employees] = await db.execute(
+            `SELECT u.id, u.name, u.username, u.email, u.mob_no, u.role, u.is_vendor, u.active, ut.name as user_type_name
+             FROM users u
+             LEFT JOIN user_types ut ON u.user_type_id = ut.id
+             WHERE u.company_id = ?
+             ORDER BY u.name ASC`,
+            [id]
+        );
+        company.employees = employees || [];
+    } catch (empErr) {
+        console.warn("Could not fetch company employees in getCompanyById:", empErr.message);
+        company.employees = [];
+    }
+
     return company;
 };
 

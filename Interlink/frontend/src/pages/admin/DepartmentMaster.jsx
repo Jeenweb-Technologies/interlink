@@ -11,6 +11,7 @@ import {
     getDepartmentMembers
 } from "../../api/departmentApi";
 import { getCompanies } from "../../api/companyApi";
+import { startDirectChat } from "../../api/chatApi";
 import { usePermission } from "../../context/PermissionContext";
 import { isUserAdmin } from "../../utils/roleUtils";
 
@@ -208,6 +209,22 @@ export default function DepartmentMaster() {
         }
     };
 
+    const handleStartChatWithMember = async (targetUser) => {
+        if (!targetUser || targetUser.id === user.id) return;
+        try {
+            const res = await startDirectChat(targetUser.id);
+            if (res.success && res.conversation) {
+                toast.success(`Opening chat with ${targetUser.name || targetUser.username}`);
+                setIsMembersModalOpen(false);
+                navigate("/chat", { state: { targetConversationId: res.conversation.id } });
+            } else {
+                toast.error(res.message || "Failed to initiate chat");
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Could not open chat session");
+        }
+    };
+
     // Columns Definition for DataTable
     const departmentColumns = useMemo(() => [
         {
@@ -373,7 +390,7 @@ export default function DepartmentMaster() {
                 {/* ── DataTable ── */}
                 <DataTable
                     tableId="department_master_directory"
-                    title="Department Master"
+                    title="Departments & Teams"
                     icon="fa-building-user"
                     badge={`${displayedDepartments.length} Units`}
                     columns={departmentColumns}
@@ -418,7 +435,7 @@ export default function DepartmentMaster() {
                     <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 animate-in zoom-in-95">
                         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
                             <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center font-medium text-xs shadow-xs shrink-0">
+                                <div className="w-8 h-8 rounded-xl bg-[#17365D] text-white flex items-center justify-center font-medium text-xs shadow-xs shrink-0">
                                     <i className="fa-solid fa-building-plus"></i>
                                 </div>
                                 <div>
@@ -606,7 +623,7 @@ export default function DepartmentMaster() {
                     <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 max-h-[85vh] flex flex-col animate-in zoom-in-95">
                         <div className="px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
                             <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-[#ED1C28] border border-slate-700/60 flex items-center justify-center font-medium text-xs shadow-xs shrink-0">
+                                <div className="w-8 h-8 rounded-xl bg-[#17365D] text-white flex items-center justify-center font-medium text-xs shadow-xs shrink-0">
                                     <i className="fa-solid fa-users"></i>
                                 </div>
                                 <div>
@@ -647,16 +664,16 @@ export default function DepartmentMaster() {
                                         return (
                                             <div
                                                 key={m.id}
-                                                className="p-3 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between"
+                                                className="p-3 bg-slate-50 rounded-2xl border border-slate-200/70 flex items-center justify-between gap-3"
                                             >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-white border border-slate-700/60 flex items-center justify-center font-medium text-xs">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-white flex items-center justify-center font-medium text-xs shrink-0">
                                                         {(m.name || m.username || "U")[0].toUpperCase()}
                                                     </div>
-                                                    <div>
+                                                    <div className="min-w-0">
                                                         <div className="flex items-center gap-2">
-                                                            <p className="font-bold text-slate-800 text-sm">{m.name || m.username}</p>
-                                                            <span className={`px-2 py-0.2 rounded-md text-[9px] font-black uppercase ${
+                                                            <p className="font-bold text-slate-800 text-sm truncate">{m.name || m.username}</p>
+                                                            <span className={`px-2 py-0.2 rounded-md text-[9px] font-black uppercase shrink-0 ${
                                                                 isDeptAdmin
                                                                     ? "bg-purple-100 text-purple-800 border border-purple-200"
                                                                     : "bg-blue-50 text-blue-700 border border-blue-100"
@@ -664,13 +681,26 @@ export default function DepartmentMaster() {
                                                                 {isDeptAdmin ? "Dept Admin" : "User"}
                                                             </span>
                                                         </div>
-                                                        <p className="text-xs text-slate-400">{m.email} {m.mob_no ? `• ${m.mob_no}` : ""}</p>
+                                                        <p className="text-xs text-slate-400 truncate">{m.email} {m.mob_no ? `• ${m.mob_no}` : ""}</p>
                                                     </div>
                                                 </div>
 
-                                                <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-1 rounded-lg border border-slate-200">
-                                                    {m.user_type_name || m.role}
-                                                </span>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <span className="text-[11px] font-bold text-slate-500 bg-white px-2 py-1 rounded-lg border border-slate-200">
+                                                        {m.user_type_name || m.role}
+                                                    </span>
+                                                    {m.id !== user.id && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleStartChatWithMember(m)}
+                                                            className="flex h-7 px-2.5 items-center gap-1 rounded-lg bg-[#2878C7] hover:bg-[#1e63a8] text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer"
+                                                            title="Chat with coworker"
+                                                        >
+                                                            <i className="fa-solid fa-comment text-[10px]"></i>
+                                                            <span>Chat</span>
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         );
                                     })}

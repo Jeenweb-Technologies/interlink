@@ -9,6 +9,7 @@ import {
     toggleCompanyStatus,
     getCompanyById
 } from "../../api/companyApi";
+import { startDirectChat } from "../../api/chatApi";
 import { usePermission } from "../../context/PermissionContext";
 import { isUserAdmin } from "../../utils/roleUtils";
 
@@ -58,6 +59,23 @@ export default function CompanyMaster() {
     // View Departments Modal
     const [viewingCompanyDepts, setViewingCompanyDepts] = useState(null);
     const [isLoadingDepts, setIsLoadingDepts] = useState(false);
+    const [companyModalTab, setCompanyModalTab] = useState("departments"); // "departments" | "employees"
+
+    const handleStartChatWithEmployee = async (targetUser) => {
+        if (!targetUser || targetUser.id === user.id) return;
+        try {
+            const res = await startDirectChat(targetUser.id);
+            if (res.success && res.conversation) {
+                toast.success(`Opening chat with ${targetUser.name || targetUser.username}`);
+                setViewingCompanyDepts(null);
+                navigate("/chat", { state: { targetConversationId: res.conversation.id } });
+            } else {
+                toast.error(res.message || "Failed to initiate chat");
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Could not open chat");
+        }
+    };
 
     const fetchCompanies = async () => {
         try {
@@ -159,11 +177,12 @@ export default function CompanyMaster() {
         }
     };
 
-    // View Company's Departments
+    // View Company's Departments & Employees
     const handleViewDepartments = async (comp) => {
         try {
             setIsLoadingDepts(true);
             setViewingCompanyDepts(comp);
+            setCompanyModalTab("departments");
             const fullComp = await getCompanyById(comp.id);
             setViewingCompanyDepts(fullComp?.data || fullComp?.company || fullComp || comp);
         } catch (error) {
@@ -182,20 +201,23 @@ export default function CompanyMaster() {
                 <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shadow-xs shrink-0 ${
                         row.is_main 
-                            ? "bg-purple-600 text-white shadow-purple-500/20" 
+                            ? "bg-[#17365D] text-white shadow-[#17365D]/20" 
                             : "bg-[#2D333B] text-white"
                     }`}>
                         {row.company_name ? row.company_name[0].toUpperCase() : "C"}
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col min-w-0">
                         <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-sm text-slate-900">{row.company_name}</span>
+                            <span className="font-extrabold text-sm text-slate-900 truncate">{row.company_name}</span>
                             {row.is_main && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
                                     <i className="fa-solid fa-crown text-[8px]"></i> Main
                                 </span>
                             )}
                         </div>
+                        {row.company_code && (
+                            <span className="text-[10px] text-slate-400 font-mono font-medium">Code: {row.company_code}</span>
+                        )}
                     </div>
                 </div>
             )
@@ -207,6 +229,23 @@ export default function CompanyMaster() {
                 <span className="text-xs text-slate-600 font-medium line-clamp-2 max-w-xs block" title={row.description}>
                     {row.description || <span className="text-slate-400 italic">No description</span>}
                 </span>
+            )
+        },
+        {
+            key: "assigned_units",
+            label: "Assigned Units",
+            render: (row) => (
+                <button
+                    type="button"
+                    onClick={() => handleViewDepartments(row)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs transition-colors cursor-pointer border border-blue-100 shadow-2xs"
+                    title="Click to view departments and employees"
+                >
+                    <i className="fa-solid fa-sitemap text-[10px]"></i>
+                    <span>{row.department_count || 0} Depts</span>
+                    <span className="text-slate-300">•</span>
+                    <span>{row.user_count || 0} Users</span>
+                </button>
             )
         },
         {
@@ -251,6 +290,16 @@ export default function CompanyMaster() {
             sortable: false,
             render: (row) => (
                 <div className="flex items-center gap-1.5">
+                    <button
+                        type="button"
+                        onClick={() => handleViewDepartments(row)}
+                        className="flex h-8 px-2.5 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                        title="View Departments & Employees"
+                    >
+                        <i className="fa-solid fa-users text-[10px]"></i>
+                        <span>Units</span>
+                    </button>
+
                     {canUpdate && (
                         <button
                             type="button"
@@ -469,18 +518,19 @@ export default function CompanyMaster() {
                 </div>
             )}
 
-            {/* ── VIEW COMPANY DEPARTMENTS MODAL ───────────────────────────── */}
+            {/* ── VIEW COMPANY DEPARTMENTS & EMPLOYEES MODAL ───────────────── */}
             {viewingCompanyDepts && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
+                    <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden border border-slate-200 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
+                        {/* Modal Header */}
                         <div className="px-4 sm:px-6 py-3.5 sm:py-4.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/90 shrink-0">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
+                                <div className="w-10 h-10 rounded-2xl bg-[#17365D] text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
                                     <i className="fa-solid fa-building-user"></i>
                                 </div>
                                 <div>
                                     <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">{viewingCompanyDepts.company_name}</h3>
-                                    <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Departments hosted under this company entity</p>
+                                    <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Departments & personnel hosted under this entity</p>
                                 </div>
                             </div>
                             <button
@@ -492,46 +542,137 @@ export default function CompanyMaster() {
                             </button>
                         </div>
 
-                        <div className="p-4 sm:p-6 space-y-3 overflow-y-auto">
+                        {/* Tab Switcher */}
+                        <div className="flex border-b border-slate-200 bg-white px-4 sm:px-6 gap-4 text-xs font-bold shrink-0">
+                            <button
+                                type="button"
+                                onClick={() => setCompanyModalTab("departments")}
+                                className={`py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                    companyModalTab === "departments"
+                                        ? "border-[#17365D] text-[#17365D]"
+                                        : "border-transparent text-slate-500 hover:text-slate-700"
+                                }`}
+                            >
+                                <i className="fa-solid fa-sitemap text-[11px]"></i>
+                                <span>Departments ({viewingCompanyDepts.departments?.length || 0})</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCompanyModalTab("employees")}
+                                className={`py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                                    companyModalTab === "employees"
+                                        ? "border-[#17365D] text-[#17365D]"
+                                        : "border-transparent text-slate-500 hover:text-slate-700"
+                                }`}
+                            >
+                                <i className="fa-solid fa-users text-[11px]"></i>
+                                <span>Employees ({viewingCompanyDepts.employees?.length || 0})</span>
+                            </button>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-4 sm:p-6 space-y-3 overflow-y-auto flex-1 custom-chat-scrollbar">
                             {isLoadingDepts ? (
-                                <div className="text-center py-8 text-xs text-slate-400">Loading departments...</div>
-                            ) : (!viewingCompanyDepts.departments || viewingCompanyDepts.departments.length === 0) ? (
-                                <div className="text-center py-8 text-slate-400 text-xs font-semibold">
-                                    No departments currently assigned to this company.
+                                <div className="text-center py-8 text-xs text-slate-400">
+                                    <i className="fa-solid fa-circle-notch fa-spin text-blue-600 text-lg mb-2 block"></i>
+                                    <span>Loading company details...</span>
                                 </div>
-                            ) : (
-                                <div className="space-y-2">
-                                    {viewingCompanyDepts.departments.map((d) => (
-                                        <div key={d.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between">
-                                            <div>
-                                                <h4 className="text-xs font-bold text-slate-900">{d.department_name}</h4>
-                                                {d.description && <p className="text-[11px] text-slate-500">{d.description}</p>}
+                            ) : companyModalTab === "departments" ? (
+                                (!viewingCompanyDepts.departments || viewingCompanyDepts.departments.length === 0) ? (
+                                    <div className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                        <i className="fa-solid fa-folder-open text-2xl text-slate-300 mb-2 block"></i>
+                                        No departments currently assigned to this company.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {viewingCompanyDepts.departments.map((d) => (
+                                            <div key={d.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between">
+                                                <div>
+                                                    <h4 className="text-xs font-bold text-slate-900">{d.department_name}</h4>
+                                                    {d.description && <p className="text-[11px] text-slate-500">{d.description}</p>}
+                                                </div>
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                    d.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-600"
+                                                }`}>
+                                                    {d.status}
+                                                </span>
                                             </div>
-                                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                                d.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-600"
-                                            }`}>
-                                                {d.status}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                )
+                            ) : (
+                                (!viewingCompanyDepts.employees || viewingCompanyDepts.employees.length === 0) ? (
+                                    <div className="text-center py-8 text-slate-400 text-xs font-semibold">
+                                        <i className="fa-solid fa-user-slash text-2xl text-slate-300 mb-2 block"></i>
+                                        No employees currently assigned to this company.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {viewingCompanyDepts.employees.map((emp) => (
+                                            <div key={emp.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className="w-8 h-8 rounded-xl bg-[#2D333B] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                                                        {(emp.name || emp.username || "U")[0].toUpperCase()}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="font-bold text-xs text-slate-900 truncate">{emp.name || emp.username}</span>
+                                                            {emp.is_vendor && (
+                                                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                                    Vendor
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] text-slate-500 truncate">{emp.email} {emp.mob_no ? `• ${emp.mob_no}` : ""}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-white text-slate-600 border border-slate-200">
+                                                        {emp.user_type_name || emp.role}
+                                                    </span>
+                                                    {emp.id !== user.id && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleStartChatWithEmployee(emp)}
+                                                            className="flex h-7 px-2.5 items-center gap-1 rounded-lg bg-[#2878C7] hover:bg-[#1e63a8] text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer"
+                                                            title="Chat with coworker"
+                                                        >
+                                                            <i className="fa-solid fa-comment text-[10px]"></i>
+                                                            <span>Chat</span>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )
                             )}
                         </div>
 
+                        {/* Modal Footer */}
                         <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
                             <span className="text-xs text-slate-500 font-medium text-center sm:text-left">
-                                Total: {viewingCompanyDepts.departments ? viewingCompanyDepts.departments.length : 0} Departments
+                                {viewingCompanyDepts.departments?.length || 0} Departments • {viewingCompanyDepts.employees?.length || 0} Employees
                             </span>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setViewingCompanyDepts(null);
-                                    navigate("/admin/departments");
-                                }}
-                                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer text-center justify-center"
-                            >
-                                Manage in Dept Master
-                            </button>
+                            <div className="flex items-center gap-2 justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewingCompanyDepts(null)}
+                                    className="px-3.5 py-2 rounded-xl text-slate-600 hover:bg-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                    Close
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setViewingCompanyDepts(null);
+                                        navigate("/peoples/departments");
+                                    }}
+                                    className="px-3.5 py-2 rounded-xl bg-[#17365D] hover:bg-[#102642] text-white text-xs font-bold shadow-xs transition-colors cursor-pointer text-center justify-center"
+                                >
+                                    Manage Departments
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
