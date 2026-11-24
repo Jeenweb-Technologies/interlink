@@ -5,7 +5,8 @@ export default function ProjectHeader({
     project,
     onOpenCreateTask,
     onOpenCreateMilestone,
-    onOpenBaselineModal
+    onOpenBaselineModal,
+    onStartMeeting
 }) {
     const navigate = useNavigate();
 
@@ -37,6 +38,16 @@ export default function ProjectHeader({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    {onStartMeeting && (
+                        <button
+                            onClick={onStartMeeting}
+                            className="px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                            title="Start instant video meeting & whiteboard for this project"
+                        >
+                            <i className="fa-solid fa-video text-emerald-600"></i>
+                            <span>Start Meeting</span>
+                        </button>
+                    )}
                     {onOpenBaselineModal && (
                         <button
                             onClick={onOpenBaselineModal}

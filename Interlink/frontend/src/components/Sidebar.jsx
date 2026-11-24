@@ -154,6 +154,7 @@ export function TopBar({ onMenuClick = () => {} }) {
         { id: "p-task", title: "Task Management", category: "Navigation", path: "/tasks", icon: "fa-solid fa-list-check text-emerald-500", visible: true },
         { id: "p-notes", title: "Notes & Scratchpad", category: "Navigation", path: "/notes", icon: "fa-solid fa-note-sticky text-amber-500", visible: true },
         { id: "p-chat", title: "Chat & Communication", category: "Navigation", path: "/chat", icon: "fa-solid fa-comments text-cyan-500", visible: true },
+        { id: "p-meetings", title: "Meetings & Whiteboard", category: "Navigation", path: "/meetings", icon: "fa-solid fa-video text-teal-400", visible: true },
         { id: "p-comp", title: "Company Master", category: "Masters", path: "/admin/companies", icon: "fa-solid fa-building text-blue-500", visible: isAdmin },
         { id: "p-users", title: "User Master Directory", category: "Masters", path: "/admin/dashboard", icon: "fa-solid fa-users-gear text-purple-500", visible: isAdmin || hasPermission("user_master", "read") },
         { id: "p-ucreate", title: "Create New User", category: "Masters", path: "/admin/users/create", icon: "fa-solid fa-user-plus text-sky-500", visible: isAdmin || hasPermission("user_master", "write") },
@@ -1188,6 +1189,25 @@ export default function Sidebar({
                                 </span>
                                 {!isCollapsed && (
                                     <span className="truncate">Chat &amp; Communication</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/meetings")}
+                                title={isCollapsed ? "Meetings & Whiteboard" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/meetings")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/meetings") ? "text-white" : "text-slate-400 group-hover:text-teal-400"
+                                }`}>
+                                    <i className="fa-solid fa-video"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Meetings &amp; Whiteboard</span>
                                 )}
                             </button>
                         </div>
