@@ -6,6 +6,7 @@ const {
     getUserById,
     toggleUserActive
 } = require("../models/userModel.js");
+const { assignUserDepartment } = require("../models/departmentModel.js");
 
 const {
     approveDevice,
@@ -42,15 +43,17 @@ const fetchUsers = async (req, res) => {
 
         const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        // Fetch users along with their active device status
+        // Fetch users along with their active device status and department
         const query = `
             SELECT 
                 u.id, u.name, u.username, u.email, u.mob_no, u.role, u.organization_id, u.company_id,
                 d.status AS device_status, ut.type_name,
-                d.device_id, device_verification_required, u.active
+                d.device_id, device_verification_required, u.active,
+                u.department_id, dept.department_name
             FROM users u
             LEFT JOIN user_devices d ON d.user_id = u.id AND d.closed_at IS NULL
             LEFT JOIN user_types ut ON u.user_type_id = ut.id
+            LEFT JOIN departments dept ON u.department_id = dept.id
             ${whereSQL}
             ORDER BY u.id DESC
         `;
@@ -78,7 +81,8 @@ const createUserByAdmin = async (req, res) => {
             mobNo,
             dateOfJoin,
             deviceVerificationRequired,
-            role
+            role,
+            departmentId
         } = req.body;
 
         if (!name || !username || !email || !password) {
@@ -88,6 +92,7 @@ const createUserByAdmin = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const organizationId = req.user?.organization_id || 1;
         const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : (req.user?.company_id || 1);
+        const parsedDeptId = departmentId ? parseInt(departmentId, 10) : null;
 
         const newUser = await createUser(
             name,
@@ -101,8 +106,17 @@ const createUserByAdmin = async (req, res) => {
             true,
             role || 'user',
             organizationId,
-            companyId
+            companyId,
+            parsedDeptId
         );
+
+        if (parsedDeptId && newUser.insertId) {
+            try {
+                await assignUserDepartment(newUser.insertId, parsedDeptId, 'USER');
+            } catch (deptErr) {
+                console.warn("Failed to sync user_departments junction:", deptErr.message);
+            }
+        }
 
         const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
         await createAuditLog(
@@ -122,13 +136,14 @@ const createUserByAdmin = async (req, res) => {
                 date_of_join: dateOfJoin || null,
                 device_verification_required: deviceVerificationRequired,
                 role: role || 'user',
-                company_id: companyId
+                company_id: companyId,
+                department_id: parsedDeptId
             },
             null,
             companyId
         );
 
-        return res.status(201).json({ success: true, message: "User created successfully" });
+        return res.status(201).json({ success: true, message: "User created successfully", userId: newUser.insertId });
     } catch (error) {
         console.log("Create User Error:", error);
         return res.status(500).json({ success: false, message: "Server Error" });
@@ -305,9 +320,129 @@ const toggleUserActiveController = async (req, res) => {
     }
 };
 
+const updateUserByAdmin = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            name,
+            username,
+            email,
+            password,
+            userTypeId,
+            mobNo,
+            dateOfJoin,
+            deviceVerificationRequired,
+            role,
+            departmentId,
+            active
+        } = req.body;
+
+        const beforeUser = await getUserById(id);
+        if (!beforeUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const updates = [];
+        const params = [];
+
+        if (name !== undefined) {
+            updates.push("name = ?");
+            params.push(name ? name.trim() : "");
+        }
+        if (username !== undefined) {
+            updates.push("username = ?");
+            params.push(username ? username.trim() : "");
+        }
+        if (email !== undefined) {
+            updates.push("email = ?");
+            params.push(email ? email.trim() : "");
+        }
+        if (mobNo !== undefined) {
+            updates.push("mob_no = ?");
+            params.push(mobNo ? mobNo.trim() : null);
+        }
+        if (userTypeId !== undefined) {
+            updates.push("user_type_id = ?");
+            params.push(userTypeId ? parseInt(userTypeId, 10) : null);
+        }
+        if (role !== undefined) {
+            updates.push("role = ?");
+            params.push(role);
+        }
+        if (dateOfJoin !== undefined) {
+            updates.push("date_of_join = ?");
+            params.push(dateOfJoin || null);
+        }
+        if (deviceVerificationRequired !== undefined) {
+            updates.push("device_verification_required = ?");
+            params.push(deviceVerificationRequired ? 1 : 0);
+        }
+        if (active !== undefined) {
+            updates.push("active = ?");
+            params.push(active ? 1 : 0);
+        }
+        if (password && password.trim().length > 0) {
+            const hashedPassword = await bcrypt.hash(password.trim(), 10);
+            updates.push("password = ?");
+            params.push(hashedPassword);
+        }
+        if (departmentId !== undefined) {
+            const parsedDeptId = departmentId ? parseInt(departmentId, 10) : null;
+            updates.push("department_id = ?");
+            params.push(parsedDeptId);
+            // keep user_departments junction synced
+            await assignUserDepartment(id, parsedDeptId);
+        }
+
+        if (updates.length > 0) {
+            params.push(id);
+            await db.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+        }
+
+        const afterUser = await getUserById(id);
+
+        const adminDeviceId = req.headers['x-device-id'] || req.headers['device-id'] || 'Unknown';
+        await createAuditLog(
+            req.user?.id,
+            req.user?.name || req.user?.username || 'Unknown',
+            adminDeviceId,
+            'User Master',
+            'updated',
+            {
+                name: beforeUser.name,
+                username: beforeUser.username,
+                email: beforeUser.email,
+                role: beforeUser.role,
+                department_id: beforeUser.department_id,
+                user_type_id: beforeUser.user_type_id
+            },
+            {
+                name: afterUser.name,
+                username: afterUser.username,
+                email: afterUser.email,
+                role: afterUser.role,
+                department_id: afterUser.department_id,
+                user_type_id: afterUser.user_type_id
+            },
+            null,
+            beforeUser.company_id
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "User updated successfully",
+            user: afterUser
+        });
+    } catch (error) {
+        console.log("Update User Error:", error);
+        return res.status(500).json({ success: false, message: error.message || "Server Error" });
+    }
+};
+
 module.exports = {
     fetchUsers,
     createUserByAdmin,
+    updateUserByAdmin,
     approveDeviceController,
     revokeDeviceController,
     fetchAuditLogs,
