@@ -20,6 +20,7 @@ exports.searchAllRecords = async (req, res) => {
                 results: {
                     projects: [],
                     tasks: [],
+                    notes: [],
                     users: [],
                     documents: [],
                     user_types: [],
@@ -29,11 +30,15 @@ exports.searchAllRecords = async (req, res) => {
         }
 
         const term = `%${query}%`;
+        const userId = req.user?.id || 0;
+        const userTypeId = req.user?.user_type_id || -1;
+        const isPrivileged = req.user?.role === 'admin' || req.user?.role === 'super_admin' || req.user?.role === 'developer';
 
         // Run queries in parallel across all entity tables
         const [
             projectsRes,
             tasksRes,
+            notesRes,
             usersRes,
             documentsRes,
             userTypesRes,
@@ -55,7 +60,27 @@ exports.searchAllRecords = async (req, res) => {
                  LIMIT 8`,
                 [term, term, term]
             ),
-            // 3. Users
+            // 3. Notes (Owned or Shared)
+            db.execute(
+                `SELECT 
+                    n.id, 
+                    n.title, 
+                    CONCAT(COALESCE(n.priority, 'medium'), ' priority • v', n.version) AS subtitle, 
+                    n.content AS description, 
+                    n.priority, 
+                    n.color, 
+                    'note' AS entity_type
+                 FROM notes n
+                 LEFT JOIN note_shares ns ON n.id = ns.note_id AND (ns.user_id = ? OR (ns.user_type_id IS NOT NULL AND ns.user_type_id = ?))
+                 WHERE n.deleted_at IS NULL
+                   AND (n.owner_id = ? OR ns.id IS NOT NULL OR ? = 1)
+                   AND (n.title LIKE ? OR n.content LIKE ?)
+                 GROUP BY n.id
+                 ORDER BY n.is_pinned DESC, n.updated_at DESC
+                 LIMIT 8`,
+                [userId, userTypeId, userId, isPrivileged ? 1 : 0, term, term]
+            ),
+            // 4. Users
             db.execute(
                 `SELECT id, name AS title, CONCAT(COALESCE(role, 'Member'), ' • ', email) AS subtitle, email, role, 'user' AS entity_type
                  FROM users
@@ -63,7 +88,7 @@ exports.searchAllRecords = async (req, res) => {
                  LIMIT 8`,
                 [term, term, term, term]
             ),
-            // 4. Project Documents
+            // 5. Project Documents
             db.execute(
                 `SELECT id, file_name AS title, CONCAT('Project #', project_id) AS subtitle, project_id, file_path, 'document' AS entity_type
                  FROM project_documents
@@ -71,7 +96,7 @@ exports.searchAllRecords = async (req, res) => {
                  LIMIT 8`,
                 [term]
             ),
-            // 5. User Types (Roles)
+            // 6. User Types (Roles)
             db.execute(
                 `SELECT id, type_name AS title, COALESCE(description, 'Role Permission Master') AS subtitle, 'user_type' AS entity_type
                  FROM user_types
@@ -79,7 +104,7 @@ exports.searchAllRecords = async (req, res) => {
                  LIMIT 8`,
                 [term, term]
             ),
-            // 6. Audit Logs
+            // 7. Audit Logs
             db.execute(
                 `SELECT id, action AS title, CONCAT(master_name, ' • ', user_name) AS subtitle, master_name, user_name, created_at, 'audit_log' AS entity_type
                  FROM audit_logs
@@ -92,12 +117,13 @@ exports.searchAllRecords = async (req, res) => {
 
         const projects = projectsRes.status === "fulfilled" && projectsRes.value[0] ? projectsRes.value[0] : [];
         const tasks = tasksRes.status === "fulfilled" && tasksRes.value[0] ? tasksRes.value[0] : [];
+        const notes = notesRes.status === "fulfilled" && notesRes.value[0] ? notesRes.value[0] : [];
         const users = usersRes.status === "fulfilled" && usersRes.value[0] ? usersRes.value[0] : [];
         const documents = documentsRes.status === "fulfilled" && documentsRes.value[0] ? documentsRes.value[0] : [];
         const userTypes = userTypesRes.status === "fulfilled" && userTypesRes.value[0] ? userTypesRes.value[0] : [];
         const auditLogs = auditLogsRes.status === "fulfilled" && auditLogsRes.value[0] ? auditLogsRes.value[0] : [];
 
-        const total = projects.length + tasks.length + users.length + documents.length + userTypes.length + auditLogs.length;
+        const total = projects.length + tasks.length + notes.length + users.length + documents.length + userTypes.length + auditLogs.length;
 
         return res.status(200).json({
             success: true,
@@ -106,6 +132,7 @@ exports.searchAllRecords = async (req, res) => {
             results: {
                 projects,
                 tasks,
+                notes,
                 users,
                 documents,
                 user_types: userTypes,

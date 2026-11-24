@@ -423,12 +423,15 @@ const getUserConversations = async (userId, companyId = 1) => {
  * Fetch messages for a conversation
  */
 const getConversationMessages = async (conversationId, limit = 100, beforeMessageId = null) => {
+    const convId = parseInt(conversationId, 10);
+    const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 100, 500));
+
     let whereClause = "WHERE m.conversation_id = ?";
-    let params = [conversationId];
+    let params = [convId];
 
     if (beforeMessageId) {
         whereClause += " AND m.id < ?";
-        params.push(beforeMessageId);
+        params.push(parseInt(beforeMessageId, 10));
     }
 
     const query = `
@@ -457,9 +460,8 @@ const getConversationMessages = async (conversationId, limit = 100, beforeMessag
         LEFT JOIN departments dept ON dept.id = u.department_id
         ${whereClause}
         ORDER BY m.id ASC
-        LIMIT ?
+        LIMIT ${safeLimit}
     `;
-    params.push(parseInt(limit, 10) || 100);
 
     const [rows] = await db.execute(query, params);
     return rows;
