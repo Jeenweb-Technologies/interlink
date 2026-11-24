@@ -130,24 +130,23 @@ const findOrganizationById = async (id) => {
 
 const findCompaniesByOrgId = async (orgId) => {
     const [rows] = await db.execute(
-        "SELECT id, organization_id, COALESCE(name, company_name) AS name, email, phone, created_at FROM companies WHERE organization_id = ? ORDER BY name ASC",
+        "SELECT id, organization_id, name, email, phone, created_at FROM companies WHERE organization_id = ? ORDER BY name ASC",
         [orgId]
     );
     return rows;
 };
 
 const findCompanyById = async (companyId) => {
-    const [rows] = await db.execute("SELECT id, organization_id, COALESCE(name, company_name) AS name, email, phone, created_at FROM companies WHERE id = ?", [companyId]);
+    const [rows] = await db.execute("SELECT id, organization_id, name, email, phone, created_at FROM companies WHERE id = ?", [companyId]);
     return rows[0] || null;
 };
 
 const createCompanyRecord = async (organizationId, name, email = null, phone = null) => {
     try {
-        // Populate both name and company_name (and company_code if column exists) to support both schemas
         const [result] = await db.execute(
-            `INSERT INTO companies (organization_id, name, company_name, email, phone) 
-             VALUES (?, ?, ?, ?, ?)`,
-            [organizationId, name, name, email, phone]
+            `INSERT INTO companies (organization_id, name, email, phone) 
+             VALUES (?, ?, ?, ?)`,
+            [organizationId, name, email, phone]
         );
         return {
             id: result.insertId,
