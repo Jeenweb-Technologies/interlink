@@ -31,6 +31,7 @@ router.post("/create", verifyPermission("department_master", "write"), createDep
 router.put("/:id", verifyPermission("department_master", "update"), updateDepartmentController);
 router.patch("/:id", verifyPermission("department_master", "update"), updateDepartmentController);
 router.patch("/:id/status", verifyPermission("department_master", "update"), toggleDepartmentStatusController);
+router.patch("/:id/toggle-status", verifyPermission("department_master", "update"), toggleDepartmentStatusController);
 
 // Delete Department
 router.delete("/:id", verifyPermission("department_master", "delete"), deleteDepartmentController);

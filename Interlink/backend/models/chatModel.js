@@ -16,6 +16,8 @@ const createChatTables = async () => {
             is_admin_only BOOLEAN DEFAULT FALSE,
             broadcast_priority ENUM('NORMAL', 'URGENT', 'COMPANY_UPDATE', 'POLICY_CHANGE') DEFAULT 'NORMAL',
             target_department_id INT NULL,
+            project_id INT NULL,
+            historic_access_on_remove VARCHAR(50) DEFAULT 'VISIBLE',
             created_by INT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -62,6 +64,13 @@ const createChatTables = async () => {
             parent_message_id INT NULL,
             is_pinned BOOLEAN DEFAULT FALSE,
             is_announcement BOOLEAN DEFAULT FALSE,
+            announcement_title VARCHAR(200) NULL,
+            announcement_expiry TIMESTAMP NULL,
+            mentions JSON DEFAULT NULL,
+            is_edited BOOLEAN DEFAULT FALSE,
+            edited_at TIMESTAMP NULL,
+            is_deleted BOOLEAN DEFAULT FALSE,
+            deleted_at TIMESTAMP NULL,
             reactions JSON DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_cm_conv (conversation_id),
@@ -86,6 +95,10 @@ const createChatTables = async () => {
             cross_department_chat BOOLEAN DEFAULT TRUE,
             read_receipts_enabled BOOLEAN DEFAULT TRUE,
             typing_indicators_enabled BOOLEAN DEFAULT TRUE,
+            message_retention_days INT DEFAULT 0,
+            legal_hold_enabled BOOLEAN DEFAULT FALSE,
+            allow_message_editing BOOLEAN DEFAULT TRUE,
+            allow_message_deletion BOOLEAN DEFAULT TRUE,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_cs_company (company_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -127,6 +140,36 @@ const createChatTables = async () => {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     await db.execute(createUserDeptPermsQuery);
+
+    // 7. Announcement Acknowledgements Table
+    await db.execute(`
+        CREATE TABLE IF NOT EXISTS chat_announcement_acknowledgements (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            message_id INT NOT NULL,
+            user_id INT NOT NULL,
+            acknowledged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_ack_msg_user (message_id, user_id),
+            FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 8. Message Moderation & Abuse Reports Table
+    await db.execute(`
+        CREATE TABLE IF NOT EXISTS chat_message_reports (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            message_id INT NOT NULL,
+            reporter_id INT NOT NULL,
+            reason VARCHAR(255) NOT NULL,
+            status ENUM('PENDING', 'REVIEWED', 'DISMISSED', 'DELETED') DEFAULT 'PENDING',
+            moderator_id INT NULL,
+            moderated_at TIMESTAMP NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_cmr_status (status),
+            FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
     // Ensure default settings exist for company 1
     try {
@@ -344,6 +387,23 @@ const createGroupOrBroadcast = async ({
  * Fetch all conversations for a specific user with unread counts and last message preview
  */
 const getUserConversations = async (userId, companyId = 1) => {
+    try {
+        // Ensure user is enrolled in applicable company-wide and department broadcast announcement channels
+        await db.execute(`
+            INSERT IGNORE INTO chat_participants (conversation_id, user_id, role)
+            SELECT c.id, ?, IF(u.role IN ('admin', 'super admin', 'super_admin'), 'ADMIN', 'MEMBER')
+            FROM chat_conversations c
+            JOIN users u ON u.id = ?
+            WHERE c.type = 'BROADCAST' 
+              AND (
+                  (c.target_department_id IS NULL AND (c.company_id = u.company_id OR c.company_id = 1 OR ? = 1))
+                  OR (c.target_department_id IS NOT NULL AND c.target_department_id = u.department_id)
+              )
+        `, [userId, userId, companyId]);
+    } catch (enrollErr) {
+        console.warn("Auto-enroll broadcast channels warning:", enrollErr.message);
+    }
+
     const query = `
         SELECT 
             c.id,
@@ -439,22 +499,30 @@ const getConversationMessages = async (conversationId, limit = 100, beforeMessag
             m.id,
             m.conversation_id,
             m.sender_id,
-            m.message_text,
+            CASE WHEN m.is_deleted = TRUE THEN 'This message was deleted' ELSE m.message_text END AS message_text,
             m.message_type,
-            m.file_url,
-            m.file_name,
+            CASE WHEN m.is_deleted = TRUE THEN NULL ELSE m.file_url END AS file_url,
+            CASE WHEN m.is_deleted = TRUE THEN NULL ELSE m.file_name END AS file_name,
             m.file_size,
             m.file_mime,
             m.parent_message_id,
             m.is_pinned,
             m.is_announcement,
+            m.announcement_title,
+            m.announcement_expiry,
+            m.mentions,
+            m.is_edited,
+            m.edited_at,
+            m.is_deleted,
+            m.deleted_at,
             m.reactions,
             m.created_at,
             u.name AS sender_name,
             u.username AS sender_username,
             u.email AS sender_email,
             u.role AS sender_role,
-            dept.department_name AS sender_department
+            dept.department_name AS sender_department,
+            (SELECT COUNT(*) FROM chat_announcement_acknowledgements caa WHERE caa.message_id = m.id) AS ack_count
         FROM chat_messages m
         JOIN users u ON u.id = m.sender_id
         LEFT JOIN departments dept ON dept.id = u.department_id
@@ -464,7 +532,14 @@ const getConversationMessages = async (conversationId, limit = 100, beforeMessag
     `;
 
     const [rows] = await db.execute(query, params);
-    return rows;
+    return rows.map(r => ({
+        ...r,
+        is_pinned: Boolean(r.is_pinned),
+        is_announcement: Boolean(r.is_announcement),
+        is_edited: Boolean(r.is_edited),
+        is_deleted: Boolean(r.is_deleted),
+        ack_count: Number(r.ack_count || 0)
+    }));
 };
 
 /**
@@ -480,7 +555,10 @@ const sendMessage = async ({
     fileSize = null,
     fileMime = null,
     parentMessageId = null,
-    isAnnouncement = false
+    isAnnouncement = false,
+    announcementTitle = null,
+    announcementExpiry = null,
+    mentions = null
 }) => {
     // 1. Verify participant and check "Only administrators can send messages" rule
     const [convRows] = await db.execute(
@@ -507,8 +585,8 @@ const sendMessage = async ({
     // 2. Insert message
     const [msgRes] = await db.execute(`
         INSERT INTO chat_messages 
-        (conversation_id, sender_id, message_text, message_type, file_url, file_name, file_size, file_mime, parent_message_id, is_announcement)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (conversation_id, sender_id, message_text, message_type, file_url, file_name, file_size, file_mime, parent_message_id, is_announcement, announcement_title, announcement_expiry, mentions)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
         conversationId,
         senderId,
@@ -519,7 +597,10 @@ const sendMessage = async ({
         fileSize || null,
         fileMime || null,
         parentMessageId || null,
-        isAnnouncement ? 1 : 0
+        isAnnouncement ? 1 : 0,
+        announcementTitle || null,
+        announcementExpiry || null,
+        mentions ? JSON.stringify(mentions) : null
     ]);
 
     const messageId = msgRes.insertId;
@@ -551,25 +632,159 @@ const sendMessage = async ({
             m.parent_message_id,
             m.is_pinned,
             m.is_announcement,
+            m.announcement_title,
+            m.announcement_expiry,
+            m.mentions,
+            m.is_edited,
+            m.edited_at,
+            m.is_deleted,
+            m.deleted_at,
             m.reactions,
             m.created_at,
             u.name AS sender_name,
             u.username AS sender_username,
             u.email AS sender_email,
             u.role AS sender_role,
-            dept.department_name AS sender_department
+            dept.department_name AS sender_department,
+            0 AS ack_count
         FROM chat_messages m
         JOIN users u ON u.id = m.sender_id
         LEFT JOIN departments dept ON dept.id = u.department_id
         WHERE m.id = ?
     `, [messageId]);
 
-    return fullMsg[0];
+    return {
+        ...fullMsg[0],
+        is_pinned: Boolean(fullMsg[0].is_pinned),
+        is_announcement: Boolean(fullMsg[0].is_announcement),
+        is_edited: Boolean(fullMsg[0].is_edited),
+        is_deleted: Boolean(fullMsg[0].is_deleted),
+        ack_count: 0
+    };
 };
 
 /**
- * Mark conversation messages as read
+ * Edit an existing message
  */
+const editMessage = async (messageId, senderId, newText) => {
+    const [rows] = await db.execute("SELECT id, sender_id, conversation_id, is_deleted, created_at FROM chat_messages WHERE id = ?", [messageId]);
+    if (rows.length === 0) throw new Error("Message not found");
+    if (rows[0].sender_id !== senderId) throw new Error("You can only edit your own messages");
+    if (rows[0].is_deleted) throw new Error("Cannot edit a deleted message");
+
+    await db.execute(
+        "UPDATE chat_messages SET message_text = ?, is_edited = TRUE, edited_at = NOW() WHERE id = ?",
+        [newText.trim(), messageId]
+    );
+
+    return {
+        messageId: Number(messageId),
+        conversationId: rows[0].conversation_id,
+        messageText: newText.trim(),
+        isEdited: true
+    };
+};
+
+/**
+ * Delete a message (soft delete)
+ */
+const deleteMessage = async (messageId, userId, isGlobalAdmin = false) => {
+    const [rows] = await db.execute(
+        "SELECT m.id, m.sender_id, m.conversation_id, cp.role AS participant_role FROM chat_messages m LEFT JOIN chat_participants cp ON cp.conversation_id = m.conversation_id AND cp.user_id = ? WHERE m.id = ?",
+        [userId, messageId]
+    );
+    if (rows.length === 0) throw new Error("Message not found");
+
+    const msg = rows[0];
+    const canDelete = isGlobalAdmin || msg.sender_id === userId || msg.participant_role === 'ADMIN';
+    if (!canDelete) throw new Error("You do not have permission to delete this message");
+
+    await db.execute(
+        "UPDATE chat_messages SET is_deleted = TRUE, deleted_at = NOW() WHERE id = ?",
+        [messageId]
+    );
+
+    return { messageId: Number(messageId), conversationId: msg.conversation_id, isDeleted: true };
+};
+
+/**
+ * Pin or Unpin a message
+ */
+const togglePinMessage = async (messageId) => {
+    const [rows] = await db.execute("SELECT id, conversation_id, is_pinned FROM chat_messages WHERE id = ?", [messageId]);
+    if (rows.length === 0) throw new Error("Message not found");
+    const nextPinned = !rows[0].is_pinned;
+    await db.execute("UPDATE chat_messages SET is_pinned = ? WHERE id = ?", [nextPinned ? 1 : 0, messageId]);
+    return { messageId: Number(messageId), conversationId: rows[0].conversation_id, isPinned: nextPinned };
+};
+
+/**
+ * Acknowledge an announcement
+ */
+const acknowledgeAnnouncement = async (messageId, userId) => {
+    await db.execute(`
+        INSERT IGNORE INTO chat_announcement_acknowledgements (message_id, user_id)
+        VALUES (?, ?)
+    `, [messageId, userId]);
+
+    const [countRows] = await db.execute(
+        "SELECT COUNT(*) AS total_acks FROM chat_announcement_acknowledgements WHERE message_id = ?",
+        [messageId]
+    );
+
+    return { messageId: Number(messageId), userId, ackCount: Number(countRows[0].total_acks) };
+};
+
+/**
+ * Report a message for moderation
+ */
+const reportChatMessage = async (messageId, reporterId, reason) => {
+    await db.execute(`
+        INSERT INTO chat_message_reports (message_id, reporter_id, reason)
+        VALUES (?, ?, ?)
+    `, [messageId, reporterId, reason || 'Inappropriate content']);
+
+    return { messageId, reporterId, success: true };
+};
+
+/**
+ * Add participant to channel
+ */
+const addChannelParticipant = async (conversationId, userId, role = 'MEMBER') => {
+    await db.execute(`
+        INSERT INTO chat_participants (conversation_id, user_id, role)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE role = VALUES(role)
+    `, [conversationId, userId, role]);
+
+    return { conversationId, userId, role };
+};
+
+/**
+ * Remove participant from channel with configurable historic access
+ */
+const removeChannelParticipant = async (conversationId, userId) => {
+    await db.execute("DELETE FROM chat_participants WHERE conversation_id = ? AND user_id = ?", [conversationId, userId]);
+    return { conversationId, userId, removed: true };
+};
+
+/**
+ * Get channel participants list
+ */
+const getChannelParticipants = async (conversationId) => {
+    const [rows] = await db.execute(`
+        SELECT 
+            cp.id, cp.conversation_id, cp.user_id, cp.role, cp.joined_at,
+            u.name, u.username, u.email, u.role AS system_role,
+            dept.department_name
+        FROM chat_participants cp
+        JOIN users u ON u.id = cp.user_id
+        LEFT JOIN departments dept ON dept.id = u.department_id
+        WHERE cp.conversation_id = ?
+        ORDER BY cp.role ASC, u.name ASC
+    `, [conversationId]);
+    return rows;
+};
 const markConversationRead = async (conversationId, userId, messageId = null) => {
     let targetMessageId = messageId;
     if (!targetMessageId) {
@@ -620,7 +835,7 @@ const toggleMessageReaction = async (messageId, userId, emoji) => {
         [JSON.stringify(reactions), messageId]
     );
 
-    return { messageId, reactions };
+    return { messageId: Number(messageId), reactions };
 };
 
 /**
@@ -635,6 +850,7 @@ const getChatSettings = async (companyId = 1) => {
             allow_group_creation: 'ALL',
             allow_broadcast_creation: 'ADMIN_ONLY',
             allow_file_sharing: true,
+            allow_file_downloads: true,
             max_file_size_mb: 25,
             cross_department_chat: true,
             read_receipts_enabled: true,
@@ -653,10 +869,15 @@ const updateChatSettings = async (companyId = 1, data) => {
         'allow_group_creation',
         'allow_broadcast_creation',
         'allow_file_sharing',
+        'allow_file_downloads',
         'max_file_size_mb',
         'cross_department_chat',
         'read_receipts_enabled',
-        'typing_indicators_enabled'
+        'typing_indicators_enabled',
+        'message_retention_days',
+        'legal_hold_enabled',
+        'allow_message_editing',
+        'allow_message_deletion'
     ];
 
     const updates = [];
@@ -681,10 +902,15 @@ const updateChatSettings = async (companyId = 1, data) => {
             data.allow_group_creation ?? 'ALL',
             data.allow_broadcast_creation ?? 'ADMIN_ONLY',
             data.allow_file_sharing ?? true,
+            data.allow_file_downloads ?? true,
             data.max_file_size_mb ?? 25,
             data.cross_department_chat ?? true,
             data.read_receipts_enabled ?? true,
             data.typing_indicators_enabled ?? true,
+            data.message_retention_days ?? 0,
+            data.legal_hold_enabled ?? false,
+            data.allow_message_editing ?? true,
+            data.allow_message_deletion ?? true,
             ...values
         ]);
     }
@@ -703,7 +929,8 @@ const getChatUserTypePermissions = async (companyId = 1) => {
             COALESCE(cutp.can_direct_chat, TRUE) AS can_direct_chat,
             COALESCE(cutp.can_create_group, TRUE) AS can_create_group,
             COALESCE(cutp.can_create_broadcast, FALSE) AS can_create_broadcast,
-            COALESCE(cutp.can_send_files, TRUE) AS can_send_files
+            COALESCE(cutp.can_send_files, TRUE) AS can_send_files,
+            COALESCE(cutp.can_download_files, TRUE) AS can_download_files
         FROM user_types ut
         LEFT JOIN chat_user_type_permissions cutp ON cutp.user_type_id = ut.id AND cutp.company_id = ?
         ORDER BY ut.type_name ASC
@@ -714,7 +941,8 @@ const getChatUserTypePermissions = async (companyId = 1) => {
         can_direct_chat: Boolean(r.can_direct_chat),
         can_create_group: Boolean(r.can_create_group),
         can_create_broadcast: Boolean(r.can_create_broadcast),
-        can_send_files: Boolean(r.can_send_files)
+        can_send_files: Boolean(r.can_send_files),
+        can_download_files: Boolean(r.can_download_files)
     }));
 };
 
@@ -723,20 +951,22 @@ const getChatUserTypePermissions = async (companyId = 1) => {
  */
 const saveChatUserTypePermission = async (companyId = 1, userTypeId, perms) => {
     await db.execute(`
-        INSERT INTO chat_user_type_permissions (company_id, user_type_id, can_direct_chat, can_create_group, can_create_broadcast, can_send_files)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO chat_user_type_permissions (company_id, user_type_id, can_direct_chat, can_create_group, can_create_broadcast, can_send_files, can_download_files)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             can_direct_chat = VALUES(can_direct_chat),
             can_create_group = VALUES(can_create_group),
             can_create_broadcast = VALUES(can_create_broadcast),
-            can_send_files = VALUES(can_send_files)
+            can_send_files = VALUES(can_send_files),
+            can_download_files = VALUES(can_download_files)
     `, [
         companyId,
         userTypeId,
         perms.can_direct_chat ? 1 : 0,
         perms.can_create_group ? 1 : 0,
         perms.can_create_broadcast ? 1 : 0,
-        perms.can_send_files ? 1 : 0
+        perms.can_send_files ? 1 : 0,
+        perms.can_download_files !== false ? 1 : 0
     ]);
 
     return { userTypeId, ...perms };
@@ -762,7 +992,8 @@ const getAllUserChatPermissions = async (companyId = 1) => {
             COALESCE(cudp.can_direct_chat, TRUE) AS can_direct_chat,
             COALESCE(cudp.can_create_group, TRUE) AS can_create_group,
             COALESCE(cudp.can_create_broadcast, FALSE) AS can_create_broadcast,
-            COALESCE(cudp.can_send_files, TRUE) AS can_send_files
+            COALESCE(cudp.can_send_files, TRUE) AS can_send_files,
+            COALESCE(cudp.can_download_files, TRUE) AS can_download_files
         FROM users u
         LEFT JOIN departments dept ON dept.id = u.department_id
         LEFT JOIN user_types ut ON ut.id = u.user_type_id
@@ -779,7 +1010,8 @@ const getAllUserChatPermissions = async (companyId = 1) => {
         can_direct_chat: Boolean(r.can_direct_chat),
         can_create_group: Boolean(r.can_create_group),
         can_create_broadcast: Boolean(r.can_create_broadcast),
-        can_send_files: Boolean(r.can_send_files)
+        can_send_files: Boolean(r.can_send_files),
+        can_download_files: Boolean(r.can_download_files)
     }));
 };
 
@@ -793,7 +1025,8 @@ const saveUserChatPermission = async (companyId = 1, userId, data) => {
         can_direct_chat = true,
         can_create_group = true,
         can_create_broadcast = false,
-        can_send_files = true
+        can_send_files = true,
+        can_download_files = true
     } = data;
 
     const formattedAllowedDepts = Array.isArray(allowed_department_ids) && allowed_department_ids.length > 0
@@ -802,8 +1035,8 @@ const saveUserChatPermission = async (companyId = 1, userId, data) => {
 
     await db.execute(`
         INSERT INTO chat_user_department_permissions 
-        (company_id, user_id, chat_scope, allowed_department_ids, can_direct_chat, can_create_group, can_create_broadcast, can_send_files)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (company_id, user_id, chat_scope, allowed_department_ids, can_direct_chat, can_create_group, can_create_broadcast, can_send_files, can_download_files)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             chat_scope = VALUES(chat_scope),
             allowed_department_ids = VALUES(allowed_department_ids),
@@ -811,6 +1044,7 @@ const saveUserChatPermission = async (companyId = 1, userId, data) => {
             can_create_group = VALUES(can_create_group),
             can_create_broadcast = VALUES(can_create_broadcast),
             can_send_files = VALUES(can_send_files),
+            can_download_files = VALUES(can_download_files),
             updated_at = NOW()
     `, [
         companyId,
@@ -820,10 +1054,57 @@ const saveUserChatPermission = async (companyId = 1, userId, data) => {
         can_direct_chat ? 1 : 0,
         can_create_group ? 1 : 0,
         can_create_broadcast ? 1 : 0,
-        can_send_files ? 1 : 0
+        can_send_files ? 1 : 0,
+        can_download_files ? 1 : 0
     ]);
 
     return { userId, ...data };
+};
+
+/**
+ * Get active user effective chat permissions
+ */
+const getMyUserChatPermissions = async (userId, companyId = 1) => {
+    const [settings] = await db.execute("SELECT * FROM chat_settings WHERE company_id = ?", [companyId]);
+    const globalSettings = settings[0] || {
+        allow_file_sharing: true,
+        allow_file_downloads: true,
+        allow_direct_messaging: true
+    };
+
+    const [userRows] = await db.execute("SELECT id, role, user_type_id, department_id FROM users WHERE id = ?", [userId]);
+    if (userRows.length === 0) return { can_download_files: true, allow_file_downloads: true };
+
+    const u = userRows[0];
+    const isGlobalAdmin = u.role === 'admin' || u.role === 'super admin';
+    if (isGlobalAdmin) {
+        return {
+            is_admin: true,
+            can_direct_chat: true,
+            can_create_group: true,
+            can_create_broadcast: true,
+            can_send_files: true,
+            can_download_files: true,
+            allow_file_downloads: Boolean(globalSettings.allow_file_downloads !== 0)
+        };
+    }
+
+    const [udpRows] = await db.execute("SELECT * FROM chat_user_department_permissions WHERE user_id = ? AND company_id = ?", [userId, companyId]);
+    const [utpRows] = await db.execute("SELECT * FROM chat_user_type_permissions WHERE user_type_id = ? AND company_id = ?", [u.user_type_id, companyId]);
+
+    const canDownload = udpRows[0]?.can_download_files !== undefined
+        ? Boolean(udpRows[0].can_download_files)
+        : (utpRows[0]?.can_download_files !== undefined ? Boolean(utpRows[0].can_download_files) : true);
+
+    return {
+        is_admin: false,
+        can_direct_chat: udpRows[0]?.can_direct_chat !== undefined ? Boolean(udpRows[0].can_direct_chat) : true,
+        can_create_group: udpRows[0]?.can_create_group !== undefined ? Boolean(udpRows[0].can_create_group) : true,
+        can_create_broadcast: udpRows[0]?.can_create_broadcast !== undefined ? Boolean(udpRows[0].can_create_broadcast) : false,
+        can_send_files: udpRows[0]?.can_send_files !== undefined ? Boolean(udpRows[0].can_send_files) : true,
+        can_download_files: canDownload && Boolean(globalSettings.allow_file_downloads !== 0),
+        allow_file_downloads: Boolean(globalSettings.allow_file_downloads !== 0)
+    };
 };
 
 module.exports = {
@@ -840,5 +1121,14 @@ module.exports = {
     getChatUserTypePermissions,
     saveChatUserTypePermission,
     getAllUserChatPermissions,
-    saveUserChatPermission
+    saveUserChatPermission,
+    editMessage,
+    deleteMessage,
+    togglePinMessage,
+    acknowledgeAnnouncement,
+    reportChatMessage,
+    addChannelParticipant,
+    removeChannelParticipant,
+    getChannelParticipants,
+    getMyUserChatPermissions
 };
