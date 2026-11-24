@@ -1,5 +1,27 @@
 const db = require("../config/db.js");
 
+// Safe column addition helper
+const ensureColumn = async (tableName, columnName, columnDef) => {
+    try {
+        const [rows] = await db.execute(`
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+              AND TABLE_NAME = ? 
+              AND COLUMN_NAME = ?
+        `, [tableName, columnName]);
+
+        if (rows.length === 0) {
+            await db.execute(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${columnName}\` ${columnDef}`);
+            console.log(`Added column ${columnName} to ${tableName}`);
+        }
+    } catch (err) {
+        if (!err.message.includes("Duplicate column name")) {
+            console.error(`Error ensuring column ${columnName} in ${tableName}:`, err.message);
+        }
+    }
+};
+
 /**
  * Initialize Chat Schema and Tables
  */
@@ -81,6 +103,44 @@ const createChatTables = async () => {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     await db.execute(createMessagesQuery);
+
+    // Ensure all modern columns exist on chat_messages
+    await ensureColumn("chat_messages", "parent_message_id", "INT NULL");
+    await ensureColumn("chat_messages", "is_pinned", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_messages", "is_announcement", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_messages", "announcement_title", "VARCHAR(200) NULL");
+    await ensureColumn("chat_messages", "announcement_expiry", "TIMESTAMP NULL");
+    await ensureColumn("chat_messages", "mentions", "JSON DEFAULT NULL");
+    await ensureColumn("chat_messages", "is_edited", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_messages", "edited_at", "TIMESTAMP NULL");
+    await ensureColumn("chat_messages", "is_deleted", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_messages", "deleted_at", "TIMESTAMP NULL");
+    await ensureColumn("chat_messages", "reactions", "JSON DEFAULT NULL");
+    await ensureColumn("chat_messages", "file_url", "VARCHAR(255) NULL");
+    await ensureColumn("chat_messages", "file_name", "VARCHAR(255) NULL");
+    await ensureColumn("chat_messages", "file_size", "INT NULL");
+    await ensureColumn("chat_messages", "file_mime", "VARCHAR(100) NULL");
+
+    // Ensure columns on chat_conversations
+    await ensureColumn("chat_conversations", "company_id", "INT DEFAULT 1");
+    await ensureColumn("chat_conversations", "type", "ENUM('DIRECT', 'GROUP', 'BROADCAST') NOT NULL DEFAULT 'DIRECT'");
+    await ensureColumn("chat_conversations", "title", "VARCHAR(150) NULL");
+    await ensureColumn("chat_conversations", "description", "VARCHAR(255) NULL");
+    await ensureColumn("chat_conversations", "avatar_url", "VARCHAR(255) NULL");
+    await ensureColumn("chat_conversations", "is_admin_only", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_conversations", "broadcast_priority", "ENUM('NORMAL', 'URGENT', 'COMPANY_UPDATE', 'POLICY_CHANGE') DEFAULT 'NORMAL'");
+    await ensureColumn("chat_conversations", "target_department_id", "INT NULL");
+    await ensureColumn("chat_conversations", "project_id", "INT NULL");
+    await ensureColumn("chat_conversations", "historic_access_on_remove", "VARCHAR(50) DEFAULT 'VISIBLE'");
+    await ensureColumn("chat_conversations", "created_by", "INT NULL");
+    await ensureColumn("chat_conversations", "last_message_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+
+    // Ensure columns on chat_participants
+    await ensureColumn("chat_participants", "role", "ENUM('ADMIN', 'MEMBER') DEFAULT 'MEMBER'");
+    await ensureColumn("chat_participants", "last_read_message_id", "INT DEFAULT 0");
+    await ensureColumn("chat_participants", "last_read_at", "TIMESTAMP NULL");
+    await ensureColumn("chat_participants", "is_muted", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_participants", "is_pinned", "BOOLEAN DEFAULT FALSE");
 
     // 4. Chat Settings Table (Company Governance Master)
     const createSettingsQuery = `
@@ -582,12 +642,9 @@ const sendMessage = async ({
         throw new Error("Only administrators can send messages in this broadcast channel.");
     }
 
-    // 2. Insert message
-    const [msgRes] = await db.execute(`
-        INSERT INTO chat_messages 
-        (conversation_id, sender_id, message_text, message_type, file_url, file_name, file_size, file_mime, parent_message_id, is_announcement, announcement_title, announcement_expiry, mentions)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
+    // 2. Insert message with self-healing schema migration
+    let msgRes;
+    const insertParams = [
         conversationId,
         senderId,
         messageText || '',
@@ -601,7 +658,38 @@ const sendMessage = async ({
         announcementTitle || null,
         announcementExpiry || null,
         mentions ? JSON.stringify(mentions) : null
-    ]);
+    ];
+
+    try {
+        [msgRes] = await db.execute(`
+            INSERT INTO chat_messages 
+            (conversation_id, sender_id, message_text, message_type, file_url, file_name, file_size, file_mime, parent_message_id, is_announcement, announcement_title, announcement_expiry, mentions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, insertParams);
+    } catch (err) {
+        if (err.code === 'ER_BAD_FIELD_ERROR') {
+            console.warn("[chatModel] chat_messages table missing columns, applying schema migration...");
+            await ensureColumn("chat_messages", "parent_message_id", "INT NULL");
+            await ensureColumn("chat_messages", "is_pinned", "BOOLEAN DEFAULT FALSE");
+            await ensureColumn("chat_messages", "is_announcement", "BOOLEAN DEFAULT FALSE");
+            await ensureColumn("chat_messages", "announcement_title", "VARCHAR(200) NULL");
+            await ensureColumn("chat_messages", "announcement_expiry", "TIMESTAMP NULL");
+            await ensureColumn("chat_messages", "mentions", "JSON DEFAULT NULL");
+            await ensureColumn("chat_messages", "is_edited", "BOOLEAN DEFAULT FALSE");
+            await ensureColumn("chat_messages", "edited_at", "TIMESTAMP NULL");
+            await ensureColumn("chat_messages", "is_deleted", "BOOLEAN DEFAULT FALSE");
+            await ensureColumn("chat_messages", "deleted_at", "TIMESTAMP NULL");
+            await ensureColumn("chat_messages", "reactions", "JSON DEFAULT NULL");
+
+            [msgRes] = await db.execute(`
+                INSERT INTO chat_messages 
+                (conversation_id, sender_id, message_text, message_type, file_url, file_name, file_size, file_mime, parent_message_id, is_announcement, announcement_title, announcement_expiry, mentions)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, insertParams);
+        } else {
+            throw err;
+        }
+    }
 
     const messageId = msgRes.insertId;
 
