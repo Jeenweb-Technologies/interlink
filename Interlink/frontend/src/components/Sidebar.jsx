@@ -154,6 +154,8 @@ export function TopBar({ onMenuClick = () => {} }) {
         { id: "p-task", title: "Task Management", category: "Navigation", path: "/tasks", icon: "fa-solid fa-list-check text-emerald-500", visible: true },
         { id: "p-notes", title: "Notes & Scratchpad", category: "Navigation", path: "/notes", icon: "fa-solid fa-note-sticky text-amber-500", visible: true },
         { id: "p-chat", title: "Chat & Communication", category: "Navigation", path: "/chat", icon: "fa-solid fa-comments text-cyan-500", visible: true },
+        { id: "p-att", title: "Attendance & Shifts", category: "Navigation", path: "/attendance", icon: "fa-solid fa-user-clock text-blue-500", visible: true },
+        { id: "p-time", title: "Timesheets", category: "Navigation", path: "/timesheets", icon: "fa-solid fa-business-time text-indigo-500", visible: true },
         { id: "p-meetings", title: "Meetings & Whiteboard", category: "Navigation", path: "/meetings", icon: "fa-solid fa-video text-teal-400", visible: true },
         { id: "p-comp", title: "Company Master", category: "Masters", path: "/admin/companies", icon: "fa-solid fa-building text-blue-500", visible: isAdmin },
         { id: "p-users", title: "User Master Directory", category: "Masters", path: "/admin/dashboard", icon: "fa-solid fa-users-gear text-purple-500", visible: isAdmin || hasPermission("user_master", "read") },
@@ -1208,6 +1210,44 @@ export default function Sidebar({
                                 </span>
                                 {!isCollapsed && (
                                     <span className="truncate">Meetings &amp; Whiteboard</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/attendance")}
+                                title={isCollapsed ? "Attendance & Shifts" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/attendance")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/attendance") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                }`}>
+                                    <i className="fa-solid fa-user-clock"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Attendance &amp; Shifts</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/timesheets")}
+                                title={isCollapsed ? "Timesheets" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/timesheets")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/timesheets") ? "text-white" : "text-slate-400 group-hover:text-indigo-400"
+                                }`}>
+                                    <i className="fa-solid fa-business-time"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Timesheets</span>
                                 )}
                             </button>
                         </div>
