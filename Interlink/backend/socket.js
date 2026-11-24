@@ -130,22 +130,66 @@ const initSocket = (server) => {
         });
 
         // ─── Meeting & Whiteboard Realtime Signaling ───────────
-        socket.on("join_lobby", ({ roomCode, participant }) => {
+        socket.on("join_lobby", ({ roomCode }) => {
             if (roomCode) {
                 socket.join(`lobby_${roomCode}`);
-                socket.join(`meeting_${roomCode}`);
             }
         });
 
         socket.on("join_meeting_room", ({ roomCode, participant }) => {
             if (roomCode) {
                 const roomKey = `meeting_${roomCode}`;
-                socket.join(roomKey);
-                socket.to(roomKey).emit("peer_joined", {
-                    participant: participant || {
-                        id: socket.user?.id || socket.id,
-                        name: socket.user?.name || "Participant"
+                socket.leave(`lobby_${roomCode}`);
+
+                socket.meetingRoomKey = roomKey;
+                socket.meetingParticipant = {
+                    ...(participant || {}),
+                    socketId: socket.id,
+                    id: participant?.id || (socket.user?.id ? `user_${socket.user.id}` : socket.id),
+                    name: participant?.name || socket.user?.name || "Participant"
+                };
+
+                // Find existing peers already in this meeting room (excluding self)
+                const existingPeers = [];
+                const room = io.sockets.adapter.rooms.get(roomKey);
+                if (room) {
+                    for (const sId of room) {
+                        if (sId !== socket.id) {
+                            const peerSocket = io.sockets.sockets.get(sId);
+                            if (peerSocket && peerSocket.meetingParticipant) {
+                                existingPeers.push({
+                                    socketId: sId,
+                                    participant: peerSocket.meetingParticipant
+                                });
+                            } else {
+                                existingPeers.push({
+                                    socketId: sId,
+                                    participant: { socketId: sId, name: "Participant" }
+                                });
+                            }
+                        }
                     }
+                }
+
+                socket.join(roomKey);
+
+                // Send list of existing peers to the newly joined participant
+                socket.emit("existing_meeting_peers", { peers: existingPeers });
+
+                // Notify all existing participants in the room
+                socket.to(roomKey).emit("peer_joined", {
+                    participant: socket.meetingParticipant,
+                    socketId: socket.id
+                });
+            }
+        });
+
+        socket.on("webrtc_signal", ({ to, signal }) => {
+            if (to) {
+                io.to(to).emit("webrtc_signal", {
+                    from: socket.id,
+                    fromParticipant: socket.meetingParticipant,
+                    signal
                 });
             }
         });
@@ -155,8 +199,11 @@ const initSocket = (server) => {
                 const roomKey = `meeting_${roomCode}`;
                 socket.leave(roomKey);
                 socket.to(roomKey).emit("peer_left", {
-                    participantId: participantId || socket.user?.id || socket.id
+                    participantId: participantId || socket.meetingParticipant?.id || socket.id,
+                    socketId: socket.id
                 });
+                socket.meetingRoomKey = null;
+                socket.meetingParticipant = null;
             }
         });
 
@@ -209,6 +256,15 @@ const initSocket = (server) => {
                     targetParticipantId,
                     payload,
                     senderId: socket.user?.id || socket.id
+                });
+            }
+        });
+
+        socket.on("disconnecting", () => {
+            if (socket.meetingRoomKey) {
+                socket.to(socket.meetingRoomKey).emit("peer_left", {
+                    participantId: socket.meetingParticipant?.id || socket.id,
+                    socketId: socket.id
                 });
             }
         });

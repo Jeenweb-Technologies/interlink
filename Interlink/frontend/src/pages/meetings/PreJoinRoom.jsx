@@ -86,10 +86,41 @@ export default function PreJoinRoom() {
                 audio: selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : true
             };
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            let stream = null;
+            let cameraUnavailable = false;
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (mediaErr) {
+                console.warn("Full media access failed, trying audio-only fallback:", mediaErr);
+                // Windows hardware lock / device busy: fall back to audio only
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: false,
+                        audio: selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : true
+                    });
+                    cameraUnavailable = true;
+                    setIsCamOff(true);
+                    toast("Camera is in use by another tab or app. Joined with audio only.", { icon: "ℹ️", id: "cam-busy" });
+                } catch (audioErr) {
+                    console.warn("Audio access also failed:", audioErr);
+                }
+            }
+
+            if (!stream) {
+                // If neither worked, try enumerating devices anyway so dropdowns work
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    setVideoDevices(devices.filter((d) => d.kind === "videoinput"));
+                    setAudioInputDevices(devices.filter((d) => d.kind === "audioinput"));
+                    setAudioOutputDevices(devices.filter((d) => d.kind === "audiooutput"));
+                } catch (e) {}
+                return;
+            }
+
             streamRef.current = stream;
 
-            if (videoRef.current) {
+            if (videoRef.current && !cameraUnavailable) {
                 videoRef.current.srcObject = stream;
             }
 
@@ -158,12 +189,34 @@ export default function PreJoinRoom() {
     };
 
     // Handle Cam Toggle
-    const handleToggleCam = () => {
-        if (streamRef.current) {
-            streamRef.current.getVideoTracks().forEach((track) => {
-                track.enabled = isCamOff;
-            });
+    const handleToggleCam = async () => {
+        if (!streamRef.current) return;
+        const videoTracks = streamRef.current.getVideoTracks();
+
+        if (videoTracks.length === 0) {
+            // Attempt to dynamically acquire video track if it wasn't available at first
+            try {
+                const vStream = await navigator.mediaDevices.getUserMedia({
+                    video: selectedVideoId ? { deviceId: { exact: selectedVideoId } } : true
+                });
+                const vTrack = vStream.getVideoTracks()[0];
+                if (vTrack) {
+                    streamRef.current.addTrack(vTrack);
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = streamRef.current;
+                    }
+                    setIsCamOff(false);
+                    toast.success("Camera connected");
+                }
+            } catch (err) {
+                toast.error("Camera is in use by another tab or application.");
+            }
+            return;
         }
+
+        videoTracks.forEach((track) => {
+            track.enabled = isCamOff;
+        });
         setIsCamOff(!isCamOff);
     };
 
@@ -418,7 +471,12 @@ export default function PreJoinRoom() {
                                 </div>
                             ) : (
                                 <video
-                                    ref={videoRef}
+                                    ref={(el) => {
+                                        videoRef.current = el;
+                                        if (el && streamRef.current) {
+                                            el.srcObject = streamRef.current;
+                                        }
+                                    }}
                                     autoPlay
                                     playsInline
                                     muted
