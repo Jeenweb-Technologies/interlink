@@ -26,6 +26,8 @@ import MeetingsPage from "./pages/meetings/MeetingsPage";
 import PreJoinRoom from "./pages/meetings/PreJoinRoom";
 import MeetingRoom from "./pages/meetings/MeetingRoom";
 import MeetingSummaryPage from "./pages/meetings/MeetingSummaryPage";
+import AttendancePage from "./pages/attendance/AttendancePage";
+import TimesheetsPage from "./pages/timesheets/TimesheetsPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -106,6 +108,14 @@ export default function AppRoutes() {
                     <Route
                         path="/notes"
                         element={<NotesPage />}
+                    />
+                    <Route
+                        path="/attendance"
+                        element={<AttendancePage />}
+                    />
+                    <Route
+                        path="/timesheets"
+                        element={<TimesheetsPage />}
                     />
                     <Route
                         path="/profile"
