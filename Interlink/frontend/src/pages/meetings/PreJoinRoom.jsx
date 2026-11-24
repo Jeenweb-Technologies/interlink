@@ -19,6 +19,7 @@ export default function PreJoinRoom() {
     const [guestEmail, setGuestEmail] = useState(user.email || "");
     const [passcode, setPasscode] = useState("");
     const [requiresPasscode, setRequiresPasscode] = useState(false);
+    const [isMeetingEnded, setIsMeetingEnded] = useState(false);
 
     // Media Hardware State
     const [videoDevices, setVideoDevices] = useState([]);
@@ -53,8 +54,16 @@ export default function PreJoinRoom() {
             .then((res) => {
                 if (!mounted) return;
                 if (res.data?.success && res.data.meeting) {
-                    setMeeting(res.data.meeting);
-                    if (res.data.meeting.passcode && (!user.id || user.id !== res.data.meeting.host_id)) {
+                    const m = res.data.meeting;
+                    setMeeting(m);
+                    if (m.status === "ended" || m.status === "cancelled") {
+                        setIsMeetingEnded(true);
+                        if (streamRef.current) {
+                            streamRef.current.getTracks().forEach((t) => t.stop());
+                        }
+                        return;
+                    }
+                    if (m.passcode && (!user.id || user.id !== m.host_id)) {
                         setRequiresPasscode(true);
                     }
                 } else {
@@ -75,6 +84,7 @@ export default function PreJoinRoom() {
 
     // 2. Hardware Enumerate & Stream Initialization
     const initMediaDevices = useCallback(async () => {
+        if (isMeetingEnded) return;
         try {
             // Stop any previous stream
             if (streamRef.current) {
@@ -350,6 +360,7 @@ export default function PreJoinRoom() {
                         }
 
                         navigate(`/meetings/room/${roomCode}`, {
+                            replace: true,
                             state: {
                                 initialMicMuted: isMicMuted,
                                 initialCamOff: isCamOff,
@@ -374,6 +385,7 @@ export default function PreJoinRoom() {
                 sessionStorage.setItem(`meeting_server_${roomCode}`, res.data.serverUrl);
 
                 navigate(`/meetings/room/${roomCode}`, {
+                    replace: true,
                     state: {
                         initialMicMuted: isMicMuted,
                         initialCamOff: isCamOff,
@@ -397,6 +409,58 @@ export default function PreJoinRoom() {
             <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white gap-3">
                 <i className="fa-solid fa-circle-notch fa-spin text-4xl text-blue-500"></i>
                 <p className="text-sm font-medium text-slate-300">Checking room status...</p>
+            </div>
+        );
+    }
+
+    if (isMeetingEnded || (meeting && (meeting.status === "ended" || meeting.status === "cancelled"))) {
+        return (
+            <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 select-none font-sans">
+                <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-3xl p-8 text-center shadow-2xl space-y-6">
+                    <div className="w-20 h-20 mx-auto rounded-3xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center text-3xl shadow-inner">
+                        <i className="fa-solid fa-flag-checkered"></i>
+                    </div>
+
+                    <div className="space-y-2">
+                        <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold uppercase tracking-wider border border-rose-500/30">
+                            Meeting Concluded
+                        </span>
+                        <h2 className="text-2xl font-black text-white tracking-tight">
+                            This Meeting Has Ended
+                        </h2>
+                        <p className="text-sm text-slate-400 leading-relaxed">
+                            {meeting?.title ? `"${meeting.title}"` : "This meeting"} has concluded. You cannot join or re-enter an ended meeting session.
+                        </p>
+                    </div>
+
+                    {meeting?.scheduled_end && (
+                        <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 flex items-center justify-between">
+                            <span className="text-slate-400">Ended At:</span>
+                            <span className="font-semibold text-slate-200">
+                                {new Date(meeting.scheduled_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        </div>
+                    )}
+
+                    <div className="pt-2 flex flex-col gap-3">
+                        {meeting?.id && (
+                            <button
+                                onClick={() => navigate(`/meetings/history/${meeting.id}`, { replace: true })}
+                                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                                <i className="fa-solid fa-file-lines"></i>
+                                <span>View Meeting Summary & Notes</span>
+                            </button>
+                        )}
+                        <button
+                            onClick={() => navigate("/meetings", { replace: true })}
+                            className="w-full py-3 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-semibold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                            <i className="fa-solid fa-arrow-left"></i>
+                            <span>Back to Meetings Hub</span>
+                        </button>
+                    </div>
+                </div>
             </div>
         );
     }

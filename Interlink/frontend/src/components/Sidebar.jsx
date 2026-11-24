@@ -313,7 +313,7 @@ export function TopBar({ onMenuClick = () => {} }) {
     };
 
     return (
-        <header className="h-16 w-full bg-white border-b border-slate-200/90 px-4 sm:px-6 flex items-center justify-between z-30 shrink-0 sticky top-0 shadow-xs select-none">
+        <header className="h-16 w-full bg-white border-b border-slate-200/90 px-4 sm:px-6 flex items-center justify-between z-40 shrink-0 sticky top-0 shadow-xs select-none">
             {/* Left Area: Mobile Menu Toggle + Light Mode Logo */}
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                 <button
@@ -995,14 +995,14 @@ export default function Sidebar({
             {isOpen && (
                 <div
                     onClick={onClose}
-                    className="fixed top-16 bottom-0 inset-x-0 bg-slate-950/60 backdrop-blur-xs z-30 lg:hidden transition-opacity"
+                    className="fixed top-16 bottom-0 inset-x-0 bg-slate-950/60 backdrop-blur-xs z-20 lg:hidden transition-opacity"
                     aria-hidden="true"
                 />
             )}
 
             {/* Sidebar Container: Starts under header (top-16 on mobile, static on desktop) */}
             <aside
-                className={`fixed lg:static top-16 lg:top-0 bottom-0 left-0 z-40 flex flex-col h-[calc(100vh-4rem)] lg:h-full bg-[#071328] border-r border-slate-800/80 text-slate-300 transition-all duration-300 ease-in-out select-none shadow-2xl lg:shadow-none
+                className={`fixed lg:static top-16 lg:top-0 bottom-0 left-0 z-30 lg:z-10 flex flex-col h-[calc(100vh-4rem)] lg:h-full bg-[#071328] border-r border-slate-800/80 text-slate-300 transition-all duration-300 ease-in-out select-none shadow-2xl lg:shadow-none
                     ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
                     ${isCollapsed ? "lg:w-20 w-64" : "w-64"}
                 `}
