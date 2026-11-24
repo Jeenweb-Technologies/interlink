@@ -22,6 +22,10 @@ import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
 import NotesPage from "./pages/notes/NotesPage";
+import MeetingsPage from "./pages/meetings/MeetingsPage";
+import PreJoinRoom from "./pages/meetings/PreJoinRoom";
+import MeetingRoom from "./pages/meetings/MeetingRoom";
+import MeetingSummaryPage from "./pages/meetings/MeetingSummaryPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -58,12 +62,30 @@ export default function AppRoutes() {
                 element={<OrgPendingApproval />}
             />
 
+            {/* Standalone Guest & Fullscreen Meeting Routes */}
+            <Route
+                path="/meetings/join/:roomCode"
+                element={<PreJoinRoom />}
+            />
+            <Route
+                path="/meetings/room/:roomCode"
+                element={<MeetingRoom />}
+            />
+
             {/* Authenticated routes wrapped with ProtectedRoute and DashboardLayout */}
             <Route element={<ProtectedRoute />}>
                 <Route element={<DashboardLayout />}>
                     <Route
                         path="/user/home"
                         element={<UserHome />}
+                    />
+                    <Route
+                        path="/meetings"
+                        element={<MeetingsPage />}
+                    />
+                    <Route
+                        path="/meetings/history/:id"
+                        element={<MeetingSummaryPage />}
                     />
                     <Route
                         path="/tasks"

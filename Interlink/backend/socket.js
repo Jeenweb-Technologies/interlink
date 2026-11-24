@@ -129,6 +129,90 @@ const initSocket = (server) => {
             }
         });
 
+        // ─── Meeting & Whiteboard Realtime Signaling ───────────
+        socket.on("join_lobby", ({ roomCode, participant }) => {
+            if (roomCode) {
+                socket.join(`lobby_${roomCode}`);
+                socket.join(`meeting_${roomCode}`);
+            }
+        });
+
+        socket.on("join_meeting_room", ({ roomCode, participant }) => {
+            if (roomCode) {
+                const roomKey = `meeting_${roomCode}`;
+                socket.join(roomKey);
+                socket.to(roomKey).emit("peer_joined", {
+                    participant: participant || {
+                        id: socket.user?.id || socket.id,
+                        name: socket.user?.name || "Participant"
+                    }
+                });
+            }
+        });
+
+        socket.on("leave_meeting_room", ({ roomCode, participantId }) => {
+            if (roomCode) {
+                const roomKey = `meeting_${roomCode}`;
+                socket.leave(roomKey);
+                socket.to(roomKey).emit("peer_left", {
+                    participantId: participantId || socket.user?.id || socket.id
+                });
+            }
+        });
+
+        socket.on("whiteboard_draw", ({ roomCode, action, element, elements }) => {
+            if (roomCode) {
+                socket.to(`meeting_${roomCode}`).emit("whiteboard_draw", {
+                    action,
+                    element,
+                    elements,
+                    senderId: socket.user?.id || socket.id
+                });
+            }
+        });
+
+        socket.on("whiteboard_cursor", ({ roomCode, cursor }) => {
+            if (roomCode) {
+                socket.to(`meeting_${roomCode}`).emit("whiteboard_cursor", {
+                    ...cursor,
+                    senderId: socket.user?.id || socket.id,
+                    senderName: cursor.senderName || socket.user?.name || "Collaborator"
+                });
+            }
+        });
+
+        socket.on("meeting_chat_message", ({ roomCode, message }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("meeting_chat_message", {
+                    ...message,
+                    senderId: socket.user?.id || socket.id,
+                    senderName: message.senderName || socket.user?.name || "Participant",
+                    timestamp: new Date()
+                });
+            }
+        });
+
+        socket.on("meeting_raise_hand", ({ roomCode, participantId, participantName, raised }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("meeting_raise_hand", {
+                    participantId: participantId || socket.user?.id || socket.id,
+                    participantName: participantName || socket.user?.name || "Participant",
+                    raised
+                });
+            }
+        });
+
+        socket.on("host_control_action", ({ roomCode, action, targetParticipantId, payload }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("host_control_action", {
+                    action,
+                    targetParticipantId,
+                    payload,
+                    senderId: socket.user?.id || socket.id
+                });
+            }
+        });
+
         socket.on("disconnect", () => {
             // disconnected cleanly
         });
