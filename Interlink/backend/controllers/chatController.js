@@ -12,7 +12,16 @@ const {
     getChatUserTypePermissions,
     saveChatUserTypePermission,
     getAllUserChatPermissions,
-    saveUserChatPermission
+    saveUserChatPermission,
+    editMessage,
+    deleteMessage,
+    togglePinMessage,
+    acknowledgeAnnouncement,
+    reportChatMessage,
+    addChannelParticipant,
+    removeChannelParticipant,
+    getChannelParticipants,
+    getMyUserChatPermissions
 } = require("../models/chatModel.js");
 const { getIO } = require("../socket.js");
 
@@ -74,7 +83,10 @@ const postMessage = async (req, res) => {
             fileSize: req.file ? req.file.size : fileSize,
             fileMime: req.file ? req.file.mimetype : fileMime,
             parentMessageId,
-            isAnnouncement: !!isAnnouncement
+            isAnnouncement: !!isAnnouncement,
+            announcementTitle: req.body.announcementTitle || null,
+            announcementExpiry: req.body.announcementExpiry || null,
+            mentions: req.body.mentions ? (typeof req.body.mentions === 'string' ? JSON.parse(req.body.mentions) : req.body.mentions) : null
         });
 
         // Emit through socket.io if initialized
@@ -187,8 +199,11 @@ const reactMessage = async (req, res) => {
         const result = await toggleMessageReaction(messageId, userId, emoji);
 
         const io = getIO();
-        if (io && conversationId) {
-            io.to(`conv_${conversationId}`).emit("reaction_updated", result);
+        if (io) {
+            io.emit("reaction_updated", result);
+            if (conversationId) {
+                io.to(`conv_${conversationId}`).emit("reaction_updated", result);
+            }
         }
 
         return res.status(200).json({ success: true, ...result });
@@ -320,6 +335,151 @@ const saveUserPermissionController = async (req, res) => {
 };
 
 /**
+ * Edit message text
+ */
+const editMessageController = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { messageText } = req.body;
+        const senderId = req.user.id;
+
+        if (!messageText || !messageText.trim()) {
+            return res.status(400).json({ success: false, message: "Message text is required" });
+        }
+
+        const result = await editMessage(messageId, senderId, messageText);
+
+        const io = getIO();
+        if (io) {
+            io.emit("message_edited", result);
+            if (result.conversationId) {
+                io.to(`conv_${result.conversationId}`).emit("message_edited", result);
+            }
+        }
+
+        return res.status(200).json({ success: true, result });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Delete message
+ */
+const deleteMessageController = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+        const isGlobalAdmin = req.user.role === 'admin' || req.user.role === 'super admin';
+
+        const result = await deleteMessage(messageId, userId, isGlobalAdmin);
+
+        const io = getIO();
+        if (io) {
+            io.emit("message_deleted", result);
+            if (result.conversationId) {
+                io.to(`conv_${result.conversationId}`).emit("message_deleted", result);
+            }
+        }
+
+        return res.status(200).json({ success: true, result });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Toggle message pin
+ */
+const togglePinMessageController = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const result = await togglePinMessage(messageId);
+
+        const io = getIO();
+        if (io) {
+            io.emit("message_pin_toggled", result);
+            if (result.conversationId) {
+                io.to(`conv_${result.conversationId}`).emit("message_pin_toggled", result);
+            }
+        }
+
+        return res.status(200).json({ success: true, result });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Acknowledge announcement
+ */
+const acknowledgeAnnouncementController = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const userId = req.user.id;
+        const result = await acknowledgeAnnouncement(messageId, userId);
+
+        const io = getIO();
+        if (io) {
+            io.emit("announcement_acknowledged", result);
+        }
+
+        return res.status(200).json({ success: true, result });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Report message
+ */
+const reportChatMessageController = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { reason } = req.body;
+        const reporterId = req.user.id;
+        const result = await reportChatMessage(messageId, reporterId, reason);
+        return res.status(200).json({ success: true, result, message: "Report submitted to administrators" });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Channel participants management
+ */
+const getChannelParticipantsController = async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const participants = await getChannelParticipants(conversationId);
+        return res.status(200).json({ success: true, participants });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: "Failed to fetch participants" });
+    }
+};
+
+const addChannelParticipantController = async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const { userId, role } = req.body;
+        const result = await addChannelParticipant(conversationId, userId, role);
+        return res.status(200).json({ success: true, result, message: "Member added" });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+const removeChannelParticipantController = async (req, res) => {
+    try {
+        const { conversationId, userId } = req.params;
+        const result = await removeChannelParticipant(conversationId, userId);
+        return res.status(200).json({ success: true, result, message: "Member removed" });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+/**
  * Get Company Chat Settings
  */
 const getSettings = async (req, res) => {
@@ -372,6 +532,17 @@ const saveUserTypePermission = async (req, res) => {
     }
 };
 
+const getMyChatPermissionsController = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const companyId = req.user.company_id || 1;
+        const permissions = await getMyUserChatPermissions(userId, companyId);
+        return res.status(200).json({ success: true, permissions });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: "Failed to fetch user permissions" });
+    }
+};
+
 module.exports = {
     getConversations,
     getMessages,
@@ -386,5 +557,14 @@ module.exports = {
     getUserTypePermissions,
     saveUserTypePermission,
     getAllUserPermissionsController,
-    saveUserPermissionController
+    saveUserPermissionController,
+    editMessageController,
+    deleteMessageController,
+    togglePinMessageController,
+    acknowledgeAnnouncementController,
+    reportChatMessageController,
+    getChannelParticipantsController,
+    addChannelParticipantController,
+    removeChannelParticipantController,
+    getMyChatPermissionsController
 };

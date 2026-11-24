@@ -18,9 +18,11 @@ export const postChatMessage = async (conversationId, data, file = null) => {
     if (file) {
         const formData = new FormData();
         formData.append("file", file);
-        if (data.messageText) formData.append("messageText", data.messageText);
-        if (data.parentMessageId) formData.append("parentMessageId", data.parentMessageId);
-        if (data.isAnnouncement) formData.append("isAnnouncement", "true");
+        Object.keys(data || {}).forEach(key => {
+            if (data[key] !== undefined && data[key] !== null) {
+                formData.append(key, typeof data[key] === "object" ? JSON.stringify(data[key]) : data[key]);
+            }
+        });
         return apiClient.post(`/chat/conversations/${conversationId}/messages`, formData, {
             headers: { "Content-Type": "multipart/form-data" }
         });
@@ -72,4 +74,41 @@ export const getAllUserChatPermissions = async () => {
 
 export const saveUserChatPermission = async (userId, data) => {
     return apiClient.put(`/chat/user-permissions/${userId}`, data);
+};
+
+// Advanced Enterprise Messaging
+export const editChatMessage = async (messageId, messageText) => {
+    return apiClient.put(`/chat/messages/${messageId}`, { messageText });
+};
+
+export const deleteChatMessage = async (messageId) => {
+    return apiClient.delete(`/chat/messages/${messageId}`);
+};
+
+export const togglePinChatMessage = async (messageId) => {
+    return apiClient.post(`/chat/messages/${messageId}/pin`);
+};
+
+export const acknowledgeAnnouncement = async (messageId) => {
+    return apiClient.post(`/chat/messages/${messageId}/acknowledge`);
+};
+
+export const reportChatMessage = async (messageId, reason) => {
+    return apiClient.post(`/chat/messages/${messageId}/report`, { reason });
+};
+
+export const getChannelParticipants = async (conversationId) => {
+    return apiClient.get(`/chat/conversations/${conversationId}/participants`);
+};
+
+export const addChannelParticipant = async (conversationId, userId, role = "MEMBER") => {
+    return apiClient.post(`/chat/conversations/${conversationId}/participants`, { userId, role });
+};
+
+export const removeChannelParticipant = async (conversationId, userId) => {
+    return apiClient.delete(`/chat/conversations/${conversationId}/participants/${userId}`);
+};
+
+export const getMyChatPermissions = async () => {
+    return apiClient.get("/chat/my-permissions");
 };

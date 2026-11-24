@@ -16,10 +16,30 @@ export default function ChatSettingsMaster() {
     const activeCompanyId = localStorage.getItem("active_company_id") || user.company_id || "1";
     const activeCompanyName = user.companies?.find(c => String(c.id) === String(activeCompanyId))?.name || "Active Workspace";
 
-    // Tab state: "policies" | "user_types" | "user_scopes"
-    const [activeTab, setActiveTab] = useState("policies");
+    // Toggle Component Helper
+    const ToggleSwitch = ({ checked, onChange, disabled = false, ariaLabel = "toggle" }) => (
+        <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            aria-label={ariaLabel}
+            disabled={disabled}
+            onClick={() => !disabled && onChange(!checked)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#0056cf] focus:ring-offset-2 ${
+                checked ? "bg-[#0056cf]" : "bg-slate-200 hover:bg-slate-300"
+            } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
+            <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                    checked ? "translate-x-5" : "translate-x-0"
+                }`}
+            />
+        </button>
+    );
     const [loading, setLoading] = useState(true);
     const [savingSettings, setSavingSettings] = useState(false);
+    const [activeTab, setActiveTab] = useState("policies");
 
     // Tab 1: Global Governance Policies
     const [settings, setSettings] = useState({
@@ -27,10 +47,15 @@ export default function ChatSettingsMaster() {
         allow_group_creation: "ALL",
         allow_broadcast_creation: "ADMIN_ONLY",
         allow_file_sharing: true,
+        allow_file_downloads: true,
         max_file_size_mb: 25,
         cross_department_chat: true,
         read_receipts_enabled: true,
-        typing_indicators_enabled: true
+        typing_indicators_enabled: true,
+        message_retention_days: 0,
+        legal_hold_enabled: false,
+        allow_message_editing: true,
+        allow_message_deletion: true
     });
 
     // Tab 2: User Type Permissions
@@ -51,7 +76,8 @@ export default function ChatSettingsMaster() {
         can_direct_chat: true,
         can_create_group: true,
         can_create_broadcast: false,
-        can_send_files: true
+        can_send_files: true,
+        can_download_files: true
     });
 
     // Load initial master data
@@ -70,6 +96,7 @@ export default function ChatSettingsMaster() {
                     ...settingsRes.data.settings,
                     allow_direct_messaging: Boolean(settingsRes.data.settings.allow_direct_messaging),
                     allow_file_sharing: Boolean(settingsRes.data.settings.allow_file_sharing),
+                    allow_file_downloads: Boolean(settingsRes.data.settings.allow_file_downloads !== 0),
                     cross_department_chat: Boolean(settingsRes.data.settings.cross_department_chat),
                     read_receipts_enabled: Boolean(settingsRes.data.settings.read_receipts_enabled),
                     typing_indicators_enabled: Boolean(settingsRes.data.settings.typing_indicators_enabled)
@@ -136,7 +163,8 @@ export default function ChatSettingsMaster() {
                 can_direct_chat: perm.can_direct_chat,
                 can_create_group: perm.can_create_group,
                 can_create_broadcast: perm.can_create_broadcast,
-                can_send_files: perm.can_send_files
+                can_send_files: perm.can_send_files,
+                can_download_files: perm.can_download_files !== false
             });
             if (res.data?.success) {
                 toast.success(`Permissions updated for ${perm.type_name}`);
@@ -157,7 +185,8 @@ export default function ChatSettingsMaster() {
             can_direct_chat: u.can_direct_chat !== false,
             can_create_group: u.can_create_group !== false,
             can_create_broadcast: Boolean(u.can_create_broadcast),
-            can_send_files: u.can_send_files !== false
+            can_send_files: u.can_send_files !== false,
+            can_download_files: u.can_download_files !== false
         });
         setIsEditModalOpen(true);
     };
@@ -190,7 +219,8 @@ export default function ChatSettingsMaster() {
                 can_direct_chat: scopeFormData.can_direct_chat,
                 can_create_group: scopeFormData.can_create_group,
                 can_create_broadcast: scopeFormData.can_create_broadcast,
-                can_send_files: scopeFormData.can_send_files
+                can_send_files: scopeFormData.can_send_files,
+                can_download_files: scopeFormData.can_download_files
             };
 
             const res = await saveUserChatPermission(editModalUser.user_id, payload);
@@ -243,68 +273,80 @@ export default function ChatSettingsMaster() {
             key: "can_direct_chat",
             label: "1-on-1 Direct Chat",
             render: (row) => (
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
+                <div className="flex items-center gap-2.5">
+                    <ToggleSwitch
                         checked={row.can_direct_chat}
                         onChange={() => handleTogglePerm(row.user_type_id, "can_direct_chat")}
-                        className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                        ariaLabel={`Direct chat for ${row.type_name}`}
                     />
-                    <span className={`text-xs font-medium ${row.can_direct_chat ? "text-emerald-700" : "text-slate-400"}`}>
+                    <span className={`text-xs font-semibold ${row.can_direct_chat ? "text-emerald-700" : "text-slate-400"}`}>
                         {row.can_direct_chat ? "Allowed" : "Disabled"}
                     </span>
-                </label>
+                </div>
             )
         },
         {
             key: "can_create_group",
             label: "Create Groups",
             render: (row) => (
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
+                <div className="flex items-center gap-2.5">
+                    <ToggleSwitch
                         checked={row.can_create_group}
                         onChange={() => handleTogglePerm(row.user_type_id, "can_create_group")}
-                        className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                        ariaLabel={`Create groups for ${row.type_name}`}
                     />
-                    <span className={`text-xs font-medium ${row.can_create_group ? "text-emerald-700" : "text-slate-400"}`}>
+                    <span className={`text-xs font-semibold ${row.can_create_group ? "text-emerald-700" : "text-slate-400"}`}>
                         {row.can_create_group ? "Allowed" : "Disabled"}
                     </span>
-                </label>
+                </div>
             )
         },
         {
             key: "can_create_broadcast",
             label: "Create Broadcasts",
             render: (row) => (
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
+                <div className="flex items-center gap-2.5">
+                    <ToggleSwitch
                         checked={row.can_create_broadcast}
                         onChange={() => handleTogglePerm(row.user_type_id, "can_create_broadcast")}
-                        className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                        ariaLabel={`Create broadcasts for ${row.type_name}`}
                     />
-                    <span className={`text-xs font-medium ${row.can_create_broadcast ? "text-emerald-700" : "text-slate-400"}`}>
+                    <span className={`text-xs font-semibold ${row.can_create_broadcast ? "text-emerald-700" : "text-slate-400"}`}>
                         {row.can_create_broadcast ? "Allowed" : "Disabled"}
                     </span>
-                </label>
+                </div>
             )
         },
         {
             key: "can_send_files",
             label: "Attach Files",
             render: (row) => (
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
+                <div className="flex items-center gap-2.5">
+                    <ToggleSwitch
                         checked={row.can_send_files}
                         onChange={() => handleTogglePerm(row.user_type_id, "can_send_files")}
-                        className="w-4 h-4 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                        ariaLabel={`Attach files for ${row.type_name}`}
                     />
-                    <span className={`text-xs font-medium ${row.can_send_files ? "text-emerald-700" : "text-slate-400"}`}>
+                    <span className={`text-xs font-semibold ${row.can_send_files ? "text-emerald-700" : "text-slate-400"}`}>
                         {row.can_send_files ? "Allowed" : "Disabled"}
                     </span>
-                </label>
+                </div>
+            )
+        },
+        {
+            key: "can_download_files",
+            label: "Download Files",
+            render: (row) => (
+                <div className="flex items-center gap-2.5">
+                    <ToggleSwitch
+                        checked={row.can_download_files !== false}
+                        onChange={() => handleTogglePerm(row.user_type_id, "can_download_files")}
+                        ariaLabel={`Download files for ${row.type_name}`}
+                    />
+                    <span className={`text-xs font-semibold ${row.can_download_files !== false ? "text-emerald-700" : "text-slate-400"}`}>
+                        {row.can_download_files !== false ? "Allowed" : "Disabled"}
+                    </span>
+                </div>
             )
         },
         {
@@ -423,16 +465,22 @@ export default function ChatSettingsMaster() {
     ], [departmentMap]);
 
     return (
-        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6 bg-[#F6F8FB] min-h-screen">
             {/* Standard Master Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-                        <i className="fa-solid fa-comments text-blue-600"></i>
-                        <span>Chat Settings & Governance</span>
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-xl sm:text-2xl font-black text-[#17365D] tracking-tight flex items-center gap-2.5">
+                            <i className="fa-solid fa-comments text-[#2878C7]"></i>
+                            <span>Chat Settings & Governance</span>
+                        </h1>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-[#2878C7] text-xs font-bold">
+                            <i className="fa-solid fa-building text-[10px]"></i>
+                            {activeCompanyName}
+                        </span>
+                    </div>
                     <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                        Configure corporate chat policies, role permissions, and cross-department communication scopes for {activeCompanyName}.
+                        Configure corporate chat policies, role permissions, and cross-department communication scopes for {activeCompanyName}
                     </p>
                 </div>
             </div>
@@ -497,15 +545,11 @@ export default function ChatSettingsMaster() {
                                     <h3 className="text-xs font-bold text-slate-800">1-on-1 Direct Messaging</h3>
                                     <p className="text-xs text-slate-500">Allow employees to initiate private direct conversations.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                                    <input
-                                        type="checkbox"
-                                        checked={settings.allow_direct_messaging}
-                                        onChange={(e) => setSettings({ ...settings, allow_direct_messaging: e.target.checked })}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
-                                </label>
+                                <ToggleSwitch
+                                    checked={settings.allow_direct_messaging}
+                                    onChange={(val) => setSettings({ ...settings, allow_direct_messaging: val })}
+                                    ariaLabel="Toggle 1-on-1 Direct Messaging"
+                                />
                             </div>
 
                             {/* Allow File Sharing */}
@@ -514,15 +558,24 @@ export default function ChatSettingsMaster() {
                                     <h3 className="text-xs font-bold text-slate-800">File & Document Attachments</h3>
                                     <p className="text-xs text-slate-500">Permit sharing documents, images, and audio files in chat.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                                    <input
-                                        type="checkbox"
-                                        checked={settings.allow_file_sharing}
-                                        onChange={(e) => setSettings({ ...settings, allow_file_sharing: e.target.checked })}
-                                        className="sr-only peer"
-                                    />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
-                                </label>
+                                <ToggleSwitch
+                                    checked={settings.allow_file_sharing}
+                                    onChange={(val) => setSettings({ ...settings, allow_file_sharing: val })}
+                                    ariaLabel="Toggle File & Document Attachments"
+                                />
+                            </div>
+
+                            {/* Allow File Downloads */}
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <h3 className="text-xs font-bold text-slate-800">File & Document Downloads</h3>
+                                    <p className="text-xs text-slate-500">Permit downloading raw attachments. When disabled, users can only preview in-app.</p>
+                                </div>
+                                <ToggleSwitch
+                                    checked={settings.allow_file_downloads !== false}
+                                    onChange={(val) => setSettings({ ...settings, allow_file_downloads: val })}
+                                    ariaLabel="Toggle File & Document Downloads"
+                                />
                             </div>
 
                             {/* Group Creation Policy */}
@@ -581,15 +634,69 @@ export default function ChatSettingsMaster() {
                                     <h3 className="text-xs font-bold text-slate-800">Read Receipts & Double Checks</h3>
                                     <p className="text-xs text-slate-500">Show read status checkmarks for sent messages.</p>
                                 </div>
-                                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                <ToggleSwitch
+                                    checked={settings.read_receipts_enabled}
+                                    onChange={(val) => setSettings({ ...settings, read_receipts_enabled: val })}
+                                    ariaLabel="Toggle Read Receipts"
+                                />
+                            </div>
+
+                            {/* Message Retention Policy */}
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-1.5">
+                                <label className="block text-xs font-bold text-slate-800">Message Retention (Days)</label>
+                                <p className="text-xs text-slate-500">Auto-delete messages older than N days (0 = retain indefinitely).</p>
+                                <div className="pt-1">
                                     <input
-                                        type="checkbox"
-                                        checked={settings.read_receipts_enabled}
-                                        onChange={(e) => setSettings({ ...settings, read_receipts_enabled: e.target.checked })}
-                                        className="sr-only peer"
+                                        type="number"
+                                        min="0"
+                                        max="3650"
+                                        value={settings.message_retention_days}
+                                        onChange={(e) => setSettings({ ...settings, message_retention_days: parseInt(e.target.value, 10) || 0 })}
+                                        className="w-full text-xs rounded-lg border border-slate-300 bg-white py-2 px-3 text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#0056cf] focus:border-[#0056cf]"
                                     />
-                                    <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0056cf]"></div>
-                                </label>
+                                </div>
+                            </div>
+
+                            {/* Legal Hold Override */}
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                        <i className="fa-solid fa-scale-balanced text-amber-600"></i>
+                                        <span>Corporate Legal Hold</span>
+                                    </h3>
+                                    <p className="text-xs text-slate-500">Freezes message retention & deletion policies for audit compliance.</p>
+                                </div>
+                                <ToggleSwitch
+                                    checked={settings.legal_hold_enabled}
+                                    onChange={(val) => setSettings({ ...settings, legal_hold_enabled: val })}
+                                    ariaLabel="Toggle Corporate Legal Hold"
+                                />
+                            </div>
+
+                            {/* Message Editing Policy */}
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <h3 className="text-xs font-bold text-slate-800">Allow Message Editing</h3>
+                                    <p className="text-xs text-slate-500">Permit senders to edit message text with visible (edited) badge.</p>
+                                </div>
+                                <ToggleSwitch
+                                    checked={settings.allow_message_editing}
+                                    onChange={(val) => setSettings({ ...settings, allow_message_editing: val })}
+                                    ariaLabel="Toggle Allow Message Editing"
+                                />
+                            </div>
+
+                            {/* Message Deletion Policy */}
+                            <div className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                                <div className="space-y-0.5">
+                                    <h3 className="text-xs font-bold text-slate-800">Allow Message Deletion</h3>
+                                    <p className="text-xs text-slate-500">Permit senders and group admins to recall/soft-delete messages.</p>
+                                </div>
+                                <ToggleSwitch
+                                    checked={settings.allow_message_deletion}
+                                    onChange={(val) => setSettings({ ...settings, allow_message_deletion: val })}
+                                    ariaLabel="Toggle Allow Message Deletion"
+                                />
                             </div>
                         </div>
 
@@ -795,46 +902,51 @@ export default function ChatSettingsMaster() {
                             {/* Additional Chat Capabilities */}
                             <div className="space-y-2 border-t border-slate-100 pt-3">
                                 <label className="block text-xs font-bold text-slate-800">Feature Access for this User</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={scopeFormData.can_direct_chat}
-                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_direct_chat: e.target.checked })}
-                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
-                                        />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
                                         <span className="text-xs font-medium text-slate-700">1-on-1 Direct Chat</span>
-                                    </label>
-
-                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={scopeFormData.can_create_group}
-                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_create_group: e.target.checked })}
-                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        <ToggleSwitch
+                                            checked={scopeFormData.can_direct_chat}
+                                            onChange={(val) => setScopeFormData({ ...scopeFormData, can_direct_chat: val })}
+                                            ariaLabel="1-on-1 Direct Chat"
                                         />
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
                                         <span className="text-xs font-medium text-slate-700">Create Groups</span>
-                                    </label>
-
-                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={scopeFormData.can_create_broadcast}
-                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_create_broadcast: e.target.checked })}
-                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        <ToggleSwitch
+                                            checked={scopeFormData.can_create_group}
+                                            onChange={(val) => setScopeFormData({ ...scopeFormData, can_create_group: val })}
+                                            ariaLabel="Create Groups"
                                         />
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
                                         <span className="text-xs font-medium text-slate-700">Create Broadcasts</span>
-                                    </label>
-
-                                    <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50/50 cursor-pointer select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={scopeFormData.can_send_files}
-                                            onChange={(e) => setScopeFormData({ ...scopeFormData, can_send_files: e.target.checked })}
-                                            className="w-3.5 h-3.5 rounded text-[#2878C7] border-slate-300 focus:ring-[#2878C7]"
+                                        <ToggleSwitch
+                                            checked={scopeFormData.can_create_broadcast}
+                                            onChange={(val) => setScopeFormData({ ...scopeFormData, can_create_broadcast: val })}
+                                            ariaLabel="Create Broadcasts"
                                         />
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
                                         <span className="text-xs font-medium text-slate-700">Send Attachments</span>
-                                    </label>
+                                        <ToggleSwitch
+                                            checked={scopeFormData.can_send_files}
+                                            onChange={(val) => setScopeFormData({ ...scopeFormData, can_send_files: val })}
+                                            ariaLabel="Send Attachments"
+                                        />
+                                    </div>
+
+                                    <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
+                                        <span className="text-xs font-medium text-slate-700">Download Files</span>
+                                        <ToggleSwitch
+                                            checked={scopeFormData.can_download_files !== false}
+                                            onChange={(val) => setScopeFormData({ ...scopeFormData, can_download_files: val })}
+                                            ariaLabel="Download Files"
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
