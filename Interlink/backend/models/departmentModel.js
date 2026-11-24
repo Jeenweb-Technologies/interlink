@@ -122,7 +122,7 @@ const getDepartments = async (includeInactive = true, companyId = null) => {
             d.status,
             d.created_at,
             d.updated_at,
-            COALESCE(c.company_name, c.name, 'Default Company') AS company_name,
+            COALESCE(c.name, 'Default Company') AS company_name,
             COUNT(DISTINCT u.id) AS member_count
         FROM departments d
         LEFT JOIN companies c ON d.company_id = c.id
@@ -153,7 +153,7 @@ const getDepartmentById = async (id) => {
             d.status,
             d.created_at,
             d.updated_at,
-            COALESCE(c.company_name, c.name, 'Default Company') AS company_name,
+            COALESCE(c.name, 'Default Company') AS company_name,
             COUNT(DISTINCT u.id) AS member_count
         FROM departments d
         LEFT JOIN companies c ON d.company_id = c.id
