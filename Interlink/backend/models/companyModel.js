@@ -68,8 +68,18 @@ const createOrganizationAndCompanyTables = async () => {
     // 4. Automatically ensure columns on existing tables
     await ensureColumn('organizations', 'email', 'VARCHAR(150) DEFAULT NULL');
     await ensureColumn('organizations', 'status', "VARCHAR(50) DEFAULT 'pending'");
+    await ensureColumn('companies', 'name', 'VARCHAR(150) DEFAULT NULL');
     await ensureColumn('companies', 'email', 'VARCHAR(150) DEFAULT NULL');
     await ensureColumn('companies', 'phone', 'VARCHAR(50) DEFAULT NULL');
+
+    // Backward-compatibility: if legacy company_name or company_code columns exist from previous schema migrations,
+    // ensure they don't block inserts if they have NOT NULL constraints
+    try {
+        await db.execute("ALTER TABLE companies MODIFY COLUMN company_name VARCHAR(150) NULL");
+    } catch (_) {}
+    try {
+        await db.execute("ALTER TABLE companies MODIFY COLUMN company_code VARCHAR(50) NULL");
+    } catch (_) {}
 
     await ensureColumn('users', 'organization_id', 'INT DEFAULT 1');
     await ensureColumn('users', 'company_id', 'INT DEFAULT 1');
@@ -120,22 +130,24 @@ const findOrganizationById = async (id) => {
 
 const findCompaniesByOrgId = async (orgId) => {
     const [rows] = await db.execute(
-        "SELECT id, organization_id, name, email, phone, created_at FROM companies WHERE organization_id = ? ORDER BY name ASC",
+        "SELECT id, organization_id, COALESCE(name, company_name) AS name, email, phone, created_at FROM companies WHERE organization_id = ? ORDER BY name ASC",
         [orgId]
     );
     return rows;
 };
 
 const findCompanyById = async (companyId) => {
-    const [rows] = await db.execute("SELECT * FROM companies WHERE id = ?", [companyId]);
+    const [rows] = await db.execute("SELECT id, organization_id, COALESCE(name, company_name) AS name, email, phone, created_at FROM companies WHERE id = ?", [companyId]);
     return rows[0] || null;
 };
 
 const createCompanyRecord = async (organizationId, name, email = null, phone = null) => {
     try {
+        // Populate both name and company_name (and company_code if column exists) to support both schemas
         const [result] = await db.execute(
-            "INSERT INTO companies (organization_id, name, email, phone) VALUES (?, ?, ?, ?)",
-            [organizationId, name, email, phone]
+            `INSERT INTO companies (organization_id, name, company_name, email, phone) 
+             VALUES (?, ?, ?, ?, ?)`,
+            [organizationId, name, name, email, phone]
         );
         return {
             id: result.insertId,
@@ -145,13 +157,11 @@ const createCompanyRecord = async (organizationId, name, email = null, phone = n
             phone
         };
     } catch (err) {
-        if (err.code === 'ER_BAD_FIELD_ERROR') {
+        if (err.code === 'ER_BAD_FIELD_ERROR' || err.code === 'ER_NO_DEFAULT_FOR_FIELD') {
             const [fallbackResult] = await db.execute(
                 "INSERT INTO companies (organization_id, name) VALUES (?, ?)",
                 [organizationId, name]
             );
-            db.execute("ALTER TABLE companies ADD COLUMN email VARCHAR(150) DEFAULT NULL").catch(() => {});
-            db.execute("ALTER TABLE companies ADD COLUMN phone VARCHAR(50) DEFAULT NULL").catch(() => {});
             return {
                 id: fallbackResult.insertId,
                 organization_id: organizationId,
