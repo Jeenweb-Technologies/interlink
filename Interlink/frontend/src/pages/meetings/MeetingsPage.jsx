@@ -82,9 +82,6 @@ export default function MeetingsPage() {
                             <h1 className="text-2xl font-black tracking-tight text-slate-900">
                                 Meetings &amp; Whiteboard Studio
                             </h1>
-                            <p className="text-sm text-slate-500 mt-0.5">
-                                High-definition audio/video conferences, interactive vector canvas, and enterprise governance
-                            </p>
                         </div>
                     </div>
 
@@ -200,7 +197,7 @@ export default function MeetingsPage() {
                                             {isScheduled && (
                                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-600 border border-blue-200/80">
                                                     <i className="fa-regular fa-clock text-[10px]"></i>
-                                                    Scheduled
+                                                    {m.meeting_type === "instant" ? "In Green Room" : "Scheduled"}
                                                 </span>
                                             )}
                                             {isEnded && (

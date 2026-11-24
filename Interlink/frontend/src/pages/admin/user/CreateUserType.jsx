@@ -5,12 +5,37 @@ import toast from "react-hot-toast";
 
 const PERMISSION_SECTIONS = [
   {
-    title: "User Management",
+    title: "Organization & System Masters",
+    masters: [
+      { key: "company_master",        label: "Company Master" },
+      { key: "department_master",     label: "Department Master" },
+      { key: "chat_settings_master",  label: "Chat Settings Master" },
+    ]
+  },
+  {
+    title: "User & Access Management",
     masters: [
       { key: "user_type",             label: "User Type Master" },
-      { key: "user_master",             label: "User Master" },
-      { key: "device_approval",         label: "Device Approval" },
-      { key: "activity_report",         label: "Activity Report" },
+      { key: "user_master",           label: "User Master" },
+      { key: "device_approval",       label: "Device Approval" },
+      { key: "activity_report",       label: "Activity Report" },
+    ]
+  },
+  {
+    title: "Workspace & Collaboration",
+    masters: [
+      { key: "projects",              label: "Projects & Portfolio" },
+      { key: "tasks",                 label: "Task Management" },
+      { key: "notes",                 label: "Notes & Scratchpad" },
+      { key: "chat",                  label: "Chat & Communication" },
+      { key: "meetings",              label: "Meetings & Whiteboard" },
+    ]
+  },
+  {
+    title: "Operations & HR",
+    masters: [
+      { key: "attendance",            label: "Attendance & Shifts" },
+      { key: "timesheets",            label: "Timesheets" },
     ]
   }
 ];
@@ -24,6 +49,14 @@ const PERM_COLORS = {
   canWrite:  { bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d", check: "#16a34a" },
   canUpdate: { bg: "#fffbeb", border: "#fde68a", text: "#b45309", check: "#d97706" },
   canDelete: { bg: "#fff1f2", border: "#fecdd3", text: "#be123c", check: "#e11d48" },
+};
+
+const isApprovalRow = (key) => key.endsWith("_approval");
+const isReportRow = (key) => key === "activity_report";
+const getApplicablePerms = (key) => {
+  if (isApprovalRow(key)) return ["canRead", "canWrite"];
+  if (isReportRow(key)) return ["canRead"];
+  return PERMS;
 };
 
 const defaultPerms = () =>
@@ -45,6 +78,7 @@ export default function CreateUserType() {
 
   // Toggle a single checkbox
   const togglePerm = (masterKey, perm) => {
+    if (!getApplicablePerms(masterKey).includes(perm)) return;
     setPermissions((prev) =>
       prev.map((p) =>
         p.masterName === masterKey ? { ...p, [perm]: !p[perm] } : p
@@ -54,78 +88,68 @@ export default function CreateUserType() {
 
   // Toggle entire row (all perms for one master)
   const toggleRow = (masterKey) => {
-    const isApprovalRow = masterKey.endsWith("_approval");
+    const applicable = getApplicablePerms(masterKey);
     const row = permissions.find((p) => p.masterName === masterKey);
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    const allChecked = applicablePerms.every((perm) => row[perm]);
+    if (!row) return;
+    const allChecked = applicable.every((perm) => row[perm]);
     setPermissions((prev) =>
-      prev.map((p) =>
-        p.masterName === masterKey
-          ? {
-              ...p,
-              canRead: !allChecked,
-              canWrite: !allChecked,
-              canUpdate: isApprovalRow ? false : !allChecked,
-              canDelete: isApprovalRow ? false : !allChecked,
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (p.masterName !== masterKey) return p;
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !allChecked;
+        });
+        return next;
+      })
     );
   };
 
   // Toggle entire column (one perm across all masters)
   const toggleColumn = (perm) => {
-    const allChecked = permissions.every((p) => p[perm]);
-    setPermissions((prev) => prev.map((p) => {
-      const isApprovalRow = p.masterName.endsWith("_approval");
-      if (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) {
-        return { ...p, [perm]: false };
-      }
-      return { ...p, [perm]: !allChecked };
-    }));
+    const applicableRows = permissions.filter((p) => getApplicablePerms(p.masterName).includes(perm));
+    const allChecked = applicableRows.length > 0 && applicableRows.every((p) => p[perm]);
+    setPermissions((prev) =>
+      prev.map((p) => {
+        if (!getApplicablePerms(p.masterName).includes(perm)) return p;
+        return { ...p, [perm]: !allChecked };
+      })
+    );
   };
 
   // Select / deselect all
   const toggleAll = () => {
     const allChecked = permissions.every((p) => {
-      const isApprovalRow = p.masterName.endsWith("_approval");
-      const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-      return applicablePerms.every((perm) => p[perm]);
+      const applicable = getApplicablePerms(p.masterName);
+      return applicable.every((perm) => p[perm]);
     });
     setPermissions((prev) =>
       prev.map((p) => {
-        const isApprovalRow = p.masterName.endsWith("_approval");
-        return {
-          ...p,
-          canRead: !allChecked,
-          canWrite: !allChecked,
-          canUpdate: isApprovalRow ? false : !allChecked,
-          canDelete: isApprovalRow ? false : !allChecked,
-        };
+        const applicable = getApplicablePerms(p.masterName);
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !allChecked;
+        });
+        return next;
       })
     );
   };
 
   const isRowAll = (masterKey) => {
-    const isApprovalRow = masterKey.endsWith("_approval");
+    const applicable = getApplicablePerms(masterKey);
     const row = permissions.find((p) => p.masterName === masterKey);
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    return applicablePerms.every((perm) => row[perm]);
+    return row ? applicable.every((perm) => row[perm]) : false;
   };
 
-  const isColAll = (perm) => permissions.every((p) => {
-    const isApprovalRow = p.masterName.endsWith("_approval");
-    if (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) {
-      return true; // treat as matched so it doesn't block "all"
-    }
-    return p[perm];
-  });
+  const isColAll = (perm) => {
+    const applicableRows = permissions.filter((p) => getApplicablePerms(p.masterName).includes(perm));
+    return applicableRows.length > 0 && applicableRows.every((p) => p[perm]);
+  };
   
-  const isAllAll = () => permissions.every((p) => {
-    const isApprovalRow = p.masterName.endsWith("_approval");
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    return applicablePerms.every((perm) => p[perm]);
-  });
+  const isAllAll = () =>
+    permissions.every((p) => {
+      const applicable = getApplicablePerms(p.masterName);
+      return applicable.every((perm) => p[perm]);
+    });
 
   const handleAddType = async (event) => {
     event.preventDefault();
@@ -298,12 +322,12 @@ export default function CreateUserType() {
                             </td>
                             {PERMS.map((perm) => {
                               const c = PERM_COLORS[perm];
-                              const checked = row[perm];
-                              const isApprovalRow = master.key.endsWith("_approval");
-                              const isReportRow = master.key === "activity_report" || master.key === "closed_inquiry_report";
+                              const checked = row ? !!row[perm] : false;
+                              const isApp = isApprovalRow(master.key);
+                              const isRep = isReportRow(master.key);
                               if (
-                                (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) ||
-                                (isReportRow && (perm === "canWrite" || perm === "canUpdate" || perm === "canDelete"))
+                                (isApp && (perm === "canUpdate" || perm === "canDelete")) ||
+                                (isRep && (perm === "canWrite" || perm === "canUpdate" || perm === "canDelete"))
                               ) {
                                 return (
                                   <td key={perm} style={{ textAlign: "center", padding: "12px 8px", borderBottom: "1px solid #f1f5f9", color: "#94a3b8" }}>

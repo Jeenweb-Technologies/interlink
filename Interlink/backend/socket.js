@@ -5,8 +5,34 @@ const {
     markConversationRead,
     toggleMessageReaction
 } = require("./models/chatModel.js");
+const { getMeetingByRoomCode, updateMeeting } = require("./models/meetingModel.js");
 
 let io = null;
+
+const checkAndAutoEndMeeting = (roomCode) => {
+    if (!roomCode) return;
+    setTimeout(async () => {
+        try {
+            const roomKey = `meeting_${roomCode}`;
+            const room = io?.sockets.adapter.rooms.get(roomKey);
+            const remainingCount = room ? room.size : 0;
+            if (remainingCount === 0) {
+                const meeting = await getMeetingByRoomCode(roomCode);
+                if (meeting && meeting.status === "live") {
+                    await updateMeeting(meeting.id, { status: "ended", scheduled_end: new Date() });
+                    if (io) {
+                        io.to(`meeting_${roomCode}`).emit("meeting_ended", {
+                            meetingId: meeting.id,
+                            roomCode
+                        });
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn("Auto-ending empty meeting room error:", err.message);
+        }
+    }, 5000);
+};
 
 const initSocket = (server) => {
     io = new Server(server, {
@@ -204,6 +230,7 @@ const initSocket = (server) => {
                 });
                 socket.meetingRoomKey = null;
                 socket.meetingParticipant = null;
+                checkAndAutoEndMeeting(roomCode);
             }
         });
 
@@ -262,10 +289,13 @@ const initSocket = (server) => {
 
         socket.on("disconnecting", () => {
             if (socket.meetingRoomKey) {
-                socket.to(socket.meetingRoomKey).emit("peer_left", {
+                const roomKey = socket.meetingRoomKey;
+                const roomCode = roomKey.replace(/^meeting_/, "");
+                socket.to(roomKey).emit("peer_left", {
                     participantId: socket.meetingParticipant?.id || socket.id,
                     socketId: socket.id
                 });
+                checkAndAutoEndMeeting(roomCode);
             }
         });
 

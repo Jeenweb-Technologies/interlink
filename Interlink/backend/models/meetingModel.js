@@ -246,6 +246,8 @@ const getMeetings = async (companyId, filters = {}) => {
     if (filters.status) {
         query += ` AND m.status = ?`;
         params.push(filters.status);
+    } else {
+        query += ` AND m.status != 'cancelled'`;
     }
 
     if (filters.project_id) {

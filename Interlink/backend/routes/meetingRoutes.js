@@ -42,6 +42,7 @@ router.post("/:roomCode/lobby", optionalAuth, meetingController.joinLobby);
 // ─── Host Control Endpoints ─────────────────────────────────────────
 router.put("/:roomCode/participants/:participantId/admit", verifyToken, meetingController.admitParticipant);
 router.put("/:roomCode/participants/:participantId/deny", verifyToken, meetingController.denyParticipant);
+router.post("/:roomCode/cancel", verifyToken, meetingController.cancelMeeting);
 router.post("/:roomCode/end", verifyToken, meetingController.endMeetingSession);
 
 // ─── Whiteboard Endpoints ───────────────────────────────────────────

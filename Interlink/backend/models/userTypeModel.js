@@ -2,10 +2,27 @@ const db = require('../config/db.js');
 
 // ─── Masters list (must match frontend) ─────────────────────────────────────
 const MASTERS = [
+    // Organization & System Masters
+    { key: 'company_master', label: 'Company Master' },
+    { key: 'department_master', label: 'Department Master' },
+    { key: 'chat_settings_master', label: 'Chat Settings Master' },
+
+    // User & Access Management
     { key: 'user_type', label: 'User Type Master' },
     { key: 'user_master', label: 'User Master' },
     { key: 'device_approval', label: 'Device Approval' },
     { key: 'activity_report', label: 'Activity Report' },
+
+    // Workspace & Collaboration
+    { key: 'projects', label: 'Projects & Portfolio' },
+    { key: 'tasks', label: 'Task Management' },
+    { key: 'notes', label: 'Notes & Scratchpad' },
+    { key: 'chat', label: 'Chat & Communication' },
+    { key: 'meetings', label: 'Meetings & Whiteboard' },
+
+    // Operations & HR
+    { key: 'attendance', label: 'Attendance & Shifts' },
+    { key: 'timesheets', label: 'Timesheets' },
 ];
 
 // ─── Table creation ──────────────────────────────────────────────────────────
@@ -54,6 +71,23 @@ const createUserTypePermissionsTable = async () => {
         console.log("✅ Permission keys migrated to worker_employee and worker_employee_type.");
     } catch (err) {
         console.error("Migration of user permissions failed:", err.message);
+    }
+
+    // Seed default workspace modules for existing user types if not set
+    try {
+        const [existingTypes] = await db.execute("SELECT id FROM user_types");
+        const defaultWorkspaceMasters = ['projects', 'tasks', 'notes', 'chat', 'meetings', 'attendance', 'timesheets'];
+        for (const ut of existingTypes) {
+            for (const mKey of defaultWorkspaceMasters) {
+                await db.execute(
+                    `INSERT IGNORE INTO user_type_permissions (user_type_id, master_name, can_read, can_write, can_update, can_delete)
+                     VALUES (?, ?, 1, 1, 1, 1)`,
+                    [ut.id, mKey]
+                );
+            }
+        }
+    } catch (seedErr) {
+        // Table may be empty or newly created, ignore
     }
 };
 

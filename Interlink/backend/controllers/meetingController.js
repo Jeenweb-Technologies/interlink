@@ -51,18 +51,18 @@ const createInstantMeeting = async (req, res) => {
             title,
             meeting_type: "instant",
             host_id: userId,
-            status: "live",
+            status: "scheduled",
             is_lobby_enabled: is_lobby_enabled === undefined ? true : Boolean(is_lobby_enabled),
             is_recording_allowed: true,
             is_guest_allowed: true
         });
 
-        // Register host as admitted participant
+        // Register host as participant (admitted to lobby/prep; transitions to live upon token generation)
         await addOrUpdateParticipant({
             meeting_id: meetingId,
             user_id: userId,
             role: "host",
-            status: "admitted"
+            status: "waiting_room"
         });
 
         // Audit log
@@ -164,6 +164,31 @@ const listMeetings = async (req, res) => {
     try {
         const companyId = req.user.company_id || 1;
         const { status, project_id, task_id, search } = req.query;
+
+        // Auto-reconcile orphan live meetings (e.g. instant meetings with no active socket peers)
+        const io = getIO();
+        if (io) {
+            try {
+                const rawLive = await getMeetings(companyId, { status: "live" });
+                for (const lm of rawLive) {
+                    const roomKey = `meeting_${lm.room_code}`;
+                    const room = io.sockets.adapter.rooms.get(roomKey);
+                    const activeSockets = room ? room.size : 0;
+                    if (activeSockets === 0) {
+                        const ageMs = Date.now() - new Date(lm.created_at).getTime();
+                        if (ageMs > 30 * 1000) {
+                            if (lm.meeting_type === "instant" && (!lm.active_participants_count || lm.active_participants_count === 0)) {
+                                await updateMeeting(lm.id, { status: "cancelled", scheduled_end: new Date() });
+                            } else {
+                                await updateMeeting(lm.id, { status: "ended", scheduled_end: new Date() });
+                            }
+                        }
+                    }
+                }
+            } catch (reconErr) {
+                console.warn("Meeting auto-reconciliation notice:", reconErr.message);
+            }
+        }
 
         const meetings = await getMeetings(companyId, {
             status,
@@ -516,6 +541,41 @@ const denyParticipant = async (req, res) => {
     }
 };
 
+// ─── Cancel Meeting ──────────────────────────────────────────────────
+const cancelMeeting = async (req, res) => {
+    try {
+        const { roomCode } = req.params;
+        const meeting = await getMeetingByRoomCode(roomCode);
+
+        if (!meeting) {
+            return res.status(404).json({ success: false, message: "Meeting not found" });
+        }
+
+        if (req.user.id !== meeting.host_id && req.user.role !== "admin") {
+            return res.status(403).json({ success: false, message: "Only the host can cancel the meeting." });
+        }
+
+        await updateMeeting(meeting.id, { status: "cancelled", scheduled_end: new Date() });
+
+        const io = getIO();
+        if (io) {
+            io.to(`meeting_${meeting.room_code}`).emit("meeting_ended", {
+                meetingId: meeting.id,
+                roomCode
+            });
+            io.to(`lobby_${meeting.room_code}`).emit("meeting_ended", {
+                meetingId: meeting.id,
+                roomCode
+            });
+        }
+
+        return res.json({ success: true, message: "Meeting cancelled successfully" });
+    } catch (error) {
+        console.error("cancelMeeting error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ─── End Meeting ────────────────────────────────────────────────────
 const endMeetingSession = async (req, res) => {
     try {
@@ -726,6 +786,7 @@ module.exports = {
     joinLobby,
     admitParticipant,
     denyParticipant,
+    cancelMeeting,
     endMeetingSession,
     getMeetingWhiteboard,
     saveMeetingWhiteboard,

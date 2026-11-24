@@ -34,6 +34,10 @@ export const denyParticipant = async (roomCode, participantId) => {
     return apiClient.put(`/meetings/${roomCode}/participants/${participantId}/deny`);
 };
 
+export const cancelMeeting = async (roomCode) => {
+    return apiClient.post(`/meetings/${roomCode}/cancel`);
+};
+
 export const endMeeting = async (roomCode) => {
     return apiClient.post(`/meetings/${roomCode}/end`);
 };

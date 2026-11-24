@@ -81,42 +81,64 @@ export default function AppRoutes() {
                         path="/user/home"
                         element={<UserHome />}
                     />
-                    <Route
-                        path="/meetings"
-                        element={<MeetingsPage />}
-                    />
-                    <Route
-                        path="/meetings/history/:id"
-                        element={<MeetingSummaryPage />}
-                    />
-                    <Route
-                        path="/tasks"
-                        element={<TasksPage />}
-                    />
-                    <Route
-                        path="/chat"
-                        element={<ChatPage />}
-                    />
-                    <Route
-                        path="/projects"
-                        element={<ProjectsPortfolioPage />}
-                    />
-                    <Route
-                        path="/projects/:id"
-                        element={<ProjectWorkspacePage />}
-                    />
-                    <Route
-                        path="/notes"
-                        element={<NotesPage />}
-                    />
-                    <Route
-                        path="/attendance"
-                        element={<AttendancePage />}
-                    />
-                    <Route
-                        path="/timesheets"
-                        element={<TimesheetsPage />}
-                    />
+                    
+                    <Route element={<ProtectedRoute requiredMaster="meetings" requiredAction="read" />}>
+                        <Route
+                            path="/meetings"
+                            element={<MeetingsPage />}
+                        />
+                        <Route
+                            path="/meetings/history/:id"
+                            element={<MeetingSummaryPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="tasks" requiredAction="read" />}>
+                        <Route
+                            path="/tasks"
+                            element={<TasksPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="chat" requiredAction="read" />}>
+                        <Route
+                            path="/chat"
+                            element={<ChatPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="projects" requiredAction="read" />}>
+                        <Route
+                            path="/projects"
+                            element={<ProjectsPortfolioPage />}
+                        />
+                        <Route
+                            path="/projects/:id"
+                            element={<ProjectWorkspacePage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="notes" requiredAction="read" />}>
+                        <Route
+                            path="/notes"
+                            element={<NotesPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="attendance" requiredAction="read" />}>
+                        <Route
+                            path="/attendance"
+                            element={<AttendancePage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="timesheets" requiredAction="read" />}>
+                        <Route
+                            path="/timesheets"
+                            element={<TimesheetsPage />}
+                        />
+                    </Route>
+
                     <Route
                         path="/profile"
                         element={<Profile />}
@@ -129,15 +151,19 @@ export default function AppRoutes() {
                         />
                     </Route>
 
-                    <Route element={<ProtectedRoute allowedRole="admin" />}>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="company_master" requiredAction="read" />}>
                         <Route
                             path="/admin/companies"
                             element={<CompanyMaster />}
                         />
+                    </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="department_master" requiredAction="read" />}>
                         <Route
                             path="/admin/departments"
                             element={<DepartmentMaster />}
                         />
+                    </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="chat_settings_master" requiredAction="read" />}>
                         <Route
                             path="/admin/chat-settings"
                             element={<ChatSettingsMaster />}

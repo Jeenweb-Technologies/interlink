@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { getMeetingDetails, getMeetingToken, joinMeetingLobby } from "../../api/meetingApi";
+import { getMeetingDetails, getMeetingToken, joinMeetingLobby, cancelMeeting } from "../../api/meetingApi";
 import { getMeetingSocket } from "../../utils/meetingSocket";
 
 export default function PreJoinRoom() {
@@ -44,6 +44,35 @@ export default function PreJoinRoom() {
     const analyserRef = useRef(null);
     const animationFrameRef = useRef(null);
     const socketRef = useRef(null);
+    const hasJoinedRef = useRef(false);
+    const meetingRef = useRef(null);
+    const userRef = useRef(user);
+
+    useEffect(() => {
+        meetingRef.current = meeting;
+    }, [meeting]);
+
+    useEffect(() => {
+        userRef.current = user;
+    }, [user]);
+
+    // If host unmounts/navigates away from an instant meeting before joining, cancel it
+    useEffect(() => {
+        return () => {
+            const currentMeeting = meetingRef.current;
+            const currentUser = userRef.current;
+            if (
+                currentMeeting &&
+                currentUser?.id &&
+                currentMeeting.host_id === currentUser.id &&
+                currentMeeting.meeting_type === "instant" &&
+                !hasJoinedRef.current
+            ) {
+                hasJoinedRef.current = true;
+                cancelMeeting(roomCode).catch(() => {});
+            }
+        };
+    }, [roomCode]);
 
     // 1. Fetch meeting info
     useEffect(() => {
@@ -277,6 +306,7 @@ export default function PreJoinRoom() {
                         sessionStorage.setItem(`meeting_token_${roomCode}`, res.data.token);
                         sessionStorage.setItem(`meeting_server_${roomCode}`, res.data.serverUrl);
                     }
+                    hasJoinedRef.current = true;
                     navigate(`/meetings/room/${roomCode}`, {
                         state: {
                             initialMicMuted: isMicMuted,
@@ -359,6 +389,7 @@ export default function PreJoinRoom() {
                             // proceed with navigation
                         }
 
+                        hasJoinedRef.current = true;
                         navigate(`/meetings/room/${roomCode}`, {
                             replace: true,
                             state: {
@@ -384,6 +415,7 @@ export default function PreJoinRoom() {
                 sessionStorage.setItem(`meeting_token_${roomCode}`, res.data.token);
                 sessionStorage.setItem(`meeting_server_${roomCode}`, res.data.serverUrl);
 
+                hasJoinedRef.current = true;
                 navigate(`/meetings/room/${roomCode}`, {
                     replace: true,
                     state: {
@@ -402,6 +434,38 @@ export default function PreJoinRoom() {
         } finally {
             setJoining(false);
         }
+    };
+
+    const handleExit = async () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+        }
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+        }
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+            audioContextRef.current.close().catch(() => {});
+        }
+
+        const currentMeeting = meetingRef.current || meeting;
+        const currentUser = userRef.current || user;
+        if (
+            currentMeeting &&
+            currentUser?.id &&
+            currentMeeting.host_id === currentUser.id &&
+            currentMeeting.meeting_type === "instant" &&
+            !hasJoinedRef.current
+        ) {
+            hasJoinedRef.current = true;
+            try {
+                await cancelMeeting(roomCode);
+            } catch (err) {
+                console.warn("Could not cancel instant meeting on exit:", err);
+            }
+        }
+
+        navigate("/meetings");
     };
 
     if (loadingMeeting) {
@@ -484,8 +548,8 @@ export default function PreJoinRoom() {
                         Room: {roomCode}
                     </span>
                     <button
-                        onClick={() => navigate("/meetings")}
-                        className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                        onClick={handleExit}
+                        className="px-3 py-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                     >
                         Exit
                     </button>
