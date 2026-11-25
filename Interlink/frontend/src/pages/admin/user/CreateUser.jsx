@@ -23,7 +23,9 @@ export default function CreateUser() {
         username: "",
         email: "",
         password: "",
+        designation: "",
         userTypeId: "",
+        departmentIds: [],
         departmentId: "",
         mobNo: "",
         dateOfJoin: "",
@@ -90,6 +92,21 @@ export default function CreateUser() {
         });
     };
 
+    const handleToggleDepartment = (deptId) => {
+        const idStr = String(deptId);
+        setNewUserForm((prev) => {
+            const exists = prev.departmentIds.includes(idStr);
+            const updated = exists
+                ? prev.departmentIds.filter((id) => id !== idStr)
+                : [...prev.departmentIds, idStr];
+            return {
+                ...prev,
+                departmentIds: updated,
+                departmentId: updated[0] || ""
+            };
+        });
+    };
+
     const handleCreateUser = async (e) => {
         e.preventDefault();
         if (selectedCompanyIds.length === 0) {
@@ -101,7 +118,9 @@ export default function CreateUser() {
         try {
             await createUserByAdmin({
                 ...newUserForm,
-                departmentId: newUserForm.departmentId ? parseInt(newUserForm.departmentId, 10) : null,
+                designation: newUserForm.designation ? newUserForm.designation.trim() : null,
+                departmentIds: newUserForm.departmentIds.map((id) => parseInt(id, 10)),
+                departmentId: newUserForm.departmentIds[0] ? parseInt(newUserForm.departmentIds[0], 10) : null,
                 companyId: activeCompanyId,
                 companyIds: selectedCompanyIds.map((id) => parseInt(id, 10))
             });
@@ -111,7 +130,9 @@ export default function CreateUser() {
                 username: "",
                 email: "",
                 password: "",
+                designation: "",
                 userTypeId: "",
+                departmentIds: [],
                 departmentId: "",
                 mobNo: "",
                 dateOfJoin: "",
@@ -217,19 +238,14 @@ export default function CreateUser() {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Department</label>
-                                <select
-                                    value={newUserForm.departmentId}
-                                    onChange={(e) => setNewUserForm({ ...newUserForm, departmentId: e.target.value })}
-                                    className="block w-full px-3 py-2 border border-slate-300 bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                                >
-                                    <option value="">None / Unassigned</option>
-                                    {departments.map((dept) => (
-                                        <option key={dept.id} value={dept.id}>
-                                            {dept.department_name}
-                                        </option>
-                                    ))}
-                                </select>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Designation</label>
+                                <input
+                                    type="text"
+                                    value={newUserForm.designation}
+                                    onChange={(e) => setNewUserForm({ ...newUserForm, designation: e.target.value })}
+                                    className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                    placeholder="e.g. Senior Software Engineer"
+                                />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-1">User Group (Role)</label>
@@ -261,6 +277,45 @@ export default function CreateUser() {
                                     onChange={(e) => setNewUserForm({ ...newUserForm, dateOfJoin: e.target.value })}
                                     className="appearance-none block w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                                 />
+                            </div>
+
+                            {/* Department Multiple Selection Field */}
+                            <div className="sm:col-span-2">
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="block text-sm font-medium text-slate-700">
+                                        Departments <span className="text-xs font-normal text-slate-400">(Multiple Selection)</span>
+                                    </label>
+                                    <span className="text-xs font-semibold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-200">
+                                        {newUserForm.departmentIds.length} {newUserForm.departmentIds.length === 1 ? "department" : "departments"} selected
+                                    </span>
+                                </div>
+                                {departments.length === 0 ? (
+                                    <p className="text-xs text-slate-400 italic py-2">No departments available.</p>
+                                ) : (
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-48 overflow-y-auto p-3 border border-slate-200 rounded-lg bg-slate-50/50">
+                                        {departments.map((dept) => {
+                                            const isChecked = newUserForm.departmentIds.includes(String(dept.id));
+                                            return (
+                                                <label
+                                                    key={dept.id}
+                                                    className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs cursor-pointer transition-all ${
+                                                        isChecked
+                                                            ? "bg-blue-50 border-blue-400 text-blue-900 font-medium shadow-xs"
+                                                            : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                                    }`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isChecked}
+                                                        onChange={() => handleToggleDepartment(dept.id)}
+                                                        className="w-4 h-4 rounded text-indigo-600 border-slate-300 focus:ring-indigo-500"
+                                                    />
+                                                    <span className="truncate">{dept.department_name}</span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         </div>
 

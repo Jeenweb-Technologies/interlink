@@ -6,7 +6,7 @@ const {
     getUserById,
     toggleUserActive
 } = require("../models/userModel.js");
-const { assignUserDepartment } = require("../models/departmentModel.js");
+const { assignUserDepartment, assignUserDepartments } = require("../models/departmentModel.js");
 const { assignUserCompanies, getUserCompanyIds } = require("../models/companyModel.js");
 
 const {
@@ -44,10 +44,11 @@ const fetchUsers = async (req, res) => {
 
         const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        // Fetch users along with their active device status and department
+        // Fetch users along with their active device status, department, and designation
         const query = `
             SELECT 
                 u.id, u.name, u.username, u.email, u.mob_no, u.role, u.organization_id, u.company_id,
+                u.designation,
                 d.status AS device_status, ut.type_name,
                 d.device_id, device_verification_required, u.active,
                 u.department_id, dept.department_name
@@ -74,10 +75,32 @@ const fetchUsers = async (req, res) => {
             });
         } catch (_) {}
 
-        const enhancedUsers = users.map((u) => ({
-            ...u,
-            allowed_companies: userCompsMap[u.id] || (u.company_id ? [{ id: u.company_id }] : [])
-        }));
+        // Fetch user departments mapping (for multi-department support)
+        let userDeptsMap = {};
+        try {
+            const [userDeptsRows] = await db.execute(`
+                SELECT ud.user_id, ud.department_id, d.department_name
+                FROM user_departments ud
+                JOIN departments d ON ud.department_id = d.id
+                ORDER BY d.department_name ASC
+            `);
+            userDeptsRows.forEach((r) => {
+                if (!userDeptsMap[r.user_id]) userDeptsMap[r.user_id] = [];
+                userDeptsMap[r.user_id].push({ id: r.department_id, name: r.department_name });
+            });
+        } catch (_) {}
+
+        const enhancedUsers = users.map((u) => {
+            const userDepts = userDeptsMap[u.id] || (u.department_id && u.department_name ? [{ id: u.department_id, name: u.department_name }] : []);
+            return {
+                ...u,
+                designation: u.designation || null,
+                departments: userDepts,
+                department_ids: userDepts.map(d => d.id),
+                department_names: userDepts.map(d => d.name).join(", "),
+                allowed_companies: userCompsMap[u.id] || (u.company_id ? [{ id: u.company_id }] : [])
+            };
+        });
 
         return res.status(200).json({
             success: true,
@@ -103,6 +126,8 @@ const createUserByAdmin = async (req, res) => {
             deviceVerificationRequired,
             role,
             departmentId,
+            departmentIds,
+            designation,
             companyId,
             companyIds
         } = req.body;
@@ -116,7 +141,13 @@ const createUserByAdmin = async (req, res) => {
         const resolvedCompanyId = companyId
             ? parseInt(companyId, 10)
             : (Array.isArray(companyIds) && companyIds.length > 0 ? parseInt(companyIds[0], 10) : (req.user?.company_id || 1));
-        const parsedDeptId = departmentId ? parseInt(departmentId, 10) : null;
+        
+        // Multi-department handling
+        const resolvedDeptIds = Array.isArray(departmentIds) && departmentIds.length > 0
+            ? departmentIds.map(d => parseInt(d, 10)).filter(d => !isNaN(d) && d > 0)
+            : (departmentId ? [parseInt(departmentId, 10)].filter(d => !isNaN(d) && d > 0) : []);
+        const parsedDeptId = resolvedDeptIds.length > 0 ? resolvedDeptIds[0] : null;
+        const cleanDesignation = designation ? designation.trim() : null;
 
         const newUser = await createUser(
             name,
@@ -131,7 +162,8 @@ const createUserByAdmin = async (req, res) => {
             role || 'user',
             organizationId,
             resolvedCompanyId,
-            parsedDeptId
+            parsedDeptId,
+            cleanDesignation
         );
 
         if (newUser.insertId) {
@@ -145,9 +177,10 @@ const createUserByAdmin = async (req, res) => {
                 console.warn("Failed to sync user_companies junction:", compErr.message);
             }
 
-            if (parsedDeptId) {
+            // Sync user departments junction
+            if (resolvedDeptIds.length > 0) {
                 try {
-                    await assignUserDepartment(newUser.insertId, parsedDeptId, 'USER');
+                    await assignUserDepartments(newUser.insertId, resolvedDeptIds, 'USER');
                 } catch (deptErr) {
                     console.warn("Failed to sync user_departments junction:", deptErr.message);
                 }
@@ -167,13 +200,15 @@ const createUserByAdmin = async (req, res) => {
                 name,
                 username,
                 email,
+                designation: cleanDesignation,
                 user_type_id: userTypeId || null,
                 mob_no: mobNo || null,
                 date_of_join: dateOfJoin || null,
                 device_verification_required: deviceVerificationRequired,
                 role: role || 'user',
                 company_id: companyId,
-                department_id: parsedDeptId
+                department_id: parsedDeptId,
+                department_ids: resolvedDeptIds
             },
             null,
             companyId
@@ -370,6 +405,8 @@ const updateUserByAdmin = async (req, res) => {
             deviceVerificationRequired,
             role,
             departmentId,
+            departmentIds,
+            designation,
             active,
             companyIds
         } = req.body;
@@ -414,6 +451,10 @@ const updateUserByAdmin = async (req, res) => {
             updates.push("device_verification_required = ?");
             params.push(deviceVerificationRequired ? 1 : 0);
         }
+        if (designation !== undefined) {
+            updates.push("designation = ?");
+            params.push(designation ? designation.trim() : null);
+        }
         if (active !== undefined) {
             updates.push("active = ?");
             params.push(active ? 1 : 0);
@@ -423,12 +464,20 @@ const updateUserByAdmin = async (req, res) => {
             updates.push("password = ?");
             params.push(hashedPassword);
         }
-        if (departmentId !== undefined) {
-            const parsedDeptId = departmentId ? parseInt(departmentId, 10) : null;
+        if (departmentIds !== undefined || departmentId !== undefined) {
+            let targetDeptIds = [];
+            if (departmentIds !== undefined) {
+                targetDeptIds = Array.isArray(departmentIds)
+                    ? departmentIds.map(d => parseInt(d, 10)).filter(d => !isNaN(d) && d > 0)
+                    : (departmentIds ? [parseInt(departmentIds, 10)].filter(d => !isNaN(d) && d > 0) : []);
+            } else if (departmentId !== undefined) {
+                targetDeptIds = departmentId ? [parseInt(departmentId, 10)].filter(d => !isNaN(d) && d > 0) : [];
+            }
+            const primaryDeptId = targetDeptIds.length > 0 ? targetDeptIds[0] : null;
             updates.push("department_id = ?");
-            params.push(parsedDeptId);
+            params.push(primaryDeptId);
             // keep user_departments junction synced
-            await assignUserDepartment(id, parsedDeptId);
+            await assignUserDepartments(id, targetDeptIds);
         }
 
         if (companyIds !== undefined && Array.isArray(companyIds)) {
@@ -458,6 +507,7 @@ const updateUserByAdmin = async (req, res) => {
                 username: beforeUser.username,
                 email: beforeUser.email,
                 role: beforeUser.role,
+                designation: beforeUser.designation,
                 department_id: beforeUser.department_id,
                 user_type_id: beforeUser.user_type_id
             },
@@ -466,6 +516,7 @@ const updateUserByAdmin = async (req, res) => {
                 username: afterUser.username,
                 email: afterUser.email,
                 role: afterUser.role,
+                designation: afterUser.designation,
                 department_id: afterUser.department_id,
                 user_type_id: afterUser.user_type_id
             },
