@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePermission } from "../../context/PermissionContext";
 
@@ -6,7 +6,14 @@ export default function UserHome() {
     const navigate = useNavigate();
     const { hasPermission } = usePermission();
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
-    const isAdmin = user.role === "admin" || user.role === "super admin";
+    const isDeveloper = user.role === "developer" || user.role === "super_admin" || user.role === "super admin";
+    const isAdmin = (user.role === "admin" || user.role === "super admin") && !isDeveloper;
+
+    useEffect(() => {
+        if (isDeveloper) {
+            navigate("/developer", { replace: true });
+        }
+    }, [isDeveloper, navigate]);
 
     const canManageUsers = isAdmin || hasPermission("user_master", "read");
     const canManageRoles = isAdmin || hasPermission("user_type", "read");

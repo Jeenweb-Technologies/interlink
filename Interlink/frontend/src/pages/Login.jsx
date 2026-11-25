@@ -39,7 +39,13 @@ export default function Login() {
             localStorage.setItem("token", token);
             sessionStorage.setItem("loginTime", new Date().toLocaleTimeString());
             window.dispatchEvent(new Event("auth-change"));
-            navigate("/user/home");
+
+            const isDev = user.role === "developer" || user.role === "super_admin" || user.role === "super admin";
+            if (isDev) {
+                navigate("/developer");
+            } else {
+                navigate("/user/home");
+            }
 
         } catch (error) {
             if (error.response?.data?.status === "ORG_PENDING_APPROVAL") {
