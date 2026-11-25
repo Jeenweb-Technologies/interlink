@@ -24,6 +24,8 @@ const noteRoutes = require("./routes/noteRoutes.js");
 const meetingRoutes = require("./routes/meetingRoutes.js");
 const attendanceRoutes = require("./routes/attendanceRoutes.js");
 const timesheetRoutes = require("./routes/timesheetRoutes.js");
+const calendarRoutes = require("./routes/calendarRoutes.js");
+const reminderRoutes = require("./routes/reminderRoutes.js");
 
 // Model Initializations
 const { initCompanyModel } = require("./models/companyModel.js");
@@ -39,6 +41,9 @@ const { createNoteTables } = require("./models/noteModel.js");
 const { createMeetingTables } = require("./models/meetingModel.js");
 const { initAttendanceTables } = require("./models/attendanceModel.js");
 const { initTimesheetTables } = require("./models/timesheetModel.js");
+const { initCalendarTables } = require("./models/calendarModel.js");
+const { initReminderTables } = require("./models/reminderModel.js");
+const { startReminderDaemon } = require("./services/reminderDaemon.js");
 
 
 const app = express();
@@ -94,6 +99,8 @@ app.use(["/api/notes", "/notes"], noteRoutes);
 app.use(["/api/meetings", "/meetings"], meetingRoutes);
 app.use(["/api/attendance", "/attendance"], attendanceRoutes);
 app.use(["/api/timesheets", "/timesheets"], timesheetRoutes);
+app.use(["/api/calendar", "/calendar"], calendarRoutes);
+app.use(["/api/reminders", "/reminders"], reminderRoutes);
 
 
 // Global 404 handler
@@ -127,12 +134,15 @@ const startServer = async () => {
         await createMeetingTables();
         await initAttendanceTables();
         await initTimesheetTables();
+        await initCalendarTables();
+        await initReminderTables();
 
         console.log("All database tables are initialized and ready.");
 
         const PORT = process.env.PORT || 5000;
         const server = http.createServer(app);
-        initSocket(server);
+        const io = initSocket(server);
+        startReminderDaemon(io);
 
         server.listen(PORT, () => {
             console.log(`Server & Socket.IO Running on Port ${PORT}`);
