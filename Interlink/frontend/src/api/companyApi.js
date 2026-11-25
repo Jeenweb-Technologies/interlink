@@ -1,7 +1,7 @@
 import { apiClient } from "./authApi";
 
-export const getCompanies = async () => {
-    return apiClient.get("/companies");
+export const getCompanies = async (params = {}) => {
+    return apiClient.get("/companies", { params });
 };
 
 export const createCompany = async (data) => {

@@ -74,6 +74,14 @@ const createProjectTables = async () => {
     await ensureColumn("projects", "total_logged_hours", "DECIMAL(8,2) DEFAULT 0.00");
     await ensureColumn("projects", "deleted_at", "TIMESTAMP NULL");
 
+    // Ensure status ENUM supports all enterprise statuses
+    try {
+        await db.execute(`
+            ALTER TABLE \`projects\` 
+            MODIFY COLUMN \`status\` ENUM('planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled') DEFAULT 'planning'
+        `);
+    } catch (_) {}
+
     // 2. Project Members & Resource Allocation
     await db.execute(`
         CREATE TABLE IF NOT EXISTS project_members (

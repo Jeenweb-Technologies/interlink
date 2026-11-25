@@ -115,7 +115,33 @@ const createOrganizationAndCompanyTables = async () => {
         // Suppress backfill errors if tables do not exist yet (they will be created sequentially)
     }
 
-    console.log("[Auto-Schema] Organizations and Companies tables ready.");
+    // 6. User-Companies Junction Table (controls which companies each user can access/switch to)
+    try {
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS user_companies (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                company_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_user_comp (user_id, company_id),
+                INDEX idx_uc_user (user_id),
+                INDEX idx_uc_comp (company_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        `);
+
+        // Backfill user_companies from existing users table
+        await db.execute(`
+            INSERT IGNORE INTO user_companies (user_id, company_id)
+            SELECT id, company_id FROM users WHERE company_id IS NOT NULL AND company_id > 0
+        `);
+    } catch (ucErr) {
+        console.warn("[Auto-Schema] Notice initializing user_companies table:", ucErr.message);
+    }
+
+    console.log("[Auto-Schema] Organizations, Companies, and User-Companies tables ready.");
 };
 
 const initCompanyModel = async () => {
@@ -173,6 +199,76 @@ const createCompanyRecord = async (organizationId, name, email = null, phone = n
     }
 };
 
+const getUserCompanyIds = async (userId) => {
+    if (!userId) return [];
+    try {
+        const [rows] = await db.execute(
+            "SELECT company_id FROM user_companies WHERE user_id = ?",
+            [userId]
+        );
+        return rows.map((r) => r.company_id);
+    } catch (err) {
+        console.error("getUserCompanyIds error:", err.message);
+        return [];
+    }
+};
+
+const getUserCompanies = async (userId) => {
+    if (!userId) return [];
+    try {
+        const [rows] = await db.execute(`
+            SELECT c.* 
+            FROM companies c
+            JOIN user_companies uc ON uc.company_id = c.id
+            WHERE uc.user_id = ?
+            ORDER BY c.name ASC
+        `, [userId]);
+        return rows;
+    } catch (err) {
+        console.error("getUserCompanies error:", err.message);
+        return [];
+    }
+};
+
+const assignUserCompanies = async (userId, companyIds) => {
+    if (!userId) return;
+    try {
+        const ids = Array.isArray(companyIds)
+            ? companyIds.map((id) => parseInt(id, 10)).filter((id) => !isNaN(id) && id > 0)
+            : [];
+
+        await db.execute("DELETE FROM user_companies WHERE user_id = ?", [userId]);
+
+        if (ids.length > 0) {
+            const placeholders = ids.map(() => "(?, ?)").join(", ");
+            const params = [];
+            ids.forEach((cId) => {
+                params.push(userId, cId);
+            });
+            await db.execute(
+                `INSERT IGNORE INTO user_companies (user_id, company_id) VALUES ${placeholders}`,
+                params
+            );
+        }
+    } catch (err) {
+        console.error("assignUserCompanies error:", err.message);
+    }
+};
+
+const checkUserCompanyAccess = async (userId, companyId) => {
+    if (!userId || !companyId) return false;
+    try {
+        const [rows] = await db.execute(
+            "SELECT id FROM user_companies WHERE user_id = ? AND company_id = ?",
+            [userId, companyId]
+        );
+        return rows.length > 0;
+    } catch (err) {
+        console.error("checkUserCompanyAccess error:", err.message);
+        return false;
+    }
+};
+
 module.exports = {
     initCompanyModel,
     createOrganizationAndCompanyTables,
@@ -180,5 +276,9 @@ module.exports = {
     findCompaniesByOrgId,
     findCompanyById,
     createCompanyRecord,
+    getUserCompanyIds,
+    getUserCompanies,
+    assignUserCompanies,
+    checkUserCompanyAccess,
     ensureColumn
 };

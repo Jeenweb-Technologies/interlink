@@ -11,6 +11,7 @@ import {
 } from "../../api/authApi";
 import { getDepartments } from "../../api/departmentApi";
 import { getUserTypes } from "../../api/userTypeMasterApi";
+import { getCompanies } from "../../api/companyApi";
 import DataTable from "../../components/DataTable";
 import { useNavigate } from "react-router-dom";
 import { usePermission } from "../../context/PermissionContext";
@@ -38,6 +39,7 @@ export default function AdminDashboard() {
     // Department & User Type Options for Edit
     const [departments, setDepartments] = useState([]);
     const [userTypes, setUserTypes] = useState([]);
+    const [allCompanies, setAllCompanies] = useState([]);
 
     // Edit User Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -52,7 +54,8 @@ export default function AdminDashboard() {
         role: "user",
         active: true,
         deviceVerificationRequired: true,
-        password: ""
+        password: "",
+        companyIds: []
     });
     const [updatingUser, setUpdatingUser] = useState(false);
 
@@ -68,6 +71,12 @@ export default function AdminDashboard() {
                 setUserTypes(res.data.data);
             }
         }).catch(err => console.error("Error loading user types for edit:", err));
+
+        getCompanies({ scope: "all" }).then(res => {
+            if (res.data?.success && Array.isArray(res.data.companies)) {
+                setAllCompanies(res.data.companies);
+            }
+        }).catch(err => console.error("Error loading companies for edit:", err));
     }, [activeCompanyId]);
 
     const fetchData = async () => {
@@ -162,6 +171,10 @@ export default function AdminDashboard() {
 
     const handleOpenEditModal = (u) => {
         setEditingUser(u);
+        const assignedCompIds = (u.allowed_companies && u.allowed_companies.length > 0)
+            ? u.allowed_companies.map(c => String(c.id))
+            : [String(u.company_id || activeCompanyId)];
+
         setEditForm({
             name: u.name || "",
             username: u.username || "",
@@ -172,9 +185,26 @@ export default function AdminDashboard() {
             role: u.role || "user",
             active: !!u.active,
             deviceVerificationRequired: typeof u.device_verification_required === "boolean" ? u.device_verification_required : true,
-            password: ""
+            password: "",
+            companyIds: assignedCompIds
         });
         setIsEditModalOpen(true);
+    };
+
+    const handleToggleEditCompany = (companyId) => {
+        const idStr = String(companyId);
+        setEditForm(prev => {
+            const exists = prev.companyIds.includes(idStr);
+            if (exists) {
+                if (prev.companyIds.length === 1) {
+                    toast.error("User must have access to at least one company");
+                    return prev;
+                }
+                return { ...prev, companyIds: prev.companyIds.filter(id => id !== idStr) };
+            } else {
+                return { ...prev, companyIds: [...prev.companyIds, idStr] };
+            }
+        });
     };
 
     const handleSaveEditUser = async (e) => {
@@ -191,7 +221,8 @@ export default function AdminDashboard() {
                 userTypeId: editForm.userTypeId ? parseInt(editForm.userTypeId, 10) : null,
                 role: editForm.role,
                 active: editForm.active,
-                deviceVerificationRequired: editForm.deviceVerificationRequired
+                deviceVerificationRequired: editForm.deviceVerificationRequired,
+                companyIds: editForm.companyIds.map(Number)
             };
             if (editForm.password && editForm.password.trim().length > 0) {
                 payload.password = editForm.password.trim();
@@ -271,6 +302,32 @@ export default function AdminDashboard() {
                     Unassigned
                 </span>
             )
+        },
+        {
+            key: 'allowed_companies',
+            label: 'Companies',
+            render: (row) => {
+                const comps = row.allowed_companies || [];
+                if (comps.length === 0) {
+                    return (
+                        <span className="text-xs text-slate-400 italic">
+                            {row.company_name || 'Current'}
+                        </span>
+                    );
+                }
+                return (
+                    <div className="flex flex-wrap gap-1 max-w-[200px]">
+                        {comps.map((c) => (
+                            <span
+                                key={c.id}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200"
+                            >
+                                {c.name}
+                            </span>
+                        ))}
+                    </div>
+                );
+            }
         },
         {
             key: 'mob_no',
@@ -736,6 +793,52 @@ export default function AdminDashboard() {
                                             placeholder="••••••••"
                                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[#0056cf] focus:outline-none"
                                         />
+                                    </div>
+                                </div>
+
+                                {/* Company Workspace Access Checkbox Section */}
+                                <div className="space-y-2 pt-2 border-t border-slate-100">
+                                    <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                                            Company Workspace Access <span className="text-red-500">*</span>
+                                        </label>
+                                        <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                            {editForm.companyIds.length} {editForm.companyIds.length === 1 ? "Company" : "Companies"} Selected
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500">
+                                        Select the company workspaces this employee is allowed to access and switch between.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 max-h-48 overflow-y-auto pr-1">
+                                        {allCompanies.map((comp) => {
+                                            const isChecked = editForm.companyIds.includes(String(comp.id));
+                                            const isCurrentActive = String(comp.id) === String(activeCompanyId);
+                                            return (
+                                                <label
+                                                    key={comp.id}
+                                                    className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                                                        isChecked
+                                                            ? "bg-blue-50/60 border-blue-300 text-slate-900 font-medium"
+                                                            : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                                    }`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isChecked}
+                                                        onChange={() => handleToggleEditCompany(comp.id)}
+                                                        className="w-4 h-4 rounded text-[#0056cf] border-slate-300 focus:ring-[#0056cf]"
+                                                    />
+                                                    <div className="flex-1 min-w-0 flex items-center justify-between gap-1.5">
+                                                        <span className="truncate">{comp.name}</span>
+                                                        {isCurrentActive && (
+                                                            <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.2 bg-blue-100 text-[#0056cf] rounded">
+                                                                Current
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </label>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 

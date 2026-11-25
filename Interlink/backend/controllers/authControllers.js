@@ -7,7 +7,7 @@ const {
     updateUserProfile
 } = require("../models/userModel.js");
 
-const { findCompaniesByOrgId } = require("../models/companyModel.js");
+const { findCompaniesByOrgId, getUserCompanies } = require("../models/companyModel.js");
 
 const { createAuditLog } = require("../models/auditLogModel.js");
 
@@ -99,7 +99,15 @@ const login = async (req, res) => {
         const userCompId = user.company_id || 1;
         let userCompanies = [];
         try {
-            userCompanies = await findCompaniesByOrgId(userOrgId);
+            if (user.role === "admin" || user.role === "super_admin" || user.role === "super admin" || user.role === "developer") {
+                userCompanies = await findCompaniesByOrgId(userOrgId);
+            } else {
+                userCompanies = await getUserCompanies(user.id);
+                if (userCompanies.length === 0) {
+                    const [defRows] = await db.execute("SELECT id, organization_id, name, email, phone FROM companies WHERE id = ?", [userCompId]);
+                    userCompanies = defRows.length > 0 ? defRows : await findCompaniesByOrgId(userOrgId);
+                }
+            }
         } catch (e) {
             console.warn("Could not fetch user companies:", e.message);
         }

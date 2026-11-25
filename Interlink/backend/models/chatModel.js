@@ -151,6 +151,7 @@ const createChatTables = async () => {
             allow_group_creation VARCHAR(50) DEFAULT 'ALL',
             allow_broadcast_creation VARCHAR(50) DEFAULT 'ADMIN_ONLY',
             allow_file_sharing BOOLEAN DEFAULT TRUE,
+            allow_file_downloads BOOLEAN DEFAULT TRUE,
             max_file_size_mb INT DEFAULT 25,
             cross_department_chat BOOLEAN DEFAULT TRUE,
             read_receipts_enabled BOOLEAN DEFAULT TRUE,
@@ -165,6 +166,13 @@ const createChatTables = async () => {
     `;
     await db.execute(createSettingsQuery);
 
+    // Ensure columns on chat_settings
+    await ensureColumn("chat_settings", "allow_file_downloads", "BOOLEAN DEFAULT TRUE");
+    await ensureColumn("chat_settings", "message_retention_days", "INT DEFAULT 0");
+    await ensureColumn("chat_settings", "legal_hold_enabled", "BOOLEAN DEFAULT FALSE");
+    await ensureColumn("chat_settings", "allow_message_editing", "BOOLEAN DEFAULT TRUE");
+    await ensureColumn("chat_settings", "allow_message_deletion", "BOOLEAN DEFAULT TRUE");
+
     // 5. Chat User Type Permissions Table
     const createUserTypePermsQuery = `
         CREATE TABLE IF NOT EXISTS chat_user_type_permissions (
@@ -175,10 +183,14 @@ const createChatTables = async () => {
             can_create_group BOOLEAN DEFAULT TRUE,
             can_create_broadcast BOOLEAN DEFAULT FALSE,
             can_send_files BOOLEAN DEFAULT TRUE,
+            can_download_files BOOLEAN DEFAULT TRUE,
             UNIQUE KEY uq_cutp (company_id, user_type_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     await db.execute(createUserTypePermsQuery);
+
+    // Ensure columns on chat_user_type_permissions
+    await ensureColumn("chat_user_type_permissions", "can_download_files", "BOOLEAN DEFAULT TRUE");
 
     // 6. User Specific Department Communication Permissions Table
     const createUserDeptPermsQuery = `
@@ -192,6 +204,7 @@ const createChatTables = async () => {
             can_create_group BOOLEAN DEFAULT TRUE,
             can_create_broadcast BOOLEAN DEFAULT FALSE,
             can_send_files BOOLEAN DEFAULT TRUE,
+            can_download_files BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_cudp_user (user_id),
@@ -200,6 +213,9 @@ const createChatTables = async () => {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
     await db.execute(createUserDeptPermsQuery);
+
+    // Ensure columns on chat_user_department_permissions
+    await ensureColumn("chat_user_department_permissions", "can_download_files", "BOOLEAN DEFAULT TRUE");
 
     // 7. Announcement Acknowledgements Table
     await db.execute(`

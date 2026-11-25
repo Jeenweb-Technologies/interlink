@@ -703,17 +703,23 @@ export function TopBar({ onMenuClick = () => {} }) {
                     <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs">
                         <i className="fa-regular fa-building text-blue-600 text-[11px]"></i>
                         <span className="text-[10px] font-bold text-slate-400 uppercase hidden md:inline">Company:</span>
-                        <select
-                            value={activeCompanyId}
-                            onChange={handleCompanyChange}
-                            className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
-                        >
-                            {companies.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.name}
-                                </option>
-                            ))}
-                        </select>
+                        {companies.length > 1 ? (
+                            <select
+                                value={activeCompanyId}
+                                onChange={handleCompanyChange}
+                                className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+                            >
+                                {companies.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                        {c.name}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <span className="text-slate-700 font-bold text-xs truncate max-w-[160px]">
+                                {companies[0]?.name || "Default Company"}
+                            </span>
+                        )}
                     </div>
                 )}
 
@@ -1069,33 +1075,38 @@ export default function Sidebar({
                                     </button>
                                 )}
                             </div>
-                            <div className="relative">
-                                <select
-                                    value={String(activeCompanyId)}
-                                    onChange={handleCompanyChange}
-                                    className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
-                                >
-                                    {companies.length === 0 ? (
-                                        <option value="1">Default Company</option>
-                                    ) : (
-                                        companies.map((c) => (
+                            {companies.length > 1 ? (
+                                <div className="relative">
+                                    <select
+                                        value={String(activeCompanyId)}
+                                        onChange={handleCompanyChange}
+                                        className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
+                                    >
+                                        {companies.map((c) => (
                                             <option key={c.id} value={String(c.id)} className="bg-slate-900 text-white py-1">
                                                 {c.name}
                                             </option>
-                                        ))
-                                    )}
-                                </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
-                                    <i className="fa-solid fa-chevron-down text-[10px]"></i>
+                                        ))}
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                                        <i className="fa-solid fa-chevron-down text-[10px]"></i>
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white shadow-sm flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                                    <span className="truncate">
+                                        {companies[0]?.name || companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Default Company"}
+                                    </span>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="flex justify-center py-0.5">
                             <button
-                                onClick={() => handleNav("/admin/companies")}
-                                title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Company Workspace"}
-                                className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all cursor-pointer"
+                                onClick={() => isAdmin && handleNav("/admin/companies")}
+                                title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || companies[0]?.name || "Company Workspace"}
+                                className={`w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all ${isAdmin ? "cursor-pointer" : "cursor-default"}`}
                             >
                                 <i className="fa-solid fa-building text-sm"></i>
                             </button>

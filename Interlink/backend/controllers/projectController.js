@@ -277,6 +277,10 @@ exports.createProject = async (req, res) => {
         }
 
         const projectOwnerId = owner_id || userId;
+        const allowedStatuses = ['planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled'];
+        const projectStatus = allowedStatuses.includes(String(status).toLowerCase())
+            ? String(status).toLowerCase()
+            : 'planning';
 
         const [result] = await db.execute(`
             INSERT INTO projects (
@@ -291,7 +295,7 @@ exports.createProject = async (req, res) => {
             name.trim(),
             description || null,
             parent_project_id || null,
-            status,
+            projectStatus,
             priority,
             visibility,
             projectOwnerId,
@@ -382,7 +386,14 @@ exports.updateProject = async (req, res) => {
         if (name !== undefined) { updates.push("name = ?"); params.push(name.trim()); }
         if (code !== undefined) { updates.push("code = ?"); params.push(code.trim().toUpperCase()); }
         if (description !== undefined) { updates.push("description = ?"); params.push(description); }
-        if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+        if (status !== undefined) {
+            const allowedStatuses = ['planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled'];
+            const validStatus = allowedStatuses.includes(String(status).toLowerCase())
+                ? String(status).toLowerCase()
+                : 'planning';
+            updates.push("status = ?");
+            params.push(validStatus);
+        }
         if (priority !== undefined) { updates.push("priority = ?"); params.push(priority); }
         if (visibility !== undefined) { updates.push("visibility = ?"); params.push(visibility); }
         if (owner_id !== undefined) { updates.push("owner_id = ?"); params.push(owner_id); }
