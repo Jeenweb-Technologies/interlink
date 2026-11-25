@@ -7,6 +7,7 @@ const {
     toggleUserActive
 } = require("../models/userModel.js");
 const { assignUserDepartment } = require("../models/departmentModel.js");
+const { assignUserCompanies, getUserCompanyIds } = require("../models/companyModel.js");
 
 const {
     approveDevice,
@@ -59,9 +60,28 @@ const fetchUsers = async (req, res) => {
         `;
         const [users] = await db.execute(query, params);
 
+        // Fetch user companies mapping
+        let userCompsMap = {};
+        try {
+            const [userCompsRows] = await db.execute(`
+                SELECT uc.user_id, uc.company_id, c.name AS company_name
+                FROM user_companies uc
+                JOIN companies c ON uc.company_id = c.id
+            `);
+            userCompsRows.forEach((r) => {
+                if (!userCompsMap[r.user_id]) userCompsMap[r.user_id] = [];
+                userCompsMap[r.user_id].push({ id: r.company_id, name: r.company_name });
+            });
+        } catch (_) {}
+
+        const enhancedUsers = users.map((u) => ({
+            ...u,
+            allowed_companies: userCompsMap[u.id] || (u.company_id ? [{ id: u.company_id }] : [])
+        }));
+
         return res.status(200).json({
             success: true,
-            users
+            users: enhancedUsers
         });
 
     } catch (error) {
@@ -82,7 +102,9 @@ const createUserByAdmin = async (req, res) => {
             dateOfJoin,
             deviceVerificationRequired,
             role,
-            departmentId
+            departmentId,
+            companyId,
+            companyIds
         } = req.body;
 
         if (!name || !username || !email || !password) {
@@ -91,7 +113,9 @@ const createUserByAdmin = async (req, res) => {
         
         const hashedPassword = await bcrypt.hash(password, 10);
         const organizationId = req.user?.organization_id || 1;
-        const companyId = req.body.companyId ? parseInt(req.body.companyId, 10) : (req.user?.company_id || 1);
+        const resolvedCompanyId = companyId
+            ? parseInt(companyId, 10)
+            : (Array.isArray(companyIds) && companyIds.length > 0 ? parseInt(companyIds[0], 10) : (req.user?.company_id || 1));
         const parsedDeptId = departmentId ? parseInt(departmentId, 10) : null;
 
         const newUser = await createUser(
@@ -106,15 +130,27 @@ const createUserByAdmin = async (req, res) => {
             true,
             role || 'user',
             organizationId,
-            companyId,
+            resolvedCompanyId,
             parsedDeptId
         );
 
-        if (parsedDeptId && newUser.insertId) {
+        if (newUser.insertId) {
+            // Assign company access permissions
+            const targetCompanyIds = Array.isArray(companyIds) && companyIds.length > 0
+                ? companyIds
+                : [resolvedCompanyId];
             try {
-                await assignUserDepartment(newUser.insertId, parsedDeptId, 'USER');
-            } catch (deptErr) {
-                console.warn("Failed to sync user_departments junction:", deptErr.message);
+                await assignUserCompanies(newUser.insertId, targetCompanyIds);
+            } catch (compErr) {
+                console.warn("Failed to sync user_companies junction:", compErr.message);
+            }
+
+            if (parsedDeptId) {
+                try {
+                    await assignUserDepartment(newUser.insertId, parsedDeptId, 'USER');
+                } catch (deptErr) {
+                    console.warn("Failed to sync user_departments junction:", deptErr.message);
+                }
             }
         }
 
@@ -334,7 +370,8 @@ const updateUserByAdmin = async (req, res) => {
             deviceVerificationRequired,
             role,
             departmentId,
-            active
+            active,
+            companyIds
         } = req.body;
 
         const beforeUser = await getUserById(id);
@@ -392,6 +429,14 @@ const updateUserByAdmin = async (req, res) => {
             params.push(parsedDeptId);
             // keep user_departments junction synced
             await assignUserDepartment(id, parsedDeptId);
+        }
+
+        if (companyIds !== undefined && Array.isArray(companyIds)) {
+            await assignUserCompanies(id, companyIds);
+            if (companyIds.length > 0 && !companyIds.map(Number).includes(Number(beforeUser.company_id))) {
+                updates.push("company_id = ?");
+                params.push(parseInt(companyIds[0], 10));
+            }
         }
 
         if (updates.length > 0) {

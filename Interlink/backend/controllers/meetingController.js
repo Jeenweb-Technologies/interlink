@@ -246,7 +246,11 @@ const generateMeetingToken = async (req, res) => {
         }
 
         if (meeting.status === "ended" || meeting.status === "cancelled") {
-            return res.status(400).json({ success: false, message: "This meeting has already ended." });
+            return res.status(200).json({
+                success: false,
+                status: "ended",
+                message: "This meeting has concluded."
+            });
         }
 
         const user = req.user || null;
@@ -437,6 +441,14 @@ const joinLobby = async (req, res) => {
         const meeting = await getMeetingByRoomCode(roomCode);
         if (!meeting) {
             return res.status(404).json({ success: false, message: "Meeting not found" });
+        }
+
+        if (meeting.status === "ended" || meeting.status === "cancelled") {
+            return res.status(200).json({
+                success: false,
+                status: "ended",
+                message: "This meeting has concluded."
+            });
         }
 
         const user = req.user || null;
