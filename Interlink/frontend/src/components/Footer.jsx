@@ -51,9 +51,7 @@ export default function Footer() {
                         <img src={jwLogo} alt="Jeenweb" className="h-14 w-auto rounded-sm cursor-pointer" onClick={() => window.open("https://www.jeenweb.com", "_blank")} />
                     </div>
                     <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-6">
-                        <span>
-                            Helpline: <a href="tel:9824466017" className="text-slate-500">9824466017</a>
-                        </span>
+                        
                         <span>
                             Email: <a href="mailto:info@jeenweb.com" className="text-slate-500">info@jeenweb.com</a>
                         </span>
