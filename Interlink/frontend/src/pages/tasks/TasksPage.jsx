@@ -385,6 +385,25 @@ export default function TasksPage() {
                                     </select>
                                 </div>
 
+                                {/* Assignee Filter with Company & Department details */}
+                                <div className="space-y-1">
+                                    <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                                        Assignee
+                                    </label>
+                                    <select
+                                        value={selectedAssignee}
+                                        onChange={(e) => setSelectedAssignee(e.target.value)}
+                                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-hidden focus:border-[#2878C7] cursor-pointer"
+                                    >
+                                        <option value="">All Assignees</option>
+                                        {metadata.users?.map((u) => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.name} {u.company_name ? `(${u.company_name}${u.department_name ? ` - ${u.department_name}` : ''})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
                                 {/* Priority Filter */}
                                 <div className="space-y-1">
                                     <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wide">
