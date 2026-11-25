@@ -201,18 +201,17 @@ export default function ProjectWorkspacePage() {
 
                         {/* Navigation Tabs Bar: Full width, strictly equal spacing across all 8 tabs */}
                         <div className="w-full bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-x-auto scrollbar-none">
-                            <div className="grid grid-cols-8 w-full min-w-[800px] text-xs font-bold divide-x divide-slate-100">
+                            <div className="grid grid-cols-8 w-full min-w-[800px] text-xs font-bold">
                                 {tabs.map((tab) => (
                                     <button
                                         key={tab.id}
                                         onClick={() => setActiveTab(tab.id)}
-                                        className={`py-3.5 px-2 border-b-2 transition-all cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap text-center ${
+                                        className={`py-3.5 px-2 border-b-2 transition-all cursor-pointer flex items-center justify-center whitespace-nowrap text-center ${
                                             activeTab === tab.id
-                                                ? "border-[#17365D] text-[#17365D] bg-blue-50/20"
-                                                : "border-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/50"
+                                                ? "border-b-[#17365D] text-[#17365D] bg-blue-50/20"
+                                                : "border-b-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/50"
                                         }`}
                                     >
-                                        <i className={`${tab.icon} text-xs`}></i>
                                         <span>{tab.label}</span>
                                     </button>
                                 ))}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { getProjectDocuments, uploadProjectDocument, deleteProjectDocument } from "../../api/projectApi";
+import FilePreviewModal from "../FilePreviewModal";
 
 export default function ProjectDocumentsView({ projectId }) {
     const [documents, setDocuments] = useState([]);
@@ -9,6 +10,7 @@ export default function ProjectDocumentsView({ projectId }) {
     const [file, setFile] = useState(null);
     const [category, setCategory] = useState("general");
     const [uploading, setUploading] = useState(false);
+    const [previewFile, setPreviewFile] = useState(null);
 
     const loadDocuments = async () => {
         try {
@@ -28,6 +30,17 @@ export default function ProjectDocumentsView({ projectId }) {
     useEffect(() => {
         if (projectId) loadDocuments();
     }, [projectId]);
+
+    const handleOpenFile = (doc) => {
+        const fileUrl = doc.file_url || (doc.file_path?.startsWith("http")
+            ? doc.file_path
+            : `http://localhost:5000/uploads/${doc.file_path}`);
+        setPreviewFile({
+            name: doc.file_name,
+            url: fileUrl,
+            mimeType: doc.mime_type
+        });
+    };
 
     const handleUpload = async (e) => {
         e.preventDefault();
@@ -136,9 +149,16 @@ export default function ProjectDocumentsView({ projectId }) {
                             <tbody className="divide-y divide-slate-100">
                                 {documents.map((doc) => (
                                     <tr key={doc.id} className="hover:bg-slate-50/80 transition-colors">
-                                        <td className="py-3 px-4 font-bold text-[#17212F] flex items-center gap-2">
-                                            <i className="fa-regular fa-file-lines text-[#2878C7] text-sm"></i>
-                                            <span className="truncate max-w-xs">{doc.file_name}</span>
+                                        <td className="py-3 px-4 font-bold text-[#17212F]">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleOpenFile(doc)}
+                                                className="flex items-center gap-2 text-left hover:text-blue-600 transition-colors cursor-pointer group"
+                                                title="Click to open attachment"
+                                            >
+                                                <i className="fa-regular fa-file-lines text-[#2878C7] text-sm group-hover:scale-110 transition-transform"></i>
+                                                <span className="truncate max-w-xs group-hover:underline">{doc.file_name}</span>
+                                            </button>
                                         </td>
                                         <td className="py-3 px-4">
                                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
@@ -149,13 +169,24 @@ export default function ProjectDocumentsView({ projectId }) {
                                         <td className="py-3 px-4 text-slate-700 font-medium">{doc.uploader_name || "User"}</td>
                                         <td className="py-3 px-4 text-slate-500">{new Date(doc.created_at).toLocaleDateString()}</td>
                                         <td className="py-3 px-4 text-right">
-                                            <button
-                                                onClick={() => handleDelete(doc.id)}
-                                                className="p-1.5 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
-                                                title="Delete document"
-                                            >
-                                                <i className="fa-solid fa-trash-can"></i>
-                                            </button>
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleOpenFile(doc)}
+                                                    className="p-1.5 text-slate-500 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                                                    title="Open attachment"
+                                                >
+                                                    <i className="fa-regular fa-eye"></i>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDelete(doc.id)}
+                                                    className="p-1.5 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                                                    title="Delete document"
+                                                >
+                                                    <i className="fa-solid fa-trash-can"></i>
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -209,6 +240,14 @@ export default function ProjectDocumentsView({ projectId }) {
                         </form>
                     </div>
                 </div>
+            )}
+            {/* File Preview Modal */}
+            {previewFile && (
+                <FilePreviewModal
+                    file={previewFile}
+                    canDownload={false}
+                    onClose={() => setPreviewFile(null)}
+                />
             )}
         </div>
     );

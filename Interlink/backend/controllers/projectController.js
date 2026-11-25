@@ -1041,8 +1041,14 @@ exports.getDocuments = async (req, res) => {
             ORDER BY d.created_at DESC
         `, [id]);
 
-        res.json({ success: true, data: docs });
+        const formattedDocs = (docs || []).map(d => ({
+            ...d,
+            file_url: uploadConfig.getFileUrl(d.file_path)
+        }));
+
+        res.json({ success: true, data: formattedDocs });
     } catch (err) {
+        console.error("Error getDocuments:", err);
         res.status(500).json({ success: false, message: "Failed to load documents" });
     }
 };
