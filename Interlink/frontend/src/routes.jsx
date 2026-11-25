@@ -22,6 +22,12 @@ import TasksPage from "./pages/tasks/TasksPage";
 import ProjectsPortfolioPage from "./pages/projects/ProjectsPortfolioPage";
 import ProjectWorkspacePage from "./pages/projects/ProjectWorkspacePage";
 import NotesPage from "./pages/notes/NotesPage";
+import MeetingsPage from "./pages/meetings/MeetingsPage";
+import PreJoinRoom from "./pages/meetings/PreJoinRoom";
+import MeetingRoom from "./pages/meetings/MeetingRoom";
+import MeetingSummaryPage from "./pages/meetings/MeetingSummaryPage";
+import AttendancePage from "./pages/attendance/AttendancePage";
+import TimesheetsPage from "./pages/timesheets/TimesheetsPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -58,6 +64,16 @@ export default function AppRoutes() {
                 element={<OrgPendingApproval />}
             />
 
+            {/* Standalone Guest & Fullscreen Meeting Routes */}
+            <Route
+                path="/meetings/join/:roomCode"
+                element={<PreJoinRoom />}
+            />
+            <Route
+                path="/meetings/room/:roomCode"
+                element={<MeetingRoom />}
+            />
+
             {/* Authenticated routes wrapped with ProtectedRoute and DashboardLayout */}
             <Route element={<ProtectedRoute />}>
                 <Route element={<DashboardLayout />}>
@@ -65,26 +81,64 @@ export default function AppRoutes() {
                         path="/user/home"
                         element={<UserHome />}
                     />
-                    <Route
-                        path="/tasks"
-                        element={<TasksPage />}
-                    />
-                    <Route
-                        path="/chat"
-                        element={<ChatPage />}
-                    />
-                    <Route
-                        path="/projects"
-                        element={<ProjectsPortfolioPage />}
-                    />
-                    <Route
-                        path="/projects/:id"
-                        element={<ProjectWorkspacePage />}
-                    />
-                    <Route
-                        path="/notes"
-                        element={<NotesPage />}
-                    />
+                    
+                    <Route element={<ProtectedRoute requiredMaster="meetings" requiredAction="read" />}>
+                        <Route
+                            path="/meetings"
+                            element={<MeetingsPage />}
+                        />
+                        <Route
+                            path="/meetings/history/:id"
+                            element={<MeetingSummaryPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="tasks" requiredAction="read" />}>
+                        <Route
+                            path="/tasks"
+                            element={<TasksPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="chat" requiredAction="read" />}>
+                        <Route
+                            path="/chat"
+                            element={<ChatPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="projects" requiredAction="read" />}>
+                        <Route
+                            path="/projects"
+                            element={<ProjectsPortfolioPage />}
+                        />
+                        <Route
+                            path="/projects/:id"
+                            element={<ProjectWorkspacePage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="notes" requiredAction="read" />}>
+                        <Route
+                            path="/notes"
+                            element={<NotesPage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="attendance" requiredAction="read" />}>
+                        <Route
+                            path="/attendance"
+                            element={<AttendancePage />}
+                        />
+                    </Route>
+
+                    <Route element={<ProtectedRoute requiredMaster="timesheets" requiredAction="read" />}>
+                        <Route
+                            path="/timesheets"
+                            element={<TimesheetsPage />}
+                        />
+                    </Route>
+
                     <Route
                         path="/profile"
                         element={<Profile />}
@@ -97,15 +151,19 @@ export default function AppRoutes() {
                         />
                     </Route>
 
-                    <Route element={<ProtectedRoute allowedRole="admin" />}>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="company_master" requiredAction="read" />}>
                         <Route
                             path="/admin/companies"
                             element={<CompanyMaster />}
                         />
+                    </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="department_master" requiredAction="read" />}>
                         <Route
                             path="/admin/departments"
                             element={<DepartmentMaster />}
                         />
+                    </Route>
+                    <Route element={<ProtectedRoute allowedRole="admin" requiredMaster="chat_settings_master" requiredAction="read" />}>
                         <Route
                             path="/admin/chat-settings"
                             element={<ChatSettingsMaster />}

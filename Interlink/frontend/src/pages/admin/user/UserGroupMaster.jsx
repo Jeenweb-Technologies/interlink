@@ -8,12 +8,37 @@ import { usePermission } from "../../../context/PermissionContext";
 // ─── Constants ───────────────────────────────────────────────────────────────
 const PERMISSION_SECTIONS = [
   {
-    title: "User Management",
+    title: "Organization & System Masters",
     masters: [
-      { key: "user_type", label: "User Type Master" },
-      { key: "user_master", label: "User Master" },
-      { key: "device_approval", label: "Device Approval" },
-      { key: "activity_report", label: "Activity Report" },
+      { key: "company_master",        label: "Company Master" },
+      { key: "department_master",     label: "Department Master" },
+      { key: "chat_settings_master",  label: "Chat Settings Master" },
+    ]
+  },
+  {
+    title: "User & Access Management",
+    masters: [
+      { key: "user_type",             label: "User Type Master" },
+      { key: "user_master",           label: "User Master" },
+      { key: "device_approval",       label: "Device Approval" },
+      { key: "activity_report",       label: "Activity Report" },
+    ]
+  },
+  {
+    title: "Workspace & Collaboration",
+    masters: [
+      { key: "projects",              label: "Projects & Portfolio" },
+      { key: "tasks",                 label: "Task Management" },
+      { key: "notes",                 label: "Notes & Scratchpad" },
+      { key: "chat",                  label: "Chat & Communication" },
+      { key: "meetings",              label: "Meetings & Whiteboard" },
+    ]
+  },
+  {
+    title: "Operations & HR",
+    masters: [
+      { key: "attendance",            label: "Attendance & Shifts" },
+      { key: "timesheets",            label: "Timesheets" },
     ]
   }
 ];
@@ -28,6 +53,14 @@ const PERM_COLORS = {
   canDelete: { bg: "#fff1f2", border: "#fecdd3", text: "#be123c", check: "#e11d48" },
 };
 
+const isApprovalRow = (key) => key.endsWith("_approval");
+const isReportRow = (key) => key === "activity_report";
+const getApplicablePerms = (key) => {
+  if (isApprovalRow(key)) return ["canRead", "canWrite"];
+  if (isReportRow(key)) return ["canRead"];
+  return PERMS;
+};
+
 const defaultPerms = () =>
   MASTERS.map((m) => ({ masterName: m.key, canRead: false, canWrite: false, canUpdate: false, canDelete: false }));
 
@@ -35,14 +68,14 @@ const buildPermsFromApi = (apiPerms) => {
   if (!apiPerms || apiPerms.length === 0) return defaultPerms();
   return MASTERS.map((m) => {
     const found = apiPerms.find((p) => p.masterName === m.key);
-    const isApprovalRow = m.key.endsWith("_approval");
+    const applicable = getApplicablePerms(m.key);
     if (found) {
       return {
         masterName: m.key,
         canRead: !!found.canRead,
-        canWrite: !!found.canWrite,
-        canUpdate: isApprovalRow ? false : !!found.canUpdate,
-        canDelete: isApprovalRow ? false : !!found.canDelete
+        canWrite: applicable.includes("canWrite") ? !!found.canWrite : false,
+        canUpdate: applicable.includes("canUpdate") ? !!found.canUpdate : false,
+        canDelete: applicable.includes("canDelete") ? !!found.canDelete : false
       };
     }
     return { masterName: m.key, canRead: false, canWrite: false, canUpdate: false, canDelete: false };
@@ -82,18 +115,35 @@ function PermBadges({ permissions }) {
   const rows = MASTERS.map((m) => {
     const p = permissions.find((x) => x.masterName === m.key);
     if (!p) return null;
-    const isApprovalRow = m.key.endsWith("_approval");
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    const granted = applicablePerms.filter((perm) => p[perm]);
+    const applicable = getApplicablePerms(m.key);
+    const granted = applicable.filter((perm) => p[perm]);
     if (granted.length === 0) return null;
-    return { label: m.label, granted, isApprovalRow };
+    return { label: m.label, granted, isApprovalRow: isApprovalRow(m.key) };
   }).filter(Boolean);
 
   if (rows.length === 0)
     return <span style={{ color: "#94a3b8", fontSize: 12 }}>No access</span>;
 
+  const isFullAccess = rows.length === MASTERS.length &&
+    rows.every(r => r.granted.length === getApplicablePerms(MASTERS.find(m => m.label === r.label).key).length);
+
+  if (isFullAccess) {
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 5,
+        fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 6,
+        background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0"
+      }}>
+        <svg viewBox="0 0 12 10" style={{ width: 10, height: 10, stroke: "#059669" }}>
+          <polyline points="1,5 4.5,8.5 11,1" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Full Access (All {MASTERS.length} Modules)
+      </span>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 150, overflowY: "auto", paddingRight: 4 }}>
       {rows.map(({ label, granted, isApprovalRow }) => (
         <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {/* Master label */}
@@ -129,73 +179,74 @@ function EditForm({ row, onClose, onSave, saving }) {
   const [typeName, setTypeName] = useState(row.type_name || "");
   const [permissions, setPermissions] = useState(buildPermsFromApi(row.permissions));
 
-  const togglePerm = (masterKey, perm) =>
-    setPermissions((prev) => prev.map((p) => p.masterName === masterKey ? { ...p, [perm]: !p[perm] } : p));
+  const togglePerm = (masterKey, perm) => {
+    if (!getApplicablePerms(masterKey).includes(perm)) return;
+    setPermissions((prev) =>
+      prev.map((p) => (p.masterName === masterKey ? { ...p, [perm]: !p[perm] } : p))
+    );
+  };
 
   const toggleRow = (masterKey) => {
-    const isApprovalRow = masterKey.endsWith("_approval");
+    const applicable = getApplicablePerms(masterKey);
     const r = permissions.find((p) => p.masterName === masterKey);
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    const all = applicablePerms.every((perm) => r[perm]);
-    setPermissions((prev) => prev.map((p) => p.masterName === masterKey
-      ? {
-          ...p,
-          canRead: !all,
-          canWrite: !all,
-          canUpdate: isApprovalRow ? false : !all,
-          canDelete: isApprovalRow ? false : !all
-        } : p));
+    if (!r) return;
+    const all = applicable.every((perm) => r[perm]);
+    setPermissions((prev) =>
+      prev.map((p) => {
+        if (p.masterName !== masterKey) return p;
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !all;
+        });
+        return next;
+      })
+    );
   };
 
   const toggleColumn = (perm) => {
-    const all = permissions.every((p) => p[perm]);
-    setPermissions((prev) => prev.map((p) => {
-      const isApprovalRow = p.masterName.endsWith("_approval");
-      if (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) {
-        return { ...p, [perm]: false };
-      }
-      return { ...p, [perm]: !all };
-    }));
+    const applicableRows = permissions.filter((p) => getApplicablePerms(p.masterName).includes(perm));
+    const all = applicableRows.length > 0 && applicableRows.every((p) => p[perm]);
+    setPermissions((prev) =>
+      prev.map((p) => {
+        if (!getApplicablePerms(p.masterName).includes(perm)) return p;
+        return { ...p, [perm]: !all };
+      })
+    );
   };
 
   const toggleAll = () => {
     const all = permissions.every((p) => {
-      const isApprovalRow = p.masterName.endsWith("_approval");
-      const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-      return applicablePerms.every((perm) => p[perm]);
+      const applicable = getApplicablePerms(p.masterName);
+      return applicable.every((perm) => p[perm]);
     });
-    setPermissions((prev) => prev.map((p) => {
-      const isApprovalRow = p.masterName.endsWith("_approval");
-      return {
-        ...p,
-        canRead: !all,
-        canWrite: !all,
-        canUpdate: isApprovalRow ? false : !all,
-        canDelete: isApprovalRow ? false : !all
-      };
-    }));
+    setPermissions((prev) =>
+      prev.map((p) => {
+        const applicable = getApplicablePerms(p.masterName);
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !all;
+        });
+        return next;
+      })
+    );
   };
 
   const isRowAll = (masterKey) => {
-    const isApprovalRow = masterKey.endsWith("_approval");
+    const applicable = getApplicablePerms(masterKey);
     const r = permissions.find((p) => p.masterName === masterKey);
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    return applicablePerms.every((perm) => r[perm]);
+    return r ? applicable.every((perm) => r[perm]) : false;
   };
 
-  const isColAll = (perm) => permissions.every((p) => {
-    const isApprovalRow = p.masterName.endsWith("_approval");
-    if (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) {
-      return true;
-    }
-    return p[perm];
-  });
+  const isColAll = (perm) => {
+    const applicableRows = permissions.filter((p) => getApplicablePerms(p.masterName).includes(perm));
+    return applicableRows.length > 0 && applicableRows.every((p) => p[perm]);
+  };
 
-  const isAllAll = () => permissions.every((p) => {
-    const isApprovalRow = p.masterName.endsWith("_approval");
-    const applicablePerms = isApprovalRow ? ["canRead", "canWrite"] : PERMS;
-    return applicablePerms.every((perm) => p[perm]);
-  });
+  const isAllAll = () =>
+    permissions.every((p) => {
+      const applicable = getApplicablePerms(p.masterName);
+      return applicable.every((perm) => p[perm]);
+    });
 
   return (
     <div className="flex flex-col flex-1 font-sans" style={{ background: "linear-gradient(135deg,#f8fafc 0%,#eef2ff 100%)" }}>
@@ -304,8 +355,8 @@ function EditForm({ row, onClose, onSave, saving }) {
                       {section.masters.map((master, idx) => {
                         const rowData = permissions.find((p) => p.masterName === master.key);
                         const rowAll = isRowAll(master.key);
-                        const isApprovalRow = master.key.endsWith("_approval");
-                        const isReportRow = master.key === "activity_report" || master.key === "closed_inquiry_report";
+                        const isApp = isApprovalRow(master.key);
+                        const isRep = isReportRow(master.key);
                         return (
                           <tr
                             key={master.key}
@@ -322,10 +373,10 @@ function EditForm({ row, onClose, onSave, saving }) {
                             </td>
                             {PERMS.map((perm) => {
                               const c = PERM_COLORS[perm];
-                              const checked = rowData[perm];
+                              const checked = rowData ? !!rowData[perm] : false;
                               if (
-                                (isApprovalRow && (perm === "canUpdate" || perm === "canDelete")) ||
-                                (isReportRow && (perm === "canWrite" || perm === "canUpdate" || perm === "canDelete"))
+                                (isApp && (perm === "canUpdate" || perm === "canDelete")) ||
+                                (isRep && (perm === "canWrite" || perm === "canUpdate" || perm === "canDelete"))
                               ) {
                                 return (
                                   <td key={perm} className="text-center py-3 px-2 border-b border-slate-50 text-slate-400">

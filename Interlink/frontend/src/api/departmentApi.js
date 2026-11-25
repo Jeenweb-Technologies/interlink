@@ -29,7 +29,7 @@ export const deleteDepartment = async (id) => {
 };
 
 export const toggleDepartmentStatus = async (id, currentStatus) => {
-    return apiClient.patch(`/departments/${id}/toggle-status`, { currentStatus });
+    return apiClient.patch(`/departments/${id}/status`, { currentStatus });
 };
 
 export const getDepartmentMembers = async (id) => {

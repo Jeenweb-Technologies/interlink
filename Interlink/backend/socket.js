@@ -5,8 +5,34 @@ const {
     markConversationRead,
     toggleMessageReaction
 } = require("./models/chatModel.js");
+const { getMeetingByRoomCode, updateMeeting } = require("./models/meetingModel.js");
 
 let io = null;
+
+const checkAndAutoEndMeeting = (roomCode) => {
+    if (!roomCode) return;
+    setTimeout(async () => {
+        try {
+            const roomKey = `meeting_${roomCode}`;
+            const room = io?.sockets.adapter.rooms.get(roomKey);
+            const remainingCount = room ? room.size : 0;
+            if (remainingCount === 0) {
+                const meeting = await getMeetingByRoomCode(roomCode);
+                if (meeting && meeting.status === "live") {
+                    await updateMeeting(meeting.id, { status: "ended", scheduled_end: new Date() });
+                    if (io) {
+                        io.to(`meeting_${roomCode}`).emit("meeting_ended", {
+                            meetingId: meeting.id,
+                            roomCode
+                        });
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn("Auto-ending empty meeting room error:", err.message);
+        }
+    }, 5000);
+};
 
 const initSocket = (server) => {
     io = new Server(server, {
@@ -126,6 +152,150 @@ const initSocket = (server) => {
                 if (typeof callback === "function") callback({ success: true });
             } catch (err) {
                 if (typeof callback === "function") callback({ success: false });
+            }
+        });
+
+        // ─── Meeting & Whiteboard Realtime Signaling ───────────
+        socket.on("join_lobby", ({ roomCode }) => {
+            if (roomCode) {
+                socket.join(`lobby_${roomCode}`);
+            }
+        });
+
+        socket.on("join_meeting_room", ({ roomCode, participant }) => {
+            if (roomCode) {
+                const roomKey = `meeting_${roomCode}`;
+                socket.leave(`lobby_${roomCode}`);
+
+                socket.meetingRoomKey = roomKey;
+                socket.meetingParticipant = {
+                    ...(participant || {}),
+                    socketId: socket.id,
+                    id: participant?.id || (socket.user?.id ? `user_${socket.user.id}` : socket.id),
+                    name: participant?.name || socket.user?.name || "Participant"
+                };
+
+                // Find existing peers already in this meeting room (excluding self)
+                const existingPeers = [];
+                const room = io.sockets.adapter.rooms.get(roomKey);
+                if (room) {
+                    for (const sId of room) {
+                        if (sId !== socket.id) {
+                            const peerSocket = io.sockets.sockets.get(sId);
+                            if (peerSocket && peerSocket.meetingParticipant) {
+                                existingPeers.push({
+                                    socketId: sId,
+                                    participant: peerSocket.meetingParticipant
+                                });
+                            } else {
+                                existingPeers.push({
+                                    socketId: sId,
+                                    participant: { socketId: sId, name: "Participant" }
+                                });
+                            }
+                        }
+                    }
+                }
+
+                socket.join(roomKey);
+
+                // Send list of existing peers to the newly joined participant
+                socket.emit("existing_meeting_peers", { peers: existingPeers });
+
+                // Notify all existing participants in the room
+                socket.to(roomKey).emit("peer_joined", {
+                    participant: socket.meetingParticipant,
+                    socketId: socket.id
+                });
+            }
+        });
+
+        socket.on("webrtc_signal", ({ to, signal }) => {
+            if (to) {
+                io.to(to).emit("webrtc_signal", {
+                    from: socket.id,
+                    fromParticipant: socket.meetingParticipant,
+                    signal
+                });
+            }
+        });
+
+        socket.on("leave_meeting_room", ({ roomCode, participantId }) => {
+            if (roomCode) {
+                const roomKey = `meeting_${roomCode}`;
+                socket.leave(roomKey);
+                socket.to(roomKey).emit("peer_left", {
+                    participantId: participantId || socket.meetingParticipant?.id || socket.id,
+                    socketId: socket.id
+                });
+                socket.meetingRoomKey = null;
+                socket.meetingParticipant = null;
+                checkAndAutoEndMeeting(roomCode);
+            }
+        });
+
+        socket.on("whiteboard_draw", ({ roomCode, action, element, elements }) => {
+            if (roomCode) {
+                socket.to(`meeting_${roomCode}`).emit("whiteboard_draw", {
+                    action,
+                    element,
+                    elements,
+                    senderId: socket.user?.id || socket.id
+                });
+            }
+        });
+
+        socket.on("whiteboard_cursor", ({ roomCode, cursor }) => {
+            if (roomCode) {
+                socket.to(`meeting_${roomCode}`).emit("whiteboard_cursor", {
+                    ...cursor,
+                    senderId: socket.user?.id || socket.id,
+                    senderName: cursor.senderName || socket.user?.name || "Collaborator"
+                });
+            }
+        });
+
+        socket.on("meeting_chat_message", ({ roomCode, message }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("meeting_chat_message", {
+                    ...message,
+                    senderId: socket.user?.id || socket.id,
+                    senderName: message.senderName || socket.user?.name || "Participant",
+                    timestamp: new Date()
+                });
+            }
+        });
+
+        socket.on("meeting_raise_hand", ({ roomCode, participantId, participantName, raised }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("meeting_raise_hand", {
+                    participantId: participantId || socket.user?.id || socket.id,
+                    participantName: participantName || socket.user?.name || "Participant",
+                    raised
+                });
+            }
+        });
+
+        socket.on("host_control_action", ({ roomCode, action, targetParticipantId, payload }) => {
+            if (roomCode) {
+                io.to(`meeting_${roomCode}`).emit("host_control_action", {
+                    action,
+                    targetParticipantId,
+                    payload,
+                    senderId: socket.user?.id || socket.id
+                });
+            }
+        });
+
+        socket.on("disconnecting", () => {
+            if (socket.meetingRoomKey) {
+                const roomKey = socket.meetingRoomKey;
+                const roomCode = roomKey.replace(/^meeting_/, "");
+                socket.to(roomKey).emit("peer_left", {
+                    participantId: socket.meetingParticipant?.id || socket.id,
+                    socketId: socket.id
+                });
+                checkAndAutoEndMeeting(roomCode);
             }
         });
 

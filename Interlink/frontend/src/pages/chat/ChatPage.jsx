@@ -9,9 +9,19 @@ import {
     createChannel,
     markConversationRead,
     toggleReaction,
-    getAvailableUsersForChat
+    getAvailableUsersForChat,
+    editChatMessage,
+    deleteChatMessage,
+    togglePinChatMessage,
+    acknowledgeAnnouncement,
+    reportChatMessage,
+    getChannelParticipants,
+    addChannelParticipant,
+    removeChannelParticipant,
+    getMyChatPermissions
 } from "../../api/chatApi";
 import { getDepartments } from "../../api/departmentApi";
+import FilePreviewModal from "../../components/FilePreviewModal";
 
 export default function ChatPage() {
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
@@ -34,6 +44,35 @@ export default function ChatPage() {
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [typingUser, setTypingUser] = useState(null);
     const [showDetailsPanel, setShowDetailsPanel] = useState(false);
+
+    // In-App File & Media Preview State
+    const [previewFile, setPreviewFile] = useState(null); // { url, name, size, type, isImage, isPdf }
+    const [myChatPermissions, setMyChatPermissions] = useState(null);
+    const canDownloadFiles = useMemo(() => {
+        if (isAdmin) return true;
+        if (!myChatPermissions) return true;
+        return myChatPermissions.can_download_files !== false && myChatPermissions.allow_file_downloads !== false;
+    }, [isAdmin, myChatPermissions]);
+
+    // Channel Participants State for Details Pane
+    const [channelParticipants, setChannelParticipants] = useState([]);
+    const [loadingParticipants, setLoadingParticipants] = useState(false);
+    const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+    const [selectedNewMemberId, setSelectedNewMemberId] = useState("");
+
+    // In-Chat Message Search
+    const [showSearchInChat, setShowSearchInChat] = useState(false);
+    const [chatMessageSearch, setChatMessageSearch] = useState("");
+
+    // Announcement Composer State
+    const [isAnnouncementMode, setIsAnnouncementMode] = useState(false);
+    const [announcementTitle, setAnnouncementTitle] = useState("");
+    const [announcementExpiry, setAnnouncementExpiry] = useState("");
+
+    // @Mention System State
+    const [mentionQuery, setMentionQuery] = useState("");
+    const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+    const [mentionedUserIds, setMentionedUserIds] = useState([]);
 
     // Modals
     const [isDirectModalOpen, setIsDirectModalOpen] = useState(false);
@@ -61,11 +100,112 @@ export default function ChatPage() {
     });
     const [creatingChannel, setCreatingChannel] = useState(false);
 
+    const textareaRef = useRef(null);
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
     const socketRef = useRef(null);
+    const selectedConvIdRef = useRef(selectedConvId);
 
-    // Connect Socket.IO
+    useEffect(() => {
+        selectedConvIdRef.current = selectedConvId;
+    }, [selectedConvId]);
+
+    // Audio chime synthesized via Web Audio API (zero external assets, crisp & instant)
+    const playNotificationChime = useCallback(() => {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            if (ctx.state === "suspended") {
+                ctx.resume();
+            }
+            const now = ctx.currentTime;
+            
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = "sine";
+            osc1.frequency.setValueAtTime(784, now); // G5
+            gain1.gain.setValueAtTime(0.12, now);
+            gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.15);
+
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = "sine";
+            osc2.frequency.setValueAtTime(1046.5, now + 0.08); // C6
+            gain2.gain.setValueAtTime(0.15, now + 0.08);
+            gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.08);
+            osc2.stop(now + 0.35);
+        } catch (_) {}
+    }, []);
+
+    // Auto-expanding textarea height adjustment up to 160px
+    const adjustTextareaHeight = useCallback(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+            const scrollH = textareaRef.current.scrollHeight;
+            textareaRef.current.style.height = `${Math.min(Math.max(scrollH, 42), 160)}px`;
+        }
+    }, []);
+
+    // Request browser notification permissions on mount
+    useEffect(() => {
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission().catch(() => {});
+        }
+    }, []);
+
+    // Candidates for @mention autocomplete
+    const mentionCandidates = useMemo(() => {
+        const pool = (channelParticipants.length > 0) ? channelParticipants : availableUsers;
+        if (!mentionQuery) return pool.slice(0, 8);
+        const q = mentionQuery.toLowerCase();
+        return pool.filter(u =>
+            (u.name && u.name.toLowerCase().includes(q)) ||
+            (u.username && u.username.toLowerCase().includes(q)) ||
+            (u.department_name && u.department_name.toLowerCase().includes(q))
+        ).slice(0, 8);
+    }, [channelParticipants, availableUsers, mentionQuery]);
+
+    // Parse and render formatted message text with @mention pills
+    const renderMessageContent = useCallback((text, isMine) => {
+        if (!text) return null;
+        // Split text by @mentions: @word or @two words
+        const parts = text.split(/(@[A-Za-z0-9_]+(?:\s[A-Za-z0-9_]+)?)/g);
+        return parts.map((part, idx) => {
+            if (part && part.startsWith("@")) {
+                const tagContent = part.slice(1).trim().toLowerCase();
+                const myName = (user.name || "").toLowerCase();
+                const myUsername = (user.username || "").toLowerCase();
+                const isMe = (myName && tagContent.includes(myName)) || (myUsername && tagContent.includes(myUsername));
+
+                return (
+                    <span
+                        key={idx}
+                        className={`inline-flex items-center gap-0.5 font-bold px-1.5 py-0.5 rounded-md text-[11px] mx-0.5 transition-colors ${
+                            isMine
+                                ? "bg-white/25 text-white border border-white/30"
+                                : isMe
+                                ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold shadow-2xs"
+                                : "bg-blue-50 text-[#0056cf] border border-blue-200"
+                        }`}
+                    >
+                        <i className="fa-solid fa-at text-[9px] opacity-75"></i>
+                        <span>{part.slice(1)}</span>
+                    </span>
+                );
+            }
+            return part;
+        });
+    }, [user.name, user.username]);
+
+    // Connect Socket.IO once on mount
     useEffect(() => {
         const token = localStorage.getItem("token");
         const socketUrl = import.meta.env.VITE_API_URL
@@ -81,50 +221,152 @@ export default function ChatPage() {
 
         socket.on("connect", () => {
             console.log("[Socket.IO] Connected successfully");
+            if (selectedConvIdRef.current) {
+                socket.emit("join_conversation", selectedConvIdRef.current);
+            }
         });
 
         socket.on("new_message", (newMsg) => {
-            setMessages(prev => {
-                // Prevent duplicate addition
-                if (prev.some(m => m.id === newMsg.id)) return prev;
-                if (newMsg.conversation_id === selectedConvId) {
-                    return [...prev, newMsg];
-                }
-                return prev;
-            });
+            const isCurrentActive = String(newMsg.conversation_id) === String(selectedConvIdRef.current);
+            const isFromMe = String(newMsg.sender_id) === String(user.id);
 
-            // Update conversations list preview & unread count
-            setConversations(prev => prev.map(c => {
-                if (c.id === newMsg.conversation_id) {
-                    return {
-                        ...c,
-                        last_message_text: newMsg.message_text,
-                        last_message_type: newMsg.message_type,
-                        last_message_time: newMsg.created_at,
-                        last_message_sender_name: newMsg.sender_name,
-                        unread_count: c.id === selectedConvId ? 0 : c.unread_count + 1
-                    };
+            // 1. Only append if message belongs to current open conversation
+            if (isCurrentActive) {
+                setMessages(prev => {
+                    if (prev.some(m => String(m.id) === String(newMsg.id))) return prev;
+                    return [...prev, newMsg];
+                });
+                markConversationRead(newMsg.conversation_id).catch(() => {});
+            }
+
+            // 2. Play chime & show interactive notification toast if message is from another user
+            if (!isFromMe) {
+                playNotificationChime();
+
+                if (!isCurrentActive || document.hidden) {
+                    toast.custom((t) => (
+                        <div
+                            onClick={() => {
+                                setSelectedConvId(Number(newMsg.conversation_id));
+                                toast.dismiss(t.id);
+                            }}
+                            className={`max-w-md w-full bg-white shadow-xl rounded-2xl pointer-events-auto flex ring-1 ring-black/5 p-3.5 gap-3 cursor-pointer hover:bg-slate-50 transition-all border border-slate-200 ${
+                                t.visible ? 'animate-enter' : 'animate-leave'
+                            }`}
+                        >
+                            <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#2878C7] flex items-center justify-center font-bold text-sm shrink-0">
+                                {(newMsg.sender_name || "U").charAt(0).toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-xs font-bold text-slate-900 truncate">
+                                        {newMsg.sender_name || "New Message"}
+                                    </p>
+                                    <span className="text-[10px] text-blue-600 font-semibold">Just now</span>
+                                </div>
+                                <p className="text-xs text-slate-500 truncate mt-0.5">
+                                    {newMsg.message_text || (newMsg.file_name ? `📎 ${newMsg.file_name}` : "Sent an attachment")}
+                                </p>
+                            </div>
+                        </div>
+                    ), { duration: 4500, position: "top-right" });
+
+                    if (window.Notification && Notification.permission === "granted") {
+                        try {
+                            new Notification(newMsg.sender_name || "New Message", {
+                                body: newMsg.message_text || "Sent an attachment"
+                            });
+                        } catch (_) {}
+                    }
                 }
-                return c;
-            }));
+            }
+
+            // 3. Update conversations list preview, unread counts & re-order to top
+            setConversations(prev => {
+                const exists = prev.some(c => String(c.id) === String(newMsg.conversation_id));
+                if (!exists) {
+                    fetchConversationsList();
+                    return prev;
+                }
+
+                const updated = prev.map(c => {
+                    if (String(c.id) === String(newMsg.conversation_id)) {
+                        return {
+                            ...c,
+                            last_message_id: newMsg.id,
+                            last_message_text: newMsg.message_text,
+                            last_message_type: newMsg.message_type,
+                            last_message_time: newMsg.created_at,
+                            last_message_sender_name: newMsg.sender_name,
+                            unread_count: isCurrentActive ? 0 : (Number(c.unread_count || 0) + 1)
+                        };
+                    }
+                    return c;
+                });
+
+                return [...updated].sort((a, b) => {
+                    if (a.is_pinned !== b.is_pinned) return b.is_pinned ? 1 : -1;
+                    if (String(a.id) === String(newMsg.conversation_id)) return -1;
+                    if (String(b.id) === String(newMsg.conversation_id)) return 1;
+                    const timeA = a.last_message_time ? new Date(a.last_message_time).getTime() : 0;
+                    const timeB = b.last_message_time ? new Date(b.last_message_time).getTime() : 0;
+                    return timeB - timeA;
+                });
+            });
         });
 
         socket.on("user_typing", ({ conversationId, userName }) => {
-            if (conversationId === selectedConvId) {
+            if (String(conversationId) === String(selectedConvIdRef.current)) {
                 setTypingUser(userName);
             }
         });
 
         socket.on("user_stop_typing", ({ conversationId }) => {
-            if (conversationId === selectedConvId) {
+            if (String(conversationId) === String(selectedConvIdRef.current)) {
                 setTypingUser(null);
             }
         });
 
         socket.on("reaction_updated", ({ messageId, reactions }) => {
             setMessages(prev => prev.map(m => {
-                if (m.id === messageId) {
+                if (String(m.id) === String(messageId)) {
                     return { ...m, reactions };
+                }
+                return m;
+            }));
+        });
+
+        socket.on("message_edited", ({ messageId, messageText, isEdited }) => {
+            setMessages(prev => prev.map(m => {
+                if (String(m.id) === String(messageId)) {
+                    return { ...m, message_text: messageText, is_edited: isEdited };
+                }
+                return m;
+            }));
+        });
+
+        socket.on("message_deleted", ({ messageId }) => {
+            setMessages(prev => prev.map(m => {
+                if (String(m.id) === String(messageId)) {
+                    return { ...m, is_deleted: true, message_text: "This message was deleted", file_url: null, file_name: null };
+                }
+                return m;
+            }));
+        });
+
+        socket.on("message_pin_toggled", ({ messageId, isPinned }) => {
+            setMessages(prev => prev.map(m => {
+                if (String(m.id) === String(messageId)) {
+                    return { ...m, is_pinned: isPinned };
+                }
+                return m;
+            }));
+        });
+
+        socket.on("announcement_acknowledged", ({ messageId, ackCount }) => {
+            setMessages(prev => prev.map(m => {
+                if (String(m.id) === String(messageId)) {
+                    return { ...m, ack_count: ackCount };
                 }
                 return m;
             }));
@@ -133,7 +375,7 @@ export default function ChatPage() {
         return () => {
             socket.disconnect();
         };
-    }, [selectedConvId]);
+    }, []);
 
     // Load Conversations List
     const fetchConversationsList = useCallback(async () => {
@@ -169,6 +411,15 @@ export default function ChatPage() {
             socketRef.current.emit("join_conversation", selectedConvId);
         }
 
+        // Fetch channel participants for @mentions immediately
+        getChannelParticipants(selectedConvId)
+            .then(res => {
+                if (res.data?.success && Array.isArray(res.data.participants)) {
+                    setChannelParticipants(res.data.participants);
+                }
+            })
+            .catch(() => {});
+
         const fetchMsg = async () => {
             try {
                 setLoadingMessages(true);
@@ -203,21 +454,77 @@ export default function ChatPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    // Load Available Users and Departments for modals
+    // Load Available Users and Departments for modals & My Effective Permissions
     const loadDirectoryUsers = async () => {
         try {
             setLoadingUsers(true);
-            const [usersRes, deptRes] = await Promise.all([
+            const [usersRes, deptRes, permRes] = await Promise.all([
                 getAvailableUsersForChat(),
-                getDepartments(false, activeCompanyId)
+                getDepartments(false, activeCompanyId),
+                getMyChatPermissions().catch(() => null)
             ]);
             if (usersRes.data?.success) setAvailableUsers(usersRes.data.users || []);
             if (deptRes.data?.success) setDepartments(deptRes.data.departments || []);
+            if (permRes?.data?.success && permRes.data.permissions) {
+                setMyChatPermissions(permRes.data.permissions);
+            }
         } catch (err) {
             console.error("Error loading chat directory:", err);
         } finally {
             setLoadingUsers(false);
         }
+    };
+
+    // Helper to format full file URL
+    const getFullFileUrl = (url) => {
+        if (!url) return "";
+        if (url.startsWith("http://") || url.startsWith("https://")) return url;
+        const apiBase = import.meta.env.VITE_API_URL
+            ? import.meta.env.VITE_API_URL.replace("/api", "")
+            : "http://localhost:5000";
+        return `${apiBase}${url.startsWith("/") ? "" : "/"}${url}`;
+    };
+
+    // Helper to check if file is an image
+    const isImageFile = (fileName, mime) => {
+        if (mime && mime.startsWith("image/")) return true;
+        if (!fileName) return false;
+        return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fileName);
+    };
+
+    // Helper to check if file is a PDF
+    const isPdfFile = (fileName, mime) => {
+        if (mime === "application/pdf") return true;
+        if (!fileName) return false;
+        return /\.pdf$/i.test(fileName);
+    };
+
+    // Helper to get specialized file type icon
+    const getFileIcon = (fileName) => {
+        if (!fileName) return "fa-solid fa-file-lines text-slate-400";
+        const ext = fileName.split(".").pop().toLowerCase();
+        if (["pdf"].includes(ext)) return "fa-solid fa-file-pdf text-rose-500";
+        if (["xlsx", "xls", "csv", "tsv"].includes(ext)) return "fa-solid fa-file-excel text-emerald-600";
+        if (["docx", "doc"].includes(ext)) return "fa-solid fa-file-word text-blue-600";
+        if (["pptx", "ppt"].includes(ext)) return "fa-solid fa-file-powerpoint text-orange-600";
+        if (["xml", "json", "html", "sql", "js", "ts", "py"].includes(ext)) return "fa-solid fa-file-code text-amber-600";
+        if (["mp4", "webm", "mov"].includes(ext)) return "fa-solid fa-file-video text-purple-600";
+        if (["mp3", "wav", "ogg"].includes(ext)) return "fa-solid fa-file-audio text-purple-600";
+        if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) return "fa-solid fa-file-zipper text-yellow-600";
+        return "fa-solid fa-file-lines text-slate-500";
+    };
+
+    // Open file in in-app preview
+    const handleOpenFilePreview = (msg) => {
+        const fullUrl = getFullFileUrl(msg.file_url);
+        setPreviewFile({
+            url: fullUrl,
+            name: msg.file_name || "Attachment",
+            size: msg.file_size,
+            mime: msg.file_mime,
+            isImage: isImageFile(msg.file_name, msg.file_mime),
+            isPdf: isPdfFile(msg.file_name, msg.file_mime)
+        });
     };
 
     // Active conversation object
@@ -244,6 +551,20 @@ export default function ChatPage() {
         };
     };
 
+    // Total Unread Messages Count across all conversations
+    const totalUnreadCount = useMemo(() => {
+        return conversations.reduce((acc, c) => acc + (Number(c.unread_count) || 0), 0);
+    }, [conversations]);
+
+    // Keep page title in sync with total unread messages
+    useEffect(() => {
+        if (totalUnreadCount > 0) {
+            document.title = `(${totalUnreadCount}) Messages - Interlink`;
+        } else {
+            document.title = "Chat & Messaging - Interlink";
+        }
+    }, [totalUnreadCount]);
+
     // Filter conversations
     const filteredConversations = useMemo(() => {
         return conversations.filter(c => {
@@ -256,10 +577,10 @@ export default function ChatPage() {
             if (filterCategory === "DIRECT") return c.type === "DIRECT";
             if (filterCategory === "GROUP") return c.type === "GROUP";
             if (filterCategory === "BROADCAST") return c.type === "BROADCAST";
-            if (filterCategory === "UNREAD") return c.unread_count > 0;
+            if (filterCategory === "UNREAD") return Number(c.unread_count) > 0 || c.id === selectedConvId;
             return true;
         });
-    }, [conversations, searchQuery, filterCategory]);
+    }, [conversations, searchQuery, filterCategory, selectedConvId]);
 
     // Handle Tab Filter Selection & Sync Active Conversation
     const handleSelectFilter = (category) => {
@@ -268,7 +589,7 @@ export default function ChatPage() {
             if (category === "DIRECT") return c.type === "DIRECT";
             if (category === "GROUP") return c.type === "GROUP";
             if (category === "BROADCAST") return c.type === "BROADCAST";
-            if (category === "UNREAD") return c.unread_count > 0;
+            if (category === "UNREAD") return Number(c.unread_count) > 0 || c.id === selectedConvId;
             return true;
         });
 
@@ -289,18 +610,61 @@ export default function ChatPage() {
 
         setSending(true);
         try {
+            const isAnnouncement = Boolean(isAnnouncementMode && announcementTitle.trim());
             const res = await postChatMessage(selectedConvId, {
                 messageText: trimmed,
-                isAnnouncement: activeConv?.type === "BROADCAST"
+                isAnnouncement,
+                announcementTitle: isAnnouncement ? announcementTitle.trim() : null,
+                announcementExpiry: (isAnnouncement && announcementExpiry) ? announcementExpiry : null,
+                mentions: mentionedUserIds.length > 0 ? mentionedUserIds : null
             }, selectedFile);
 
             if (res.data?.success && res.data.message) {
-                setMessages(prev => [...prev, res.data.message]);
+                const newMsg = res.data.message;
+                // Ensure no duplicate addition if socket also broadcasts to sender
+                setMessages(prev => {
+                    if (prev.some(m => String(m.id) === String(newMsg.id))) return prev;
+                    return [...prev, newMsg];
+                });
                 setMessageText("");
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = "42px";
+                }
                 setSelectedFile(null);
+                setAnnouncementTitle("");
+                setAnnouncementExpiry("");
+                setIsAnnouncementMode(false);
+                setMentionedUserIds([]);
+                setShowMentionDropdown(false);
                 if (fileInputRef.current) fileInputRef.current.value = "";
                 // Stop typing emission
                 socketRef.current?.emit("stop_typing", { conversationId: selectedConvId });
+
+                // Update conversations roster and bump active conversation to top
+                setConversations(prev => {
+                    const updated = prev.map(c => {
+                        if (String(c.id) === String(selectedConvId)) {
+                            return {
+                                ...c,
+                                last_message_id: newMsg.id,
+                                last_message_text: newMsg.message_text,
+                                last_message_type: newMsg.message_type,
+                                last_message_time: newMsg.created_at,
+                                last_message_sender_name: user.name || "Me",
+                                unread_count: 0
+                            };
+                        }
+                        return c;
+                    });
+                    return [...updated].sort((a, b) => {
+                        if (a.is_pinned !== b.is_pinned) return b.is_pinned ? 1 : -1;
+                        if (String(a.id) === String(selectedConvId)) return -1;
+                        if (String(b.id) === String(selectedConvId)) return 1;
+                        const timeA = a.last_message_time ? new Date(a.last_message_time).getTime() : 0;
+                        const timeB = b.last_message_time ? new Date(b.last_message_time).getTime() : 0;
+                        return timeB - timeA;
+                    });
+                });
             }
         } catch (err) {
             console.error("Send message error:", err);
@@ -310,9 +674,80 @@ export default function ChatPage() {
         }
     };
 
-    // Typing Event Trigger
+    // Fetch Channel Participants
+    const fetchParticipants = useCallback(async () => {
+        if (!selectedConvId || !activeConv || activeConv.type === "DIRECT") return;
+        try {
+            setLoadingParticipants(true);
+            const res = await getChannelParticipants(selectedConvId);
+            if (res.data?.success) {
+                setChannelParticipants(res.data.participants || []);
+            }
+        } catch (err) {
+            console.error("Error loading participants:", err);
+        } finally {
+            setLoadingParticipants(false);
+        }
+    }, [selectedConvId, activeConv]);
+
+    useEffect(() => {
+        if (showDetailsPanel && activeConv && activeConv.type !== "DIRECT") {
+            fetchParticipants();
+        }
+    }, [showDetailsPanel, selectedConvId, activeConv, fetchParticipants]);
+
+    const handleAddMember = async (e) => {
+        if (e) e.preventDefault();
+        if (!selectedNewMemberId) {
+            toast.error("Please select a colleague to add");
+            return;
+        }
+        try {
+            const res = await addChannelParticipant(selectedConvId, selectedNewMemberId, "MEMBER");
+            if (res.data?.success) {
+                toast.success("Member added to channel");
+                setSelectedNewMemberId("");
+                setIsAddMemberOpen(false);
+                fetchParticipants();
+                fetchConversationsList();
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to add member");
+        }
+    };
+
+    const handleRemoveMember = async (memberUserId, memberName) => {
+        if (!window.confirm(`Are you sure you want to remove ${memberName || "this user"} from this channel?`)) return;
+        try {
+            const res = await removeChannelParticipant(selectedConvId, memberUserId);
+            if (res.data?.success) {
+                toast.success("Member removed from channel");
+                fetchParticipants();
+                fetchConversationsList();
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to remove member");
+        }
+    };
+
+    // Typing Event & Mention Detection Trigger
     const handleTextChange = (e) => {
-        setMessageText(e.target.value);
+        const val = e.target.value;
+        setMessageText(val);
+        adjustTextareaHeight();
+
+        // Detect mention trigger '@'
+        const cursor = e.target.selectionStart ?? val.length;
+        const textBeforeCursor = val.slice(0, cursor);
+        const match = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_]*)$/);
+
+        if (match) {
+            setMentionQuery(match[1]);
+            setShowMentionDropdown(true);
+        } else {
+            setShowMentionDropdown(false);
+        }
+
         if (socketRef.current && selectedConvId) {
             socketRef.current.emit("typing", {
                 conversationId: selectedConvId,
@@ -321,18 +756,103 @@ export default function ChatPage() {
         }
     };
 
+    // Select candidate from @mention dropdown
+    const handleSelectMention = (candidate) => {
+        const textBefore = messageText;
+        const updated = textBefore.replace(/(?:^|\s)@([a-zA-Z0-9_]*)$/, (match) => {
+            const prefix = match.startsWith(" ") ? " " : "";
+            return `${prefix}@${candidate.name} `;
+        });
+        setMessageText(updated);
+        setMentionedUserIds(prev => [...new Set([...prev, candidate.user_id || candidate.id])]);
+        setShowMentionDropdown(false);
+        setTimeout(adjustTextareaHeight, 0);
+    };
+
     // Reaction Toggle
     const handleReaction = async (messageId, emoji) => {
         try {
             const res = await toggleReaction(messageId, emoji, selectedConvId);
             if (res.data?.success) {
+                const reactions = res.data.reactions;
                 setMessages(prev => prev.map(m => {
-                    if (m.id === messageId) return { ...m, reactions: res.data.reactions };
+                    if (String(m.id) === String(messageId)) return { ...m, reactions };
                     return m;
                 }));
             }
         } catch (err) {
             console.error("Reaction error:", err);
+        }
+    };
+
+    // Edit Message Handler
+    const handleEditMessage = async (msg) => {
+        const newText = window.prompt("Edit message:", msg.message_text);
+        if (newText === null || !newText.trim() || newText.trim() === msg.message_text) return;
+        try {
+            const res = await editChatMessage(msg.id, newText.trim());
+            if (res.data?.success) {
+                toast.success("Message edited");
+                setMessages(prev => prev.map(m => String(m.id) === String(msg.id) ? { ...m, message_text: newText.trim(), is_edited: true } : m));
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to edit message");
+        }
+    };
+
+    // Delete Message Handler
+    const handleDeleteMessage = async (msg) => {
+        if (!window.confirm("Are you sure you want to delete this message?")) return;
+        try {
+            const res = await deleteChatMessage(msg.id);
+            if (res.data?.success) {
+                toast.success("Message deleted");
+                setMessages(prev => prev.map(m => String(m.id) === String(msg.id) ? { ...m, is_deleted: true, message_text: "This message was deleted", file_url: null, file_name: null } : m));
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to delete message");
+        }
+    };
+
+    // Toggle Pin Message Handler
+    const handleTogglePinMessage = async (msg) => {
+        try {
+            const res = await togglePinChatMessage(msg.id);
+            if (res.data?.success) {
+                const nextPinned = res.data.result?.isPinned ?? !msg.is_pinned;
+                toast.success(nextPinned ? "Message pinned" : "Message unpinned");
+                setMessages(prev => prev.map(m => String(m.id) === String(msg.id) ? { ...m, is_pinned: nextPinned } : m));
+            }
+        } catch (err) {
+            toast.error("Failed to pin message");
+        }
+    };
+
+    // Acknowledge Announcement Handler
+    const handleAcknowledge = async (msg) => {
+        try {
+            const res = await acknowledgeAnnouncement(msg.id);
+            if (res.data?.success) {
+                toast.success("Announcement acknowledged");
+                const ackCount = res.data.result?.ackCount ?? ((msg.ack_count || 0) + 1);
+                setMessages(prev => prev.map(m => String(m.id) === String(msg.id) ? { ...m, ack_count: ackCount } : m));
+            }
+        } catch (err) {
+            toast.error("Failed to acknowledge announcement");
+        }
+    };
+
+    // Report Message Handler
+    const handleReportMessage = async (msg) => {
+        const reason = window.prompt("Reason for reporting this message:");
+        if (!reason || !reason.trim()) return;
+        try {
+            const res = await reportChatMessage(msg.id, reason.trim());
+            if (res.data?.success) {
+                toast.success("Report submitted to administrators for review");
+            }
+        } catch (err) {
+            toast.error("Failed to submit report");
         }
     };
 
@@ -511,18 +1031,25 @@ export default function ChatPage() {
                             { key: "DIRECT", label: "Direct" },
                             { key: "GROUP", label: "Groups" },
                             { key: "BROADCAST", label: "Broadcasts" },
-                            { key: "UNREAD", label: "Unread" }
+                            { key: "UNREAD", label: "Unread", count: totalUnreadCount }
                         ].map(tab => (
                             <button
                                 key={tab.key}
                                 onClick={() => handleSelectFilter(tab.key)}
-                                className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer ${
+                                className={`px-2.5 py-1 rounded-lg transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
                                     filterCategory === tab.key
                                         ? "bg-[#17365D] text-white shadow-xs"
                                         : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                                 }`}
                             >
-                                {tab.label}
+                                <span>{tab.label}</span>
+                                {tab.count > 0 && (
+                                    <span className={`px-1.5 py-0.2 text-[9px] font-extrabold rounded-full ${
+                                        filterCategory === tab.key ? "bg-rose-500 text-white" : "bg-rose-500 text-white"
+                                    }`}>
+                                        {tab.count}
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>
@@ -537,7 +1064,25 @@ export default function ChatPage() {
                         </div>
                     ) : filteredConversations.length === 0 ? (
                         <div className="p-6 text-center text-slate-400 flex flex-col items-center justify-center gap-3 my-auto">
-                            {filterCategory === "GROUP" ? (
+                            {filterCategory === "UNREAD" ? (
+                                <>
+                                    <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center text-xl shadow-xs">
+                                        <i className="fa-solid fa-check-double"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-700">You're All Caught Up!</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mt-1 leading-relaxed">
+                                            No unread messages across your direct chats, groups, or announcements.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleSelectFilter("ALL")}
+                                        className="mt-1 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all cursor-pointer"
+                                    >
+                                        View All Conversations
+                                    </button>
+                                </>
+                            ) : filterCategory === "GROUP" ? (
                                 <>
                                     <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center text-xl shadow-xs">
                                         <i className="fa-solid fa-users"></i>
@@ -748,16 +1293,55 @@ export default function ChatPage() {
                             {/* Header Actions */}
                             <div className="flex items-center gap-2">
                                 <button
+                                    onClick={() => {
+                                        setShowSearchInChat(!showSearchInChat);
+                                        if (showSearchInChat) setChatMessageSearch("");
+                                    }}
+                                    className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                                        showSearchInChat ? "bg-blue-50 text-[#2878C7] border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                                    }`}
+                                    title="Search Messages"
+                                >
+                                    <i className="fa-solid fa-magnifying-glass text-sm"></i>
+                                </button>
+                                <button
                                     onClick={() => setShowDetailsPanel(!showDetailsPanel)}
                                     className={`p-2 rounded-xl border transition-colors cursor-pointer ${
                                         showDetailsPanel ? "bg-blue-50 text-[#2878C7] border-blue-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                                     }`}
-                                    title="Channel Info & Shared Files"
+                                    title="Channel Info & Members"
                                 >
                                     <i className="fa-solid fa-circle-info text-sm"></i>
                                 </button>
                             </div>
                         </div>
+
+                        {/* In-Chat Message Search Bar */}
+                        {showSearchInChat && (
+                            <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center gap-3">
+                                <i className="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+                                <input
+                                    type="text"
+                                    value={chatMessageSearch}
+                                    onChange={(e) => setChatMessageSearch(e.target.value)}
+                                    placeholder="Filter messages in this conversation by keyword..."
+                                    className="flex-1 text-xs outline-none bg-transparent text-slate-700 placeholder:text-slate-400 font-medium"
+                                    autoFocus
+                                />
+                                {chatMessageSearch && (
+                                    <span className="text-[11px] font-bold text-[#2878C7] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                                        {messages.filter(m => (m.message_text || "").toLowerCase().includes(chatMessageSearch.toLowerCase()) || (m.file_name || "").toLowerCase().includes(chatMessageSearch.toLowerCase())).length} found
+                                    </span>
+                                )}
+                                <button
+                                    onClick={() => { setShowSearchInChat(false); setChatMessageSearch(""); }}
+                                    className="text-slate-400 hover:text-slate-600 text-xs p-1"
+                                    title="Close Search"
+                                >
+                                    <i className="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        )}
 
                         {/* Broadcast Notice Banner (if admin-only) */}
                         {activeConv.is_admin_only && (
@@ -792,14 +1376,17 @@ export default function ChatPage() {
                                     </p>
                                 </div>
                             ) : (
-                                messages.map((msg) => {
+                                (chatMessageSearch
+                                    ? messages.filter(m => (m.message_text || "").toLowerCase().includes(chatMessageSearch.toLowerCase()) || (m.file_name || "").toLowerCase().includes(chatMessageSearch.toLowerCase()))
+                                    : messages
+                                ).map((msg) => {
                                     const isMine = msg.sender_id === user.id;
                                     const reactions = typeof msg.reactions === "string" ? JSON.parse(msg.reactions || "{}") : (msg.reactions || {});
 
                                     return (
                                         <div
                                             key={msg.id}
-                                            className={`flex items-end gap-2.5 ${isMine ? "justify-end" : "justify-start"}`}
+                                            className={`flex items-end gap-2.5 group/msg ${isMine ? "justify-end" : "justify-start"}`}
                                         >
                                             {/* Incoming Avatar */}
                                             {!isMine && (
@@ -830,39 +1417,90 @@ export default function ChatPage() {
                                                 >
                                                     {/* File Attachment Card */}
                                                     {msg.file_url && (
-                                                        <div className={`mb-2 p-2.5 rounded-xl border flex items-center gap-2.5 ${
-                                                            isMine ? "bg-white/10 border-white/20 text-white" : "bg-slate-50 border-slate-200 text-slate-800"
-                                                        }`}>
-                                                            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-sm shrink-0">
-                                                                <i className="fa-solid fa-file-arrow-down"></i>
-                                                            </div>
-                                                            <div className="min-w-0 flex-1">
-                                                                <a
-                                                                    href={msg.file_url}
-                                                                    target="_blank"
-                                                                    rel="noreferrer"
-                                                                    className="font-bold underline truncate block hover:opacity-80 text-xs"
+                                                        <div className="mb-2">
+                                                            {isImageFile(msg.file_name, msg.file_mime) ? (
+                                                                <div className="rounded-xl overflow-hidden border border-black/10 group/img relative cursor-pointer" onClick={() => handleOpenFilePreview(msg)}>
+                                                                    <img
+                                                                        src={getFullFileUrl(msg.file_url)}
+                                                                        alt={msg.file_name || "Attachment"}
+                                                                        className="max-h-60 max-w-full rounded-xl object-cover hover:opacity-95 transition-opacity"
+                                                                        loading="lazy"
+                                                                    />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white">
+                                                                        <span className="px-3 py-1.5 rounded-lg bg-black/60 text-xs font-semibold backdrop-blur-xs flex items-center gap-1.5">
+                                                                            <i className="fa-solid fa-expand"></i> In-App View
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div
+                                                                    onClick={() => handleOpenFilePreview(msg)}
+                                                                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                                                                        isMine
+                                                                            ? "bg-white/10 border-white/20 text-white hover:bg-white/20"
+                                                                            : "bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100"
+                                                                    }`}
                                                                 >
-                                                                    {msg.file_name || "Attachment"}
-                                                                </a>
-                                                                {msg.file_size && (
-                                                                    <span className="text-[10px] opacity-75">
-                                                                        {(msg.file_size / 1024).toFixed(1)} KB
+                                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                                        <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-sm shrink-0">
+                                                                            <i className={getFileIcon(msg.file_name)}></i>
+                                                                        </div>
+                                                                        <div className="min-w-0">
+                                                                            <span className="font-bold truncate block text-xs">
+                                                                                {msg.file_name || "Attachment"}
+                                                                            </span>
+                                                                            {msg.file_size && (
+                                                                                <span className="text-[10px] opacity-75">
+                                                                                    {(msg.file_size / 1024).toFixed(1)} KB
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md shrink-0 flex items-center gap-1 ${
+                                                                        isMine ? "bg-white/20 text-white" : "bg-blue-50 text-[#0056cf]"
+                                                                    }`}>
+                                                                        <i className="fa-solid fa-eye text-[9px]"></i> View
                                                                     </span>
-                                                                )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Announcement Title & Priority Banner (Only when explicit announcement) */}
+                                                    {Boolean(msg.is_announcement) && Boolean(msg.announcement_title) && (
+                                                        <div className="mb-2 pb-1.5 border-b border-amber-200/70 flex items-center justify-between gap-2 text-xs">
+                                                            <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                                                                <i className="fa-solid fa-bullhorn text-amber-600 text-[11px]"></i>
+                                                                <span>{msg.announcement_title}</span>
                                                             </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleAcknowledge(msg)}
+                                                                className="px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 font-bold text-[10px] transition-colors cursor-pointer shrink-0 flex items-center gap-1"
+                                                                title="Acknowledge announcement"
+                                                            >
+                                                                <span>✓ Acknowledge</span>
+                                                                {msg.ack_count > 0 && <span>({msg.ack_count})</span>}
+                                                            </button>
                                                         </div>
                                                     )}
 
                                                     {/* Message Text */}
                                                     {msg.message_text && (
-                                                        <p className="whitespace-pre-wrap select-text">{msg.message_text}</p>
+                                                        <p className={`whitespace-pre-wrap select-text ${msg.is_deleted ? "italic opacity-70" : ""}`}>
+                                                            {msg.is_deleted ? msg.message_text : renderMessageContent(msg.message_text, isMine)}
+                                                            {msg.is_edited && !msg.is_deleted && (
+                                                                <span className="ml-1.5 text-[9px] opacity-75">(edited)</span>
+                                                            )}
+                                                        </p>
                                                     )}
 
                                                     {/* Timestamp & Status */}
-                                                    <div className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
+                                                    <div className={`flex items-center justify-end gap-1.5 mt-1 text-[10px] ${
                                                         isMine ? "text-white/80" : "text-slate-400"
                                                     }`}>
+                                                        {msg.is_pinned && <i className="fa-solid fa-thumbtack text-[9px] text-amber-400"></i>}
                                                         <span>{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                         {isMine && <i className="fa-solid fa-check-double text-[9px]"></i>}
                                                     </div>
@@ -888,18 +1526,64 @@ export default function ChatPage() {
                                                     </div>
                                                 )}
 
-                                                {/* Quick Emoji Reaction Buttons on Hover */}
-                                                <div className="flex items-center gap-1 opacity-0 hover:opacity-100 transition-opacity text-slate-400 text-xs px-1">
-                                                    {["👍", "❤️", "👏", "🎉"].map(em => (
+                                                {/* Quick Emoji Reaction Buttons on Hover & Message Actions */}
+                                                {!msg.is_deleted && (
+                                                    <div className="flex items-center gap-1.5 opacity-0 group-hover/msg:opacity-100 transition-opacity text-slate-400 text-xs px-1">
+                                                        {["👍", "❤️", "👏", "🎉"].map(em => (
+                                                            <button
+                                                                key={em}
+                                                                onClick={() => handleReaction(msg.id, em)}
+                                                                className="hover:scale-125 transition-transform cursor-pointer"
+                                                            >
+                                                                {em}
+                                                            </button>
+                                                        ))}
+
+                                                        <span className="text-slate-200">|</span>
+
+                                                        {/* Pin Message */}
                                                         <button
-                                                            key={em}
-                                                            onClick={() => handleReaction(msg.id, em)}
-                                                            className="hover:scale-125 transition-transform cursor-pointer"
+                                                            onClick={() => handleTogglePinMessage(msg)}
+                                                            className="hover:text-amber-500 transition-colors cursor-pointer"
+                                                            title={msg.is_pinned ? "Unpin message" : "Pin message"}
                                                         >
-                                                            {em}
+                                                            <i className={`fa-solid fa-thumbtack ${msg.is_pinned ? "text-amber-500" : ""}`}></i>
                                                         </button>
-                                                    ))}
-                                                </div>
+
+                                                        {/* Edit Message (if author) */}
+                                                        {isMine && (
+                                                            <button
+                                                                onClick={() => handleEditMessage(msg)}
+                                                                className="hover:text-blue-500 transition-colors cursor-pointer"
+                                                                title="Edit message"
+                                                            >
+                                                                <i className="fa-solid fa-pencil text-[10px]"></i>
+                                                            </button>
+                                                        )}
+
+                                                        {/* Delete Message (if author or admin) */}
+                                                        {(isMine || isAdmin) && (
+                                                            <button
+                                                                onClick={() => handleDeleteMessage(msg)}
+                                                                className="hover:text-red-500 transition-colors cursor-pointer"
+                                                                title="Delete message"
+                                                            >
+                                                                <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                            </button>
+                                                        )}
+
+                                                        {/* Report Message */}
+                                                        {!isMine && (
+                                                            <button
+                                                                onClick={() => handleReportMessage(msg)}
+                                                                className="hover:text-amber-600 transition-colors cursor-pointer"
+                                                                title="Report message"
+                                                            >
+                                                                <i className="fa-solid fa-flag text-[10px]"></i>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -917,6 +1601,43 @@ export default function ChatPage() {
                                 </div>
                             ) : (
                                 <form onSubmit={handleSendMessage} className="space-y-2">
+                                    {/* Announcement Details (Title & Expiry) - Only shown when user toggles announcement */}
+                                    {isAnnouncementMode && (
+                                        <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2 animate-in fade-in">
+                                            <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                                                <span className="flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-bullhorn text-amber-600"></i>
+                                                    Official Announcement Composer
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setIsAnnouncementMode(false); setAnnouncementTitle(""); setAnnouncementExpiry(""); }}
+                                                    className="text-amber-600 hover:text-amber-800 text-[10px] cursor-pointer"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={announcementTitle}
+                                                    onChange={(e) => setAnnouncementTitle(e.target.value)}
+                                                    placeholder="Announcement Headline / Title (required)..."
+                                                    className="w-full px-3 py-1.5 rounded-lg border border-amber-200 bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                                />
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-[10px] font-bold text-amber-800 shrink-0">Expiry Date:</span>
+                                                    <input
+                                                        type="date"
+                                                        value={announcementExpiry}
+                                                        onChange={(e) => setAnnouncementExpiry(e.target.value)}
+                                                        className="w-full px-2.5 py-1 rounded-lg border border-amber-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Selected File Badge */}
                                     {selectedFile && (
                                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-[#2878C7] font-semibold">
@@ -925,7 +1646,7 @@ export default function ChatPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => { setSelectedFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
-                                                className="text-slate-400 hover:text-red-500"
+                                                className="text-slate-400 hover:text-red-500 cursor-pointer"
                                             >
                                                 <i className="fa-solid fa-xmark"></i>
                                             </button>
@@ -948,6 +1669,33 @@ export default function ChatPage() {
                                             title="Attach File / Document"
                                         >
                                             <i className="fa-solid fa-paperclip text-sm"></i>
+                                        </button>
+
+                                        {(isAdmin || activeConv?.user_role === "ADMIN" || activeConv?.type === "BROADCAST") && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsAnnouncementMode(!isAnnouncementMode)}
+                                                className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
+                                                    isAnnouncementMode ? "bg-amber-100 text-amber-700" : "text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+                                                }`}
+                                                title="Make this an official announcement with headline & acknowledgement"
+                                            >
+                                                <i className="fa-solid fa-bullhorn text-sm"></i>
+                                            </button>
+                                        )}
+
+                                        {/* @Mention Trigger Button */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setMessageText(prev => prev + (prev.endsWith(" ") || prev === "" ? "@" : " @"));
+                                                setShowMentionDropdown(true);
+                                                setMentionQuery("");
+                                            }}
+                                            className="p-2.5 rounded-xl text-slate-400 hover:text-[#2878C7] hover:bg-blue-50 transition-colors cursor-pointer"
+                                            title="Mention a colleague (@)"
+                                        >
+                                            <i className="fa-solid fa-at text-sm"></i>
                                         </button>
 
                                         <div className="relative">
@@ -976,19 +1724,53 @@ export default function ChatPage() {
                                             )}
                                         </div>
 
-                                        <textarea
-                                            rows={1}
-                                            value={messageText}
-                                            onChange={handleTextChange}
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter" && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    handleSendMessage();
-                                                }
-                                            }}
-                                            placeholder={`Message ${activeDisplay.name}... (Press Enter to send)`}
-                                            className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7] text-xs sm:text-sm resize-none placeholder:text-slate-400 font-medium"
-                                        />
+                                        <div className="relative flex-1">
+                                            {/* @Mention Autocomplete Dropdown */}
+                                            {showMentionDropdown && mentionCandidates.length > 0 && (
+                                                <div className="absolute bottom-full mb-2 left-0 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95">
+                                                    <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+                                                        <span>Mention Colleague</span>
+                                                        <span className="text-slate-300">Click to tag</span>
+                                                    </div>
+                                                    <div className="max-h-44 overflow-y-auto divide-y divide-slate-50">
+                                                        {mentionCandidates.map(c => (
+                                                            <button
+                                                                key={c.id || c.user_id}
+                                                                type="button"
+                                                                onClick={() => handleSelectMention(c)}
+                                                                className="w-full px-2.5 py-1.5 text-left flex items-center gap-2.5 hover:bg-blue-50/70 rounded-xl transition-colors cursor-pointer"
+                                                            >
+                                                                <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#2878C7] flex items-center justify-center font-bold text-xs shrink-0">
+                                                                    {(c.name || "U").charAt(0).toUpperCase()}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <span className="font-bold text-xs text-slate-800 block truncate">{c.name}</span>
+                                                                    <span className="text-[10px] text-slate-400 block truncate">
+                                                                        @{c.username || c.name.toLowerCase().replace(/\s+/g, '')} {c.department_name ? `• ${c.department_name}` : ""}
+                                                                    </span>
+                                                                </div>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <textarea
+                                                ref={textareaRef}
+                                                rows={1}
+                                                value={messageText}
+                                                onChange={handleTextChange}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter" && !e.shiftKey) {
+                                                        e.preventDefault();
+                                                        handleSendMessage();
+                                                    }
+                                                }}
+                                                placeholder={`Message ${activeDisplay.name}... (Type @ to tag, Shift+Enter for new line)`}
+                                                className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7] text-xs sm:text-sm resize-none placeholder:text-slate-400 font-medium max-h-40 overflow-y-auto transition-all"
+                                                style={{ minHeight: "42px" }}
+                                            />
+                                        </div>
 
                                         <button
                                             type="submit"
@@ -1125,20 +1907,150 @@ export default function ChatPage() {
                             ) : (
                                 <div className="space-y-2">
                                     {messages.filter(m => m.file_url).map(f => (
-                                        <a
+                                        <button
                                             key={f.id}
-                                            href={f.file_url}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="p-2 rounded-xl border border-slate-200/80 hover:bg-slate-50 flex items-center gap-2.5 transition-colors"
+                                            type="button"
+                                            onClick={() => handleOpenFilePreview(f)}
+                                            className="w-full text-left p-2 rounded-xl border border-slate-200/80 hover:bg-slate-50 flex items-center justify-between gap-2.5 transition-colors cursor-pointer"
                                         >
-                                            <i className="fa-solid fa-file-lines text-[#2878C7]"></i>
-                                            <span className="truncate flex-1 font-semibold text-slate-700">{f.file_name || "Document"}</span>
-                                        </a>
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                {isImageFile(f.file_name, f.file_mime) ? (
+                                                    <i className="fa-solid fa-image text-emerald-600 shrink-0"></i>
+                                                ) : isPdfFile(f.file_name, f.file_mime) ? (
+                                                    <i className="fa-solid fa-file-pdf text-rose-500 shrink-0"></i>
+                                                ) : (
+                                                    <i className="fa-solid fa-file-lines text-[#2878C7] shrink-0"></i>
+                                                )}
+                                                <span className="truncate font-semibold text-slate-700 text-xs">{f.file_name || "Document"}</span>
+                                            </div>
+                                            <span className="text-[10px] text-blue-600 font-bold shrink-0">Preview</span>
+                                        </button>
                                     ))}
                                 </div>
                             )}
                         </div>
+
+                        {/* Channel Members Section (for Group & Broadcast Channels) */}
+                        {activeConv.type !== "DIRECT" && (
+                            <div className="pt-2 border-t border-slate-100 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <h6 className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">
+                                        Channel Members ({channelParticipants.length})
+                                    </h6>
+                                    {(isAdmin || activeConv.user_role === "ADMIN" || activeConv.created_by === user.id) && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsAddMemberOpen(!isAddMemberOpen)}
+                                            className="px-2 py-0.5 rounded-md bg-blue-50 text-[#2878C7] hover:bg-blue-100 font-bold text-[10px] transition-colors cursor-pointer flex items-center gap-1"
+                                        >
+                                            <i className="fa-solid fa-user-plus text-[9px]"></i>
+                                            <span>Add</span>
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Add Member Drawer */}
+                                {isAddMemberOpen && (
+                                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                                        <label className="text-[10px] font-bold text-slate-600 block">
+                                            Select Colleague to Add
+                                        </label>
+                                        <select
+                                            value={selectedNewMemberId}
+                                            onChange={(e) => setSelectedNewMemberId(e.target.value)}
+                                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#2878C7]"
+                                        >
+                                            <option value="">-- Choose Colleague --</option>
+                                            {availableUsers
+                                                .filter(u => !channelParticipants.some(p => p.user_id === u.id))
+                                                .map(u => (
+                                                    <option key={u.id} value={u.id}>
+                                                        {u.name} ({u.department_name || "General"})
+                                                    </option>
+                                                ))
+                                            }
+                                        </select>
+                                        <div className="flex justify-end gap-1.5 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => { setIsAddMemberOpen(false); setSelectedNewMemberId(""); }}
+                                                className="px-2.5 py-1 rounded-lg text-slate-500 hover:bg-slate-200 font-bold text-[10px] cursor-pointer"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleAddMember}
+                                                disabled={!selectedNewMemberId}
+                                                className="px-3 py-1 rounded-lg bg-[#2878C7] hover:bg-[#1e63a8] text-white font-bold text-[10px] transition-all disabled:opacity-50 cursor-pointer"
+                                            >
+                                                Add Member
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Participants List */}
+                                {loadingParticipants ? (
+                                    <div className="py-4 text-center text-slate-400 text-xs">
+                                        <i className="fa-solid fa-spinner fa-spin mr-1"></i> Loading members...
+                                    </div>
+                                ) : channelParticipants.length === 0 ? (
+                                    <p className="text-slate-400 italic text-[11px]">No participants found.</p>
+                                ) : (
+                                    <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                                        {channelParticipants.map(p => {
+                                            const canRemove = (isAdmin || activeConv.user_role === "ADMIN" || activeConv.created_by === user.id) && p.user_id !== user.id;
+                                            return (
+                                                <div
+                                                    key={p.user_id}
+                                                    className="flex items-center justify-between p-1.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#2878C7] flex items-center justify-center font-bold text-[11px] shrink-0">
+                                                            {p.name ? p.name.charAt(0).toUpperCase() : "U"}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="font-semibold text-slate-800 text-xs truncate max-w-[120px]">
+                                                                    {p.name}
+                                                                </span>
+                                                                {p.user_id === user.id && (
+                                                                    <span className="text-[9px] font-bold text-slate-400">(You)</span>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-[10px] text-slate-400 block truncate">
+                                                                {p.department_name || p.role}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                                            p.role === "ADMIN"
+                                                                ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                                                : "bg-slate-100 text-slate-600"
+                                                        }`}>
+                                                            {p.role}
+                                                        </span>
+                                                        {canRemove && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRemoveMember(p.user_id, p.name)}
+                                                                className="w-5 h-5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500 flex items-center justify-center transition-colors cursor-pointer"
+                                                                title="Remove member"
+                                                            >
+                                                                <i className="fa-solid fa-xmark text-xs"></i>
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -1416,6 +2328,15 @@ export default function ChatPage() {
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* ── Modal: In-App Full Feature Document & Media Viewer ───────────── */}
+            {previewFile && (
+                <FilePreviewModal
+                    file={previewFile}
+                    canDownload={canDownloadFiles}
+                    onClose={() => setPreviewFile(null)}
+                />
             )}
         </div>
     );
