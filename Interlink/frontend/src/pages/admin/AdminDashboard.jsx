@@ -49,6 +49,8 @@ export default function AdminDashboard() {
         username: "",
         email: "",
         mobNo: "",
+        designation: "",
+        departmentIds: [],
         departmentId: "",
         userTypeId: "",
         role: "user",
@@ -175,12 +177,20 @@ export default function AdminDashboard() {
             ? u.allowed_companies.map(c => String(c.id))
             : [String(u.company_id || activeCompanyId)];
 
+        const assignedDeptIds = (u.departments && u.departments.length > 0)
+            ? u.departments.map(d => String(d.id))
+            : (u.department_ids && u.department_ids.length > 0)
+                ? u.department_ids.map(String)
+                : (u.department_id ? [String(u.department_id)] : []);
+
         setEditForm({
             name: u.name || "",
             username: u.username || "",
             email: u.email || "",
             mobNo: u.mob_no || "",
-            departmentId: u.department_id ? String(u.department_id) : "",
+            designation: u.designation || "",
+            departmentIds: assignedDeptIds,
+            departmentId: assignedDeptIds[0] || "",
             userTypeId: u.user_type_id ? String(u.user_type_id) : "",
             role: u.role || "user",
             active: !!u.active,
@@ -189,6 +199,21 @@ export default function AdminDashboard() {
             companyIds: assignedCompIds
         });
         setIsEditModalOpen(true);
+    };
+
+    const handleToggleEditDepartment = (deptId) => {
+        const idStr = String(deptId);
+        setEditForm(prev => {
+            const exists = prev.departmentIds.includes(idStr);
+            const updated = exists
+                ? prev.departmentIds.filter(id => id !== idStr)
+                : [...prev.departmentIds, idStr];
+            return {
+                ...prev,
+                departmentIds: updated,
+                departmentId: updated[0] || ""
+            };
+        });
     };
 
     const handleToggleEditCompany = (companyId) => {
@@ -217,7 +242,9 @@ export default function AdminDashboard() {
                 username: editForm.username.trim(),
                 email: editForm.email.trim(),
                 mobNo: editForm.mobNo ? editForm.mobNo.trim() : null,
-                departmentId: editForm.departmentId ? parseInt(editForm.departmentId, 10) : null,
+                designation: editForm.designation ? editForm.designation.trim() : null,
+                departmentIds: editForm.departmentIds.map(Number),
+                departmentId: editForm.departmentIds[0] ? parseInt(editForm.departmentIds[0], 10) : null,
                 userTypeId: editForm.userTypeId ? parseInt(editForm.userTypeId, 10) : null,
                 role: editForm.role,
                 active: editForm.active,
@@ -263,8 +290,15 @@ export default function AdminDashboard() {
         // },
         {
             key: 'name', label: 'Full Name', render: (row) => (
-                <span className="text-sm text-slate-600">
+                <span className="text-sm text-slate-700 font-medium">
                     {row.name || '—'}
+                </span>
+            )
+        },
+        {
+            key: 'designation', label: 'Designation', render: (row) => (
+                <span className="text-sm text-slate-600">
+                    {row.designation || '—'}
                 </span>
             )
         },
@@ -291,17 +325,32 @@ export default function AdminDashboard() {
         },
         {
             key: 'department_name',
-            label: 'Department',
-            render: (row) => row.department_name ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-[#0056cf] border border-blue-200">
-                    <i className="fa-solid fa-sitemap text-[10px]"></i>
-                    {row.department_name}
-                </span>
-            ) : (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-400 italic">
-                    Unassigned
-                </span>
-            )
+            label: 'Department(s)',
+            render: (row) => {
+                const depts = (row.departments && row.departments.length > 0)
+                    ? row.departments
+                    : (row.department_name ? [{ id: row.department_id, name: row.department_name }] : []);
+                if (depts.length === 0) {
+                    return (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-400 italic">
+                            Unassigned
+                        </span>
+                    );
+                }
+                return (
+                    <div className="flex flex-wrap gap-1 max-w-[220px]">
+                        {depts.map((d) => (
+                            <span
+                                key={d.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-[#0056cf] border border-blue-200"
+                            >
+                                <i className="fa-solid fa-sitemap text-[9px]"></i>
+                                {d.name || d.department_name}
+                            </span>
+                        ))}
+                    </div>
+                );
+            }
         },
         {
             key: 'allowed_companies',
@@ -734,20 +783,15 @@ export default function AdminDashboard() {
 
                                     <div>
                                         <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                                            Assigned Department
+                                            Designation
                                         </label>
-                                        <select
-                                            value={editForm.departmentId}
-                                            onChange={(e) => setEditForm({ ...editForm, departmentId: e.target.value })}
-                                            className="w-full px-3 py-2 border border-slate-300 bg-white rounded-lg text-sm focus:ring-2 focus:ring-[#0056cf] focus:outline-none"
-                                        >
-                                            <option value="">None / Unassigned</option>
-                                            {departments.map((dept) => (
-                                                <option key={dept.id} value={dept.id}>
-                                                    {dept.department_name}
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <input
+                                            type="text"
+                                            value={editForm.designation}
+                                            onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })}
+                                            placeholder="e.g. Senior Software Engineer"
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[#0056cf] focus:outline-none"
+                                        />
                                     </div>
 
                                     <div>
@@ -793,6 +837,48 @@ export default function AdminDashboard() {
                                             placeholder="••••••••"
                                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-[#0056cf] focus:outline-none"
                                         />
+                                    </div>
+                                </div>
+
+                                {/* Department Multiple Selection Section */}
+                                <div className="space-y-2 pt-2 border-t border-slate-100">
+                                    <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                                            Assigned Departments
+                                        </label>
+                                        <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                            {editForm.departmentIds.length} {editForm.departmentIds.length === 1 ? "Department" : "Departments"} Selected
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500">
+                                        Select the department(s) this user belongs to.
+                                    </p>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-2 border border-slate-200 rounded-lg bg-slate-50/50">
+                                        {departments.length === 0 ? (
+                                            <p className="text-xs text-slate-400 italic py-1 col-span-full">No departments available</p>
+                                        ) : (
+                                            departments.map((dept) => {
+                                                const isChecked = editForm.departmentIds.includes(String(dept.id));
+                                                return (
+                                                    <label
+                                                        key={dept.id}
+                                                        className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                                                            isChecked
+                                                                ? "bg-blue-50/80 border-blue-300 text-slate-900 font-medium"
+                                                                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                                        }`}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={() => handleToggleEditDepartment(dept.id)}
+                                                            className="w-4 h-4 rounded text-[#0056cf] border-slate-300 focus:ring-[#0056cf]"
+                                                        />
+                                                        <span className="truncate">{dept.department_name}</span>
+                                                    </label>
+                                                );
+                                            })
+                                        )}
                                     </div>
                                 </div>
 
