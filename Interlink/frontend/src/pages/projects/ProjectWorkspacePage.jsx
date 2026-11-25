@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { getProjectById, createProjectBaseline } from "../../api/projectApi";
 import { getTasks, getTaskMetadata, updateTask, bulkUpdateTasks } from "../../api/taskApi";
+import { createInstantMeeting } from "../../api/meetingApi";
 import ProjectStateWrapper from "../../components/projects/ProjectStateWrapper";
 import ProjectHeader from "../../components/projects/ProjectHeader";
 import TaskListView from "../../components/tasks/TaskListView";
@@ -18,6 +19,23 @@ import ProjectReportView from "../../components/projects/ProjectReportView";
 export default function ProjectWorkspacePage() {
     const { id } = useParams();
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
+
+    const handleStartProjectMeeting = async () => {
+        if (!project) return;
+        try {
+            const res = await createInstantMeeting({
+                title: `${project.name} - Project Sync`,
+                project_id: project.id
+            });
+            if (res.data?.success && res.data.meeting) {
+                toast.success("Project meeting started!");
+                navigate(`/meetings/join/${res.data.meeting.room_code}`);
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to start meeting");
+        }
+    };
 
     // Active workspace tab
     const [activeTab, setActiveTab] = useState("tasks"); // 'overview' | 'tasks' | 'subprojects' | 'gantt' | 'milestones_risks' | 'workload' | 'documents' | 'report'
@@ -178,6 +196,7 @@ export default function ProjectWorkspacePage() {
                             onOpenCreateTask={() => setCreateTaskDrawerOpen(true)}
                             onOpenCreateMilestone={() => setActiveTab("milestones_risks")}
                             onOpenBaselineModal={handleFreezeBaseline}
+                            onStartMeeting={handleStartProjectMeeting}
                         />
 
                         {/* Navigation Filter / Workspace Tabs Bar: Full width, strictly equal spacing, clean typography without icons */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
     getTasks,
@@ -8,6 +8,7 @@ import {
     updateTask,
     bulkUpdateTasks
 } from "../../api/taskApi";
+import { createInstantMeeting } from "../../api/meetingApi";
 import TaskStateWrapper from "../../components/tasks/TaskStateWrapper";
 import TaskDashboardView from "../../components/tasks/TaskDashboardView";
 import TaskListView from "../../components/tasks/TaskListView";
@@ -57,6 +58,24 @@ export default function TasksPage() {
 
     // URL Search params for deep link opening of task detail drawer
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
+
+    const handleStartTaskMeeting = async () => {
+        try {
+            const res = await createInstantMeeting({
+                title: selectedProject
+                    ? `Task Review - Project ${selectedProject}`
+                    : "Task Standup & Review Meeting",
+                project_id: selectedProject ? parseInt(selectedProject, 10) : null
+            });
+            if (res.data?.success && res.data.meeting) {
+                toast.success("Task meeting started!");
+                navigate(`/meetings/join/${res.data.meeting.room_code}`);
+            }
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Failed to start meeting");
+        }
+    };
 
     // Drawers
     const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
@@ -286,7 +305,17 @@ export default function TasksPage() {
                     </div>
 
                     {/* Consolidated Filters Dropdown on Right */}
-                    <div className="relative shrink-0" ref={filterDropdownRef}>
+                    <div className="relative shrink-0 flex items-center gap-2" ref={filterDropdownRef}>
+                        <button
+                            type="button"
+                            onClick={handleStartTaskMeeting}
+                            className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                            title="Start instant video meeting for task review"
+                        >
+                            <i className="fa-solid fa-video text-xs"></i>
+                            <span>Start Meeting</span>
+                        </button>
+
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"
