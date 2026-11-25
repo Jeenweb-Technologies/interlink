@@ -11,3 +11,7 @@ export const getAllOrganizations = async (status = "all") => {
 export const updateOrganizationStatus = async (id, status) => {
     return apiClient.patch(`/superadmin/organizations/${id}/status`, { status });
 };
+
+export const createOrganization = async (payload) => {
+    return apiClient.post("/superadmin/organizations", payload);
+};

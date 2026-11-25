@@ -76,7 +76,8 @@ export function TopBar({ onMenuClick = () => {} }) {
     const location = useLocation();
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const { hasPermission } = usePermission();
-    const isAdmin = user.role === "admin" || user.role === "super admin";
+    const isDeveloper = user.role === "super_admin" || user.role === "super admin" || user.role === "developer";
+    const isAdmin = (user.role === "admin" || user.role === "super admin") && !isDeveloper;
 
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -334,9 +335,9 @@ export function TopBar({ onMenuClick = () => {} }) {
 
                 {/* Light Mode Logo directly on header background */}
                 <div
-                    onClick={() => navigate("/user/home")}
+                    onClick={() => navigate(isDeveloper ? "/developer" : "/user/home")}
                     className="cursor-pointer transition-opacity hover:opacity-90 flex items-center gap-2"
-                    title="Interlink Workspace"
+                    title={isDeveloper ? "Developer Platform Console" : "Interlink Workspace"}
                 >
                     <InterlinkLogo size="md" light={false} />
                 </div>
@@ -702,29 +703,37 @@ export function TopBar({ onMenuClick = () => {} }) {
 
             {/* Right Area: Company Switcher + Notification Bell + User Profile */}
             <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-                {/* Company Switcher */}
-                {companies.length > 0 && (
-                    <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs">
-                        <i className="fa-regular fa-building text-blue-600 text-[11px]"></i>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase hidden md:inline">Company:</span>
-                        {companies.length > 1 ? (
-                            <select
-                                value={activeCompanyId}
-                                onChange={handleCompanyChange}
-                                className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
-                            >
-                                {companies.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name}
-                                    </option>
-                                ))}
-                            </select>
-                        ) : (
-                            <span className="text-slate-700 font-bold text-xs truncate max-w-[160px]">
-                                {companies[0]?.name || "Default Company"}
-                            </span>
-                        )}
+                {/* Platform Control Scope or Company Switcher */}
+                {isDeveloper ? (
+                    <div className="flex items-center gap-1.5 bg-purple-50 border border-purple-200/80 rounded-xl px-2.5 py-1.5 text-xs text-purple-700 font-bold shadow-2xs">
+                        <i className="fa-solid fa-shield-halved text-purple-600 text-[11px]"></i>
+                        <span className="text-[10px] uppercase tracking-wider text-purple-500 font-bold hidden sm:inline">Scope:</span>
+                        <span>Platform Control</span>
                     </div>
+                ) : (
+                    companies.length > 0 && (
+                        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 text-xs">
+                            <i className="fa-regular fa-building text-blue-600 text-[11px]"></i>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase hidden md:inline">Company:</span>
+                            {companies.length > 1 ? (
+                                <select
+                                    value={activeCompanyId}
+                                    onChange={handleCompanyChange}
+                                    className="bg-transparent text-slate-700 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+                                >
+                                    {companies.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <span className="text-slate-700 font-bold text-xs truncate max-w-[160px]">
+                                    {companies[0]?.name || "Default Company"}
+                                </span>
+                            )}
+                        </div>
+                    )
                 )}
 
                 {/* Notification Bell with Badge */}
@@ -890,8 +899,8 @@ export default function Sidebar({
     const location = useLocation();
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const { hasPermission } = usePermission();
-    const isAdmin = user.role === "admin" || user.role === "super admin" || user.role === "super_admin";
     const isDeveloper = user.role === "super_admin" || user.role === "super admin" || user.role === "developer";
+    const isAdmin = (user.role === "admin" || user.role === "super admin" || user.role === "super_admin") && !isDeveloper;
 
     const [companies, setCompanies] = useState(user.companies || []);
     const [activeCompanyId, setActiveCompanyId] = useState(
@@ -1060,72 +1069,35 @@ export default function Sidebar({
                     </div>
                 </div>
 
-                {/* Company Switcher in Sidebar */}
-                <div className="px-3 py-3 border-b border-slate-800/80 bg-slate-950/40">
-                    {!isCollapsed ? (
-                        <div>
-                            <div className="flex items-center justify-between px-1 mb-1.5">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                                    <i className="fa-solid fa-building text-blue-400 text-[10px]"></i>
-                                    Company
-                                </span>
-                                {isAdmin && (
-                                    <button
-                                        onClick={() => handleNav("/admin/companies")}
-                                        className="text-[10px] text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer"
-                                        title="Open Company Master"
-                                    >
-                                        Manage
-                                    </button>
-                                )}
+                {/* Company Switcher / Platform Scope in Sidebar */}
+                {isDeveloper ? (
+                    <div className="px-3 py-3 border-b border-slate-800/80 bg-purple-950/20">
+                        {!isCollapsed ? (
+                            <div className="flex items-center gap-2.5 px-1 py-0.5 text-purple-300">
+                                <div className="w-8 h-8 rounded-xl bg-purple-900/60 border border-purple-500/30 flex items-center justify-center text-purple-300 shrink-0 shadow-sm">
+                                    <i className="fa-solid fa-terminal text-xs"></i>
+                                </div>
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-xs font-bold text-white tracking-wide truncate">Platform Control</span>
+                                    <span className="text-[10px] text-purple-400 font-semibold uppercase tracking-wider">Developer Scope</span>
+                                </div>
                             </div>
-                            {companies.length > 1 ? (
-                                <div className="relative">
-                                    <select
-                                        value={String(activeCompanyId)}
-                                        onChange={handleCompanyChange}
-                                        className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
-                                    >
-                                        {companies.map((c) => (
-                                            <option key={c.id} value={String(c.id)} className="bg-slate-900 text-white py-1">
-                                                {c.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
-                                        <i className="fa-solid fa-chevron-down text-[10px]"></i>
-                                    </div>
+                        ) : (
+                            <div className="flex justify-center py-0.5">
+                                <div title="Platform Control (Developer Scope)" className="w-10 h-10 rounded-xl bg-purple-900/60 border border-purple-500/30 text-purple-300 flex items-center justify-center">
+                                    <i className="fa-solid fa-terminal text-sm"></i>
                                 </div>
-                            ) : (
-                                <div className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white shadow-sm flex items-center gap-2">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
-                                    <span className="truncate">
-                                        {companies[0]?.name || companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Default Company"}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="flex justify-center py-0.5">
-                            <button
-                                onClick={() => isAdmin && handleNav("/admin/companies")}
-                                title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || companies[0]?.name || "Company Workspace"}
-                                className={`w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all ${isAdmin ? "cursor-pointer" : "cursor-default"}`}
-                            >
-                                <i className="fa-solid fa-building text-sm"></i>
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {/* Nav Items */}
-                <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-800">
-                    <div>
-                        {!isCollapsed && (
-                            <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
-                                Main Navigation
-                            </p>
+                            </div>
                         )}
+                    </div>
+                ) : (
+                    <div className="px-3 py-3 border-b border-slate-800/80 bg-slate-950/40">
+                        {!isCollapsed ? (
+                            <div>
+                                <div className="flex items-center justify-between px-1 mb-1.5">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                        <i className="fa-solid fa-building text-blue-400 text-[10px]"></i>
+                                        Company
                         <div className="space-y-1">
                             <button
                                 onClick={() => handleNav("/user/home")}
@@ -1304,37 +1276,60 @@ export default function Sidebar({
                                     }`}>
                                         <i className="fa-solid fa-user-clock"></i>
                                     </span>
-                                    {!isCollapsed && (
-                                        <span className="truncate">Attendance &amp; Shifts</span>
+                                    {isAdmin && (
+                                        <button
+                                            onClick={() => handleNav("/admin/companies")}
+                                            className="text-[10px] text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer"
+                                            title="Open Company Master"
+                                        >
+                                            Manage
+                                        </button>
                                     )}
-                                </button>
-                            )}
-
-                            {canReadTimesheets && (
+                                </div>
+                                {companies.length > 1 ? (
+                                    <div className="relative">
+                                        <select
+                                            value={String(activeCompanyId)}
+                                            onChange={handleCompanyChange}
+                                            className="w-full bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500 appearance-none pr-8 cursor-pointer shadow-sm transition-all"
+                                        >
+                                            {companies.map((c) => (
+                                                <option key={c.id} value={String(c.id)} className="bg-slate-900 text-white py-1">
+                                                    {c.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                                            <i className="fa-solid fa-chevron-down text-[10px]"></i>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white shadow-sm flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                                        <span className="truncate">
+                                            {companies[0]?.name || companies.find(c => String(c.id) === String(activeCompanyId))?.name || "Default Company"}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex justify-center py-0.5">
                                 <button
-                                    onClick={() => handleNav("/timesheets")}
-                                    title={isCollapsed ? "Timesheets" : ""}
-                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
-                                        location.pathname.startsWith("/timesheets")
-                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
-                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
-                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                    onClick={() => isAdmin && handleNav("/admin/companies")}
+                                    title={companies.find(c => String(c.id) === String(activeCompanyId))?.name || companies[0]?.name || "Company Workspace"}
+                                    className={`w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 text-blue-400 hover:text-white hover:border-blue-500 flex items-center justify-center transition-all ${isAdmin ? "cursor-pointer" : "cursor-default"}`}
                                 >
-                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                        location.pathname.startsWith("/timesheets") ? "text-white" : "text-slate-400 group-hover:text-indigo-400"
-                                    }`}>
-                                        <i className="fa-solid fa-business-time"></i>
-                                    </span>
-                                    {!isCollapsed && (
-                                        <span className="truncate">Timesheets</span>
-                                    )}
+                                    <i className="fa-solid fa-building text-sm"></i>
                                 </button>
-                            )}
-                        </div>
+                            </div>
+                        )}
                     </div>
+                )}
 
-                    {/* Developer Console (Super Admin / Developer only) */}
-                    {isDeveloper && (
+                {/* Nav Items */}
+                <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-slate-800">
+                    {isDeveloper ? (
+                        /* Developer Panel: Platform Control ONLY */
                         <div>
                             {!isCollapsed && (
                                 <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-purple-400 flex items-center gap-1.5">
@@ -1342,18 +1337,20 @@ export default function Sidebar({
                                     Platform Control
                                 </p>
                             )}
-                            <div className="space-y-1">
+                            <div className="space-y-1.5">
                                 <button
                                     onClick={() => handleNav("/developer")}
                                     title={isCollapsed ? "Developer Console" : ""}
                                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
-                                        location.pathname === "/developer" || location.pathname === "/admin/developer"
+                                        (location.pathname === "/developer" || location.pathname === "/admin/developer") && !location.search.includes("createOrg=true")
                                             ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 font-semibold"
                                             : "text-purple-300 hover:text-white hover:bg-purple-950/40 border border-purple-900/30"
                                     } ${isCollapsed ? "justify-center" : ""}`}
                                 >
                                     <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                        location.pathname === "/developer" || location.pathname === "/admin/developer" ? "text-white" : "text-purple-400 group-hover:text-purple-300"
+                                        (location.pathname === "/developer" || location.pathname === "/admin/developer") && !location.search.includes("createOrg=true")
+                                            ? "text-white"
+                                            : "text-purple-400 group-hover:text-purple-300"
                                     }`}>
                                         <i className="fa-solid fa-laptop-code"></i>
                                     </span>
@@ -1366,115 +1363,316 @@ export default function Sidebar({
                                         </div>
                                     )}
                                 </button>
-                            </div>
-                        </div>
-                    )}
 
-                    {hasAnyMaster && (
-                        <div>
-                            {!isCollapsed && (
-                                <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
-                                    Administration
-                                </p>
-                            )}
-
-                            <div className="space-y-1">
-                                {!isCollapsed ? (
-                                    <>
-                                        <button
-                                            onClick={() => setMastersOpen(!mastersOpen)}
-                                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group ${
-                                                isMasterRoute
-                                                    ? "text-blue-400 bg-blue-950/40 border border-blue-900/50"
-                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-3 truncate">
-                                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                                    isMasterRoute ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400"
-                                                }`}>
-                                                    <i className="fa-solid fa-layer-group"></i>
-                                                </span>
-                                                <span className="truncate font-semibold">Masters</span>
-                                            </div>
-                                            <i className={`fa-solid fa-chevron-down text-xs transition-transform duration-200 text-slate-500 ${
-                                                mastersOpen ? "rotate-180 text-blue-400" : ""
-                                            }`}></i>
-                                        </button>
-
-                                        {mastersOpen && (
-                                            <div className="ml-4 pl-3 border-l border-slate-800 space-y-1 mt-1 animate-in fade-in slide-in-from-top-1 duration-150">
-                                                {masterItems.map((item, idx) => {
-                                                    const isActive = item.matchPaths.some(p => location.pathname === p);
-                                                    return (
-                                                        <button
-                                                            key={idx}
-                                                            onClick={() => handleNav(item.path)}
-                                                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer text-left ${
-                                                                isActive
-                                                                    ? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/20"
-                                                                    : "text-slate-400 hover:text-white hover:bg-slate-800/60"
-                                                            }`}
-                                                        >
-                                                            <i className={`${item.icon} text-xs w-4 text-center ${isActive ? "text-white" : "text-slate-400"}`}></i>
-                                                            <span className="truncate">{item.name}</span>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </>
-                                ) : (
-                                    masterItems.map((item, idx) => {
-                                        const isActive = item.matchPaths.some(p => location.pathname === p);
-                                        return (
-                                            <button
-                                                key={idx}
-                                                onClick={() => handleNav(item.path)}
-                                                title={item.name}
-                                                className={`w-full flex items-center justify-center px-3 py-2.5 rounded-xl text-sm transition-all duration-150 cursor-pointer ${
-                                                    isActive
-                                                        ? "bg-blue-600 text-white font-semibold shadow-lg shadow-blue-600/30"
-                                                        : "text-slate-400 hover:text-white hover:bg-slate-800/70"
-                                                }`}
-                                            >
-                                                <i className={`${item.icon} text-base`}></i>
-                                            </button>
-                                        );
-                                    })
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {canViewReport && (
-                        <div>
-                            {!isCollapsed && (
-                                <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
-                                    Analytics
-                                </p>
-                            )}
-                            <div className="space-y-1">
                                 <button
-                                    onClick={() => handleNav("/admin/report")}
-                                    title={isCollapsed ? "Activity Report" : ""}
+                                    onClick={() => handleNav("/developer?createOrg=true")}
+                                    title={isCollapsed ? "Create Client Organization" : ""}
                                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
-                                        location.pathname === "/admin/report"
-                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
-                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                        location.search.includes("createOrg=true")
+                                            ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30 font-semibold"
+                                            : "text-emerald-300 hover:text-white hover:bg-emerald-950/40 border border-emerald-900/30"
                                     } ${isCollapsed ? "justify-center" : ""}`}
                                 >
                                     <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
-                                        location.pathname === "/admin/report" ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                        location.search.includes("createOrg=true") ? "text-white" : "text-emerald-400 group-hover:text-emerald-300"
                                     }`}>
-                                        <i className="fa-solid fa-clock-rotate-left"></i>
+                                        <i className="fa-solid fa-building-circle-plus"></i>
                                     </span>
                                     {!isCollapsed && (
-                                        <span className="truncate">Activity Report</span>
+                                        <div className="flex items-center justify-between flex-1 min-w-0">
+                                            <span className="truncate">Create Client Org</span>
+                                            <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-bold">
+                                                + New
+                                            </span>
+                                        </div>
                                     )}
                                 </button>
                             </div>
                         </div>
+                    ) : (
+                        <>
+                            <div>
+                                {!isCollapsed && (
+                                    <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+                                        Main Navigation
+                                    </p>
+                                )}
+                                <div className="space-y-1">
+                                    <button
+                                        onClick={() => handleNav("/user/home")}
+                                        title={isCollapsed ? "User Dashboard" : ""}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                            location.pathname === "/user/home"
+                                                ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                        } ${isCollapsed ? "justify-center" : ""}`}
+                                    >
+                                        <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                            location.pathname === "/user/home" ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                        }`}>
+                                            <i className="fa-solid fa-gauge-high"></i>
+                                        </span>
+                                        {!isCollapsed && (
+                                            <span className="truncate">User Dashboard</span>
+                                        )}
+                                    </button>
+
+                                    {canReadProjects && (
+                                        <button
+                                            onClick={() => handleNav("/projects")}
+                                            title={isCollapsed ? "Projects & Portfolio" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/projects")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/projects") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-diagram-project"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Projects &amp; Portfolio</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadTasks && (
+                                        <button
+                                            onClick={() => handleNav("/tasks")}
+                                            title={isCollapsed ? "Task Management" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/tasks")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/tasks") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-list-check"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Task Management</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadNotes && (
+                                        <button
+                                            onClick={() => handleNav("/notes")}
+                                            title={isCollapsed ? "Notes & Scratchpad" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/notes")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/notes") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-note-sticky"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Notes &amp; Scratchpad</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadChat && (
+                                        <button
+                                            onClick={() => handleNav("/chat")}
+                                            title={isCollapsed ? "Chat & Communication" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/chat")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/chat") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-comments"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Chat &amp; Communication</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadMeetings && (
+                                        <button
+                                            onClick={() => handleNav("/meetings")}
+                                            title={isCollapsed ? "Meetings & Whiteboard" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/meetings")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/meetings") ? "text-white" : "text-slate-400 group-hover:text-teal-400"
+                                            }`}>
+                                                <i className="fa-solid fa-video"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Meetings &amp; Whiteboard</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadAttendance && (
+                                        <button
+                                            onClick={() => handleNav("/attendance")}
+                                            title={isCollapsed ? "Attendance & Shifts" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/attendance")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/attendance") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-user-clock"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Attendance &amp; Shifts</span>
+                                            )}
+                                        </button>
+                                    )}
+
+                                    {canReadTimesheets && (
+                                        <button
+                                            onClick={() => handleNav("/timesheets")}
+                                            title={isCollapsed ? "Timesheets" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname.startsWith("/timesheets")
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname.startsWith("/timesheets") ? "text-white" : "text-slate-400 group-hover:text-indigo-400"
+                                            }`}>
+                                                <i className="fa-solid fa-business-time"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Timesheets</span>
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {hasAnyMaster && (
+                                <div>
+                                    {!isCollapsed && (
+                                        <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+                                            Administration
+                                        </p>
+                                    )}
+
+                                    <div className="space-y-1">
+                                        {!isCollapsed ? (
+                                            <>
+                                                <button
+                                                    onClick={() => setMastersOpen(!mastersOpen)}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group ${
+                                                        isMasterRoute
+                                                            ? "text-blue-400 bg-blue-950/40 border border-blue-900/50"
+                                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center gap-3 truncate">
+                                                        <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                            isMasterRoute ? "text-blue-400" : "text-slate-400 group-hover:text-blue-400"
+                                                        }`}>
+                                                            <i className="fa-solid fa-layer-group"></i>
+                                                        </span>
+                                                        <span className="truncate font-semibold">Masters</span>
+                                                    </div>
+                                                    <i className={`fa-solid fa-chevron-down text-xs transition-transform duration-200 text-slate-500 ${
+                                                        mastersOpen ? "rotate-180 text-blue-400" : ""
+                                                    }`}></i>
+                                                </button>
+
+                                                {mastersOpen && (
+                                                    <div className="ml-4 pl-3 border-l border-slate-800 space-y-1 mt-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                                                        {masterItems.map((item, idx) => {
+                                                            const isActive = item.matchPaths.some(p => location.pathname === p);
+                                                            return (
+                                                                <button
+                                                                    key={idx}
+                                                                    onClick={() => handleNav(item.path)}
+                                                                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150 cursor-pointer text-left ${
+                                                                        isActive
+                                                                            ? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/20"
+                                                                            : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+                                                                    }`}
+                                                                >
+                                                                    <i className={`${item.icon} text-xs w-4 text-center ${isActive ? "text-white" : "text-slate-400"}`}></i>
+                                                                    <span className="truncate">{item.name}</span>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            masterItems.map((item, idx) => {
+                                                const isActive = item.matchPaths.some(p => location.pathname === p);
+                                                return (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleNav(item.path)}
+                                                        title={item.name}
+                                                        className={`w-full flex items-center justify-center px-3 py-2.5 rounded-xl text-sm transition-all duration-150 cursor-pointer ${
+                                                            isActive
+                                                                ? "bg-blue-600 text-white font-semibold shadow-lg shadow-blue-600/30"
+                                                                : "text-slate-400 hover:text-white hover:bg-slate-800/70"
+                                                        }`}
+                                                    >
+                                                        <i className={`${item.icon} text-base`}></i>
+                                                    </button>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {canViewReport && (
+                                <div>
+                                    {!isCollapsed && (
+                                        <p className="px-3 mb-2 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+                                            Analytics
+                                        </p>
+                                    )}
+                                    <div className="space-y-1">
+                                        <button
+                                            onClick={() => handleNav("/admin/report")}
+                                            title={isCollapsed ? "Activity Report" : ""}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                                location.pathname === "/admin/report"
+                                                    ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                                    : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                            } ${isCollapsed ? "justify-center" : ""}`}
+                                        >
+                                            <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                                location.pathname === "/admin/report" ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                            }`}>
+                                                <i className="fa-solid fa-clock-rotate-left"></i>
+                                            </span>
+                                            {!isCollapsed && (
+                                                <span className="truncate">Activity Report</span>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
 
