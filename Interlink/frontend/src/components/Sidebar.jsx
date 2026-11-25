@@ -158,6 +158,8 @@ export function TopBar({ onMenuClick = () => {} }) {
         { id: "p-att", title: "Attendance & Shifts", category: "Navigation", path: "/attendance", icon: "fa-solid fa-user-clock text-blue-500", visible: isAdmin || hasPermission("attendance", "read") },
         { id: "p-time", title: "Timesheets", category: "Navigation", path: "/timesheets", icon: "fa-solid fa-business-time text-indigo-500", visible: isAdmin || hasPermission("timesheets", "read") },
         { id: "p-meetings", title: "Meetings & Whiteboard", category: "Navigation", path: "/meetings", icon: "fa-solid fa-video text-teal-400", visible: isAdmin || hasPermission("meetings", "read") },
+        { id: "p-cal", title: "Calendar & Schedule", category: "Navigation", path: "/calendar", icon: "fa-solid fa-calendar-days text-indigo-500", visible: true },
+        { id: "p-rem", title: "Reminder Center", category: "Navigation", path: "/reminders", icon: "fa-solid fa-bell text-rose-500", visible: true },
         { id: "p-comp", title: "Company Master", category: "Masters", path: "/admin/companies", icon: "fa-solid fa-building text-blue-500", visible: isAdmin || hasPermission("company_master", "read") },
         { id: "p-dept", title: "Department Master", category: "Masters", path: "/admin/departments", icon: "fa-solid fa-sitemap text-indigo-500", visible: isAdmin || hasPermission("department_master", "read") },
         { id: "p-chatsettings", title: "Chat Settings Master", category: "Masters", path: "/admin/chat-settings", icon: "fa-solid fa-sliders text-cyan-500", visible: isAdmin || hasPermission("chat_settings_master", "read") },
@@ -172,7 +174,9 @@ export function TopBar({ onMenuClick = () => {} }) {
     const quickActions = [
         { id: "qa-task", title: "Create New Task", subtitle: "Open task drawer", path: "/tasks?openCreate=true", icon: "fa-solid fa-plus-circle text-blue-500" },
         { id: "qa-proj", title: "Create New Project", subtitle: "Open project creation modal", path: "/projects?openCreate=true", icon: "fa-solid fa-folder-plus text-sky-500" },
-        { id: "qa-note", title: "Create New Note", subtitle: "Open note editor", path: "/notes", icon: "fa-solid fa-file-circle-plus text-amber-500" }
+        { id: "qa-note", title: "Create New Note", subtitle: "Open note editor", path: "/notes", icon: "fa-solid fa-file-circle-plus text-amber-500" },
+        { id: "qa-event", title: "Schedule Event", subtitle: "Open calendar event editor", path: "/calendar", icon: "fa-solid fa-calendar-plus text-indigo-500" },
+        { id: "qa-rem", title: "Set Reminder", subtitle: "Open reminder center", path: "/reminders", icon: "fa-solid fa-bell text-rose-500" }
     ];
 
     const filteredPages = searchQuery.trim()
@@ -1094,6 +1098,183 @@ export default function Sidebar({
                                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                                         <i className="fa-solid fa-building text-blue-400 text-[10px]"></i>
                                         Company
+                        <div className="space-y-1">
+                            <button
+                                onClick={() => handleNav("/user/home")}
+                                title={isCollapsed ? "User Dashboard" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname === "/user/home"
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname === "/user/home" ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                }`}>
+                                    <i className="fa-solid fa-gauge-high"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">User Dashboard</span>
+                                )}
+                            </button>
+
+                            {canReadProjects && (
+                                <button
+                                    onClick={() => handleNav("/projects")}
+                                    title={isCollapsed ? "Projects & Portfolio" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/projects")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/projects") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                    }`}>
+                                        <i className="fa-solid fa-diagram-project"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <span className="truncate">Projects &amp; Portfolio</span>
+                                    )}
+                                </button>
+                            )}
+
+                            {canReadTasks && (
+                                <button
+                                    onClick={() => handleNav("/tasks")}
+                                    title={isCollapsed ? "Task Management" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/tasks")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/tasks") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                    }`}>
+                                        <i className="fa-solid fa-list-check"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <span className="truncate">Task Management</span>
+                                    )}
+                                </button>
+                            )}
+
+                            {canReadNotes && (
+                                <button
+                                    onClick={() => handleNav("/notes")}
+                                    title={isCollapsed ? "Notes & Scratchpad" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/notes")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/notes") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                    }`}>
+                                        <i className="fa-solid fa-note-sticky"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <span className="truncate">Notes &amp; Scratchpad</span>
+                                    )}
+                                </button>
+                            )}
+
+                            {canReadChat && (
+                                <button
+                                    onClick={() => handleNav("/chat")}
+                                    title={isCollapsed ? "Chat & Communication" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/chat")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/chat") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                    }`}>
+                                        <i className="fa-solid fa-comments"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <span className="truncate">Chat &amp; Communication</span>
+                                    )}
+                                </button>
+                            )}
+
+                            {canReadMeetings && (
+                                <button
+                                    onClick={() => handleNav("/meetings")}
+                                    title={isCollapsed ? "Meetings & Whiteboard" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/meetings")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/meetings") ? "text-white" : "text-slate-400 group-hover:text-teal-400"
+                                    }`}>
+                                        <i className="fa-solid fa-video"></i>
+                                    </span>
+                                    {!isCollapsed && (
+                                        <span className="truncate">Meetings &amp; Whiteboard</span>
+                                    )}
+                                </button>
+                            )}
+
+                            <button
+                                onClick={() => handleNav("/calendar")}
+                                title={isCollapsed ? "Calendar & Schedule" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/calendar")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/calendar") ? "text-white" : "text-slate-400 group-hover:text-indigo-400"
+                                }`}>
+                                    <i className="fa-solid fa-calendar-days"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Calendar &amp; Schedule</span>
+                                )}
+                            </button>
+
+                            <button
+                                onClick={() => handleNav("/reminders")}
+                                title={isCollapsed ? "Reminder Center" : ""}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                    location.pathname.startsWith("/reminders")
+                                        ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                        : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                } ${isCollapsed ? "justify-center" : ""}`}
+                            >
+                                <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                    location.pathname.startsWith("/reminders") ? "text-white" : "text-slate-400 group-hover:text-rose-400"
+                                }`}>
+                                    <i className="fa-solid fa-bell"></i>
+                                </span>
+                                {!isCollapsed && (
+                                    <span className="truncate">Reminder Center</span>
+                                )}
+                            </button>
+
+                            {canReadAttendance && (
+                                <button
+                                    onClick={() => handleNav("/attendance")}
+                                    title={isCollapsed ? "Attendance & Shifts" : ""}
+                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer text-left group relative ${
+                                        location.pathname.startsWith("/attendance")
+                                            ? "bg-gradient-to-r from-blue-600 to-[#0056cf] text-white shadow-lg shadow-blue-600/30 font-semibold"
+                                            : "text-slate-300 hover:text-white hover:bg-slate-800/70"
+                                    } ${isCollapsed ? "justify-center" : ""}`}
+                                >
+                                    <span className={`flex items-center justify-center w-5 text-center shrink-0 text-base ${
+                                        location.pathname.startsWith("/attendance") ? "text-white" : "text-slate-400 group-hover:text-blue-400"
+                                    }`}>
+                                        <i className="fa-solid fa-user-clock"></i>
                                     </span>
                                     {isAdmin && (
                                         <button

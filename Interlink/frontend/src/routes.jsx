@@ -28,6 +28,8 @@ import MeetingRoom from "./pages/meetings/MeetingRoom";
 import MeetingSummaryPage from "./pages/meetings/MeetingSummaryPage";
 import AttendancePage from "./pages/attendance/AttendancePage";
 import TimesheetsPage from "./pages/timesheets/TimesheetsPage";
+import CalendarPage from "./pages/calendar/CalendarPage";
+import ReminderCenterPage from "./pages/reminders/ReminderCenterPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/Sidebar";
 
@@ -138,6 +140,16 @@ export default function AppRoutes() {
                             element={<TimesheetsPage />}
                         />
                     </Route>
+
+                    <Route
+                        path="/calendar"
+                        element={<CalendarPage />}
+                    />
+
+                    <Route
+                        path="/reminders"
+                        element={<ReminderCenterPage />}
+                    />
 
                     <Route
                         path="/profile"
