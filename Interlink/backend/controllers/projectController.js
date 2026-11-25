@@ -15,8 +15,17 @@ exports.getPortfolioMetrics = async (req, res) => {
         let memberFilter = "";
         let memberParams = [];
         if (!isAdmin) {
-            memberFilter = " AND (p.owner_id = ? OR p.sponsor_id = ? OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
-            memberParams = [userId, userId, userId];
+            memberFilter = ` AND (
+                p.owner_id = ? 
+                OR p.sponsor_id = ? 
+                OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+                OR p.parent_project_id IN (
+                    SELECT project_id FROM project_members WHERE user_id = ?
+                    UNION
+                    SELECT id FROM projects WHERE owner_id = ? OR sponsor_id = ?
+                )
+            )`;
+            memberParams = [userId, userId, userId, userId, userId, userId];
         }
 
         // Base project counts
@@ -32,7 +41,7 @@ exports.getPortfolioMetrics = async (req, res) => {
                 SUM(approved_budget) as total_approved_budget,
                 SUM(actual_cost) as total_actual_cost
             FROM projects p
-            WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
             ${memberFilter}
         `, [tenantId, companyId, ...memberParams]);
 
@@ -41,7 +50,7 @@ exports.getPortfolioMetrics = async (req, res) => {
             SELECT p.id, p.end_date, p.progress_percentage, p.approved_budget, p.actual_cost,
                    (SELECT COUNT(*) FROM project_risks r WHERE r.project_id = p.id AND r.severity_score >= 12 AND r.status != 'closed') as high_risks_count
             FROM projects p
-            WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
             ${memberFilter}
         `, [tenantId, companyId, ...memberParams]);
 
@@ -109,6 +118,7 @@ exports.getProjects = async (req, res) => {
             SELECT p.*,
                    u_owner.name as owner_name, u_owner.email as owner_email,
                    u_sponsor.name as sponsor_name, u_sponsor.email as sponsor_email,
+                   parent.name as parent_project_name, parent.code as parent_project_code,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.deleted_at IS NULL) as tasks_count,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'done' AND t.deleted_at IS NULL) as completed_tasks_count,
                    (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) as members_count,
@@ -117,24 +127,33 @@ exports.getProjects = async (req, res) => {
             FROM projects p
             LEFT JOIN users u_owner ON p.owner_id = u_owner.id
             LEFT JOIN users u_sponsor ON p.sponsor_id = u_sponsor.id
+            LEFT JOIN projects parent ON p.parent_project_id = parent.id
             WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
         `;
 
         const params = [tenantId, companyId];
 
-        // Non-admin members only see projects where they are explicitly included as a member, owner, or sponsor
+        // Non-admin members only see projects where they are explicitly included as a member, owner, sponsor, or parent project member
         if (!isAdmin) {
             query += ` AND (
                 p.owner_id = ?
                 OR p.sponsor_id = ?
                 OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+                OR p.parent_project_id IN (
+                    SELECT project_id FROM project_members WHERE user_id = ?
+                    UNION
+                    SELECT id FROM projects WHERE owner_id = ? OR sponsor_id = ?
+                )
             )`;
-            params.push(userId, userId, userId);
+            params.push(userId, userId, userId, userId, userId, userId);
         }
 
-        // By default show top-level projects unless user requests subprojects explicitly
-        if (include_subprojects !== 'true') {
+        // Support explicit filtering: top-level only or by parent project
+        if (req.query.top_level_only === 'true') {
             query += " AND p.parent_project_id IS NULL";
+        } else if (req.query.parent_project_id) {
+            query += " AND p.parent_project_id = ?";
+            params.push(req.query.parent_project_id);
         }
 
         if (status) {
@@ -192,13 +211,17 @@ exports.getProjectById = async (req, res) => {
         const userRole = (req.user?.role || "").toLowerCase();
         const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
 
-        // Access control: Only included members, owner, sponsor, or administrators can view
+        // Access control: Only included members, owner, sponsor, parent project members, or administrators can view
         if (!isAdmin) {
             const [membership] = await db.execute(`
                 SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
                 UNION
                 SELECT 1 FROM projects WHERE id = ? AND (owner_id = ? OR sponsor_id = ?)
-            `, [id, userId, id, userId, userId]);
+                UNION
+                SELECT 1 FROM project_members WHERE project_id = (SELECT parent_project_id FROM projects WHERE id = ?) AND user_id = ?
+                UNION
+                SELECT 1 FROM projects WHERE id = (SELECT parent_project_id FROM projects WHERE id = ?) AND (owner_id = ? OR sponsor_id = ?)
+            `, [id, userId, id, userId, userId, id, userId, id, userId, userId]);
 
             if (membership.length === 0) {
                 return res.status(403).json({
