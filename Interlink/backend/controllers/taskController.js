@@ -1241,11 +1241,18 @@ exports.getTaskMetadata = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
 
-        const [projects] = await db.execute(
-            "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ? ORDER BY name ASC",
-            [tenantId, companyId]
-        );
+        let projectsQuery = "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?";
+        const projectsParams = [tenantId, companyId];
+        if (!isAdmin) {
+            projectsQuery += " AND (owner_id = ? OR sponsor_id = ? OR id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
+            projectsParams.push(userId, userId, userId);
+        }
+        projectsQuery += " ORDER BY name ASC";
+        const [projects] = await db.execute(projectsQuery, projectsParams);
         const [users] = await db.execute(`
             SELECT 
                 u.id, u.name, u.username, u.email, u.role, u.company_id, u.department_id,

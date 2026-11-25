@@ -8,6 +8,16 @@ exports.getPortfolioMetrics = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
+        let memberFilter = "";
+        let memberParams = [];
+        if (!isAdmin) {
+            memberFilter = " AND (p.owner_id = ? OR p.sponsor_id = ? OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
+            memberParams = [userId, userId, userId];
+        }
 
         // Base project counts
         const [counts] = await db.execute(`
@@ -21,9 +31,10 @@ exports.getPortfolioMetrics = async (req, res) => {
                 SUM(estimated_budget) as total_estimated_budget,
                 SUM(approved_budget) as total_approved_budget,
                 SUM(actual_cost) as total_actual_cost
-            FROM projects 
-            WHERE tenant_id = ? AND company_id = ? AND parent_project_id IS NULL AND deleted_at IS NULL
-        `, [tenantId, companyId]);
+            FROM projects p
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL
+            ${memberFilter}
+        `, [tenantId, companyId, ...memberParams]);
 
         // Health distribution (On Track, At Risk, Delayed)
         const [projects] = await db.execute(`
@@ -31,7 +42,8 @@ exports.getPortfolioMetrics = async (req, res) => {
                    (SELECT COUNT(*) FROM project_risks r WHERE r.project_id = p.id AND r.severity_score >= 12 AND r.status != 'closed') as high_risks_count
             FROM projects p
             WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
-        `, [tenantId, companyId]);
+            ${memberFilter}
+        `, [tenantId, companyId, ...memberParams]);
 
         let onTrack = 0;
         let atRisk = 0;
@@ -87,6 +99,10 @@ exports.getProjects = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
         const { search, status, priority, owner_id, sponsor_id, visibility, include_subprojects } = req.query;
 
         let query = `
@@ -105,6 +121,16 @@ exports.getProjects = async (req, res) => {
         `;
 
         const params = [tenantId, companyId];
+
+        // Non-admin members only see projects where they are explicitly included as a member, owner, or sponsor
+        if (!isAdmin) {
+            query += ` AND (
+                p.owner_id = ?
+                OR p.sponsor_id = ?
+                OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+            )`;
+            params.push(userId, userId, userId);
+        }
 
         // By default show top-level projects unless user requests subprojects explicitly
         if (include_subprojects !== 'true') {
@@ -162,6 +188,25 @@ exports.getProjectById = async (req, res) => {
         const { id } = req.params;
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
+        // Access control: Only included members, owner, sponsor, or administrators can view
+        if (!isAdmin) {
+            const [membership] = await db.execute(`
+                SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
+                UNION
+                SELECT 1 FROM projects WHERE id = ? AND (owner_id = ? OR sponsor_id = ?)
+            `, [id, userId, id, userId, userId]);
+
+            if (membership.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Access denied. Only included members can view this project."
+                });
+            }
+        }
 
         const [rows] = await db.execute(`
             SELECT p.*,
@@ -473,7 +518,7 @@ exports.createProjectFromTemplate = async (req, res) => {
     try {
         const tenantId = req.user?.tenant_id || 1;
         const userId = req.user?.id || 1;
-        const { template_id, name, code, start_date, end_date, owner_id, sponsor_id, estimated_budget } = req.body;
+        const { template_id, name, code, start_date, end_date, owner_id, sponsor_id, estimated_budget, members = [] } = req.body;
 
         const [templates] = await db.execute("SELECT * FROM project_templates WHERE id = ? AND tenant_id = ?", [template_id, tenantId]);
         if (templates.length === 0) {
@@ -508,6 +553,21 @@ exports.createProjectFromTemplate = async (req, res) => {
             INSERT IGNORE INTO project_members (project_id, user_id, role, allocation_percentage)
             VALUES (?, ?, 'project_manager', 100)
         `, [newProjectId, owner_id || userId]);
+
+        // Add additional team members
+        if (Array.isArray(members) && members.length > 0) {
+            for (const m of members) {
+                const uId = typeof m === 'object' ? m.user_id : m;
+                const role = (typeof m === 'object' && m.role) ? m.role : 'contributor';
+                const alloc = (typeof m === 'object' && m.allocation_percentage) ? m.allocation_percentage : 100;
+                if (uId && Number(uId) !== Number(owner_id || userId)) {
+                    await db.execute(`
+                        INSERT IGNORE INTO project_members (project_id, user_id, role, allocation_percentage)
+                        VALUES (?, ?, ?, ?)
+                    `, [newProjectId, uId, role, alloc]);
+                }
+            }
+        }
 
         // Insert Phases & track IDs
         const phaseIdMap = {};

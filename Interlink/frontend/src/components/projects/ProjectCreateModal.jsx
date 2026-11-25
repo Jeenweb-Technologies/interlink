@@ -2,12 +2,16 @@ import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { createProject, getProjectTemplates, createProjectFromTemplate } from "../../api/projectApi";
 import { getTaskMetadata } from "../../api/taskApi";
+import AssigneeMultiSelect from "../tasks/AssigneeMultiSelect";
 
 export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const [activeTab, setActiveTab] = useState("basic"); // 'basic' | 'finance' | 'template'
     const [templates, setTemplates] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState("");
     const [users, setUsers] = useState([]);
+    const [companies, setCompanies] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [selectedMemberIds, setSelectedMemberIds] = useState([]);
     const [submitting, setSubmitting] = useState(false);
 
     // Form state
@@ -33,7 +37,11 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 getTaskMetadata().catch(() => ({ data: { data: { users: [] } } }))
             ]).then(([tplRes, metaRes]) => {
                 if (tplRes.data?.success) setTemplates(tplRes.data.data || []);
-                if (metaRes.data?.success) setUsers(metaRes.data.data.users || []);
+                if (metaRes.data?.success && metaRes.data.data) {
+                    setUsers(metaRes.data.data.users || []);
+                    setCompanies(metaRes.data.data.companies || []);
+                    setDepartments(metaRes.data.data.departments || []);
+                }
             });
         }
     }, [isOpen]);
@@ -73,7 +81,8 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                     sponsor_id: sponsorId || null,
                     start_date: startDate || null,
                     end_date: endDate || null,
-                    estimated_budget: Number(estimatedBudget) || 50000
+                    estimated_budget: Number(estimatedBudget) || 50000,
+                    members: selectedMemberIds
                 });
                 if (res.data?.success) {
                     toast.success(res.data.message || "Project created from template!");
@@ -95,7 +104,8 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                     currency,
                     estimated_budget: Number(estimatedBudget) || 0,
                     approved_budget: isBudgetApproved ? (Number(approvedBudget) || Number(estimatedBudget) || 0) : 0,
-                    is_budget_approved: isBudgetApproved
+                    is_budget_approved: isBudgetApproved,
+                    members: selectedMemberIds
                 });
                 if (res.data?.success) {
                     toast.success("Project created successfully!");
@@ -276,6 +286,22 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                     />
                                 </div>
                             </div>
+
+                            {/* Included Team Members (Multi-Select) */}
+                            <div className="pt-2 border-t border-slate-200">
+                                <AssigneeMultiSelect
+                                    label="Included Team Members"
+                                    placeholder="Search and select people included in this project..."
+                                    users={users}
+                                    selectedUserIds={selectedMemberIds}
+                                    onChange={setSelectedMemberIds}
+                                    companies={companies}
+                                    departments={departments}
+                                />
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                    Selected members will be included and granted access to this project
+                                </p>
+                            </div>
                         </div>
                     )}
 
@@ -319,6 +345,22 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                     </select>
                                     <p className="text-[11px] text-slate-400 mt-1">Business stakeholder providing budget and strategic sign-off</p>
                                 </div>
+                            </div>
+
+                            {/* Project Team Members (Multi-Select) */}
+                            <div className="pt-2 border-t border-slate-200">
+                                <AssigneeMultiSelect
+                                    label="Included Team Members"
+                                    placeholder="Search and select people included in this project..."
+                                    users={users}
+                                    selectedUserIds={selectedMemberIds}
+                                    onChange={setSelectedMemberIds}
+                                    companies={companies}
+                                    departments={departments}
+                                />
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                    Team members will be granted access and assigned to this project
+                                </p>
                             </div>
 
                             <div className="pt-2 border-t border-slate-200">
