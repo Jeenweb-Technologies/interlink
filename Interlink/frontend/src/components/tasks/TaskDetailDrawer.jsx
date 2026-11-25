@@ -3,6 +3,7 @@ import toast from "react-hot-toast";
 import { useTaskTimer } from "../../context/TaskTimerContext";
 import {
     getTaskById,
+    getTaskMetadata,
     updateTask,
     deleteTask,
     addComment,
@@ -14,6 +15,7 @@ import {
     deleteDependency
 } from "../../api/taskApi";
 import { TaskStatusBadge, TaskPriorityBadge, BlockedWorkBadge, TaskLabelChip, AssigneeAvatarGroup } from "./TaskBadges";
+import AssigneeMultiSelect from "./AssigneeMultiSelect";
 
 export default function TaskDetailDrawer({
     taskId,
@@ -60,6 +62,42 @@ export default function TaskDetailDrawer({
     // Dependency adder
     const [showDepPicker, setShowDepPicker] = useState(false);
     const [selectedPredId, setSelectedPredId] = useState("");
+
+    // Metadata for Assignee management
+    const [metadataUsers, setMetadataUsers] = useState([]);
+    const [companies, setCompanies] = useState([]);
+    const [departments, setDepartments] = useState([]);
+
+    useEffect(() => {
+        if (isOpen) {
+            getTaskMetadata()
+                .then((res) => {
+                    if (res.data?.success && res.data.data) {
+                        setMetadataUsers(res.data.data.users || []);
+                        setCompanies(res.data.data.companies || []);
+                        setDepartments(res.data.data.departments || []);
+                    }
+                })
+                .catch((err) => console.error("Error loading task metadata:", err));
+        }
+    }, [isOpen]);
+
+    const handleUpdateAssignees = async (newAssigneeIds) => {
+        if (!task) return;
+        try {
+            const res = await updateTask(task.id, { assignees: newAssigneeIds });
+            if (res.data?.success) {
+                toast.success("Assignees updated!");
+                fetchDetail(task.id);
+                if (onUpdated) onUpdated();
+            } else {
+                toast.error(res.data?.message || "Failed to update assignees");
+            }
+        } catch (err) {
+            console.error("Update assignees error:", err);
+            toast.error("Failed to update assignees");
+        }
+    };
 
     const fetchDetail = async (id) => {
         try {
@@ -404,16 +442,23 @@ export default function TaskDetailDrawer({
                             </div>
 
                             {/* Assignees & Labels */}
-                            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs text-slate-400">Assignees:</span>
-                                    <AssigneeAvatarGroup assignees={task.assignees} max={5} />
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {task.labels?.map((l) => (
-                                        <TaskLabelChip key={l.id} name={l.name} color={l.color} />
-                                    ))}
-                                </div>
+                            <div className="space-y-3 pt-2 border-t border-slate-100">
+                                <AssigneeMultiSelect
+                                    label="Assigned Members"
+                                    users={metadataUsers.length > 0 ? metadataUsers : (task.assignees || [])}
+                                    selectedUserIds={task.assignees?.map(a => a.id) || []}
+                                    onChange={handleUpdateAssignees}
+                                    companies={companies}
+                                    departments={departments}
+                                />
+                                {task.labels?.length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                        <span className="text-xs text-slate-400 mr-1">Labels:</span>
+                                        {task.labels?.map((l) => (
+                                            <TaskLabelChip key={l.id} name={l.name} color={l.color} />
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
