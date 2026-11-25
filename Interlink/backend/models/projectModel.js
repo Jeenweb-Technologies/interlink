@@ -72,6 +72,7 @@ const createProjectTables = async () => {
     await ensureColumn("projects", "completed_at", "DATETIME NULL");
     await ensureColumn("projects", "actual_completion_duration_days", "DECIMAL(6,1) NULL");
     await ensureColumn("projects", "total_logged_hours", "DECIMAL(8,2) DEFAULT 0.00");
+    await ensureColumn("projects", "notes", "LONGTEXT NULL");
     await ensureColumn("projects", "deleted_at", "TIMESTAMP NULL");
 
     // Ensure status ENUM supports all enterprise statuses

@@ -293,6 +293,7 @@ exports.createProject = async (req, res) => {
             name,
             code,
             description,
+            notes,
             parent_project_id,
             status = 'planning',
             priority = 'medium',
@@ -329,16 +330,17 @@ exports.createProject = async (req, res) => {
 
         const [result] = await db.execute(`
             INSERT INTO projects (
-                tenant_id, company_id, code, name, description, parent_project_id, status, priority, visibility,
+                tenant_id, company_id, code, name, description, notes, parent_project_id, status, priority, visibility,
                 owner_id, sponsor_id, start_date, end_date, baseline_start_date, baseline_end_date,
                 currency, estimated_budget, approved_budget, is_budget_approved, actual_cost, progress_percentage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
         `, [
             tenantId,
             companyId,
             projectCode,
             name.trim(),
             description || null,
+            notes || null,
             parent_project_id || null,
             projectStatus,
             priority,
@@ -410,6 +412,7 @@ exports.updateProject = async (req, res) => {
             name,
             code,
             description,
+            notes,
             status,
             priority,
             visibility,
@@ -431,6 +434,7 @@ exports.updateProject = async (req, res) => {
         if (name !== undefined) { updates.push("name = ?"); params.push(name.trim()); }
         if (code !== undefined) { updates.push("code = ?"); params.push(code.trim().toUpperCase()); }
         if (description !== undefined) { updates.push("description = ?"); params.push(description); }
+        if (notes !== undefined) { updates.push("notes = ?"); params.push(notes); }
         if (status !== undefined) {
             const allowedStatuses = ['planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled'];
             const validStatus = allowedStatuses.includes(String(status).toLowerCase())

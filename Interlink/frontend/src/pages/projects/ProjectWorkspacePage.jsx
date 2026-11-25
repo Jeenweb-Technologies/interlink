@@ -233,6 +233,18 @@ export default function ProjectWorkspacePage() {
                                                 {project.description || "No detailed charter provided. Edit project details to establish scope and success criteria."}
                                             </p>
 
+                                            {project.notes && (
+                                                <div className="pt-3 border-t border-slate-100">
+                                                    <h4 className="text-xs font-bold text-[#17365D] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <i className="fa-solid fa-note-sticky text-[#2878C7]"></i>
+                                                        <span>Project Notes &amp; Operational Details</span>
+                                                    </h4>
+                                                    <div className="text-xs text-[#5B6573] whitespace-pre-wrap leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+                                                        {project.notes}
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-100">
                                                 <div className="p-3 bg-slate-50 rounded-lg">
                                                     <span className="text-[10px] font-bold text-slate-400 uppercase">Phases Defined</span>
