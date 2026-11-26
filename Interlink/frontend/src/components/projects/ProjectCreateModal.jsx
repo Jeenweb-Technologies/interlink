@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
-import { createProject, getProjectTemplates, createProjectFromTemplate } from "../../api/projectApi";
+import { createProject } from "../../api/projectApi";
 import { getTaskMetadata } from "../../api/taskApi";
+import AssigneeMultiSelect from "../tasks/AssigneeMultiSelect";
 
-export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
-    const [activeTab, setActiveTab] = useState("basic"); // 'basic' | 'finance' | 'template'
-    const [templates, setTemplates] = useState([]);
-    const [selectedTemplateId, setSelectedTemplateId] = useState("");
+export default function ProjectCreateModal({ isOpen, onClose, onCreated, parentProject = null }) {
+    const [activeTab, setActiveTab] = useState("basic"); // 'basic' | 'finance' | 'notes_details'
     const [users, setUsers] = useState([]);
+    const [companies, setCompanies] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [selectedMemberIds, setSelectedMemberIds] = useState([]);
     const [submitting, setSubmitting] = useState(false);
 
     // Form state
     const [name, setName] = useState("");
     const [code, setCode] = useState("");
     const [description, setDescription] = useState("");
+    const [notes, setNotes] = useState("");
+    const [keyDeliverables, setKeyDeliverables] = useState("");
+    const [risksConstraints, setRisksConstraints] = useState("");
     const [priority, setPriority] = useState("medium");
-    const [visibility, setVisibility] = useState("public");
     const [ownerId, setOwnerId] = useState("");
     const [sponsorId, setSponsorId] = useState("");
     const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
@@ -25,18 +29,61 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const [approvedBudget, setApprovedBudget] = useState("");
     const [isBudgetApproved, setIsBudgetApproved] = useState(false);
 
-    // Load templates and users metadata
+    // Initialize/prefill state when modal opens or parentProject changes
     useEffect(() => {
         if (isOpen) {
-            Promise.all([
-                getProjectTemplates().catch(() => ({ data: { data: [] } })),
-                getTaskMetadata().catch(() => ({ data: { data: { users: [] } } }))
-            ]).then(([tplRes, metaRes]) => {
-                if (tplRes.data?.success) setTemplates(tplRes.data.data || []);
-                if (metaRes.data?.success) setUsers(metaRes.data.data.users || []);
-            });
+            setActiveTab("basic");
+            if (parentProject) {
+                setName("");
+                setCode(parentProject.code ? `${parentProject.code}-SUB` : "SUB-");
+                setDescription("");
+                setNotes("");
+                setKeyDeliverables("");
+                setRisksConstraints("");
+                setPriority(parentProject.priority || "medium");
+                setOwnerId(parentProject.owner_id || "");
+                setSponsorId(parentProject.sponsor_id || "");
+                setStartDate(parentProject.start_date ? parentProject.start_date.slice(0, 10) : new Date().toISOString().slice(0, 10));
+                setEndDate(parentProject.end_date ? parentProject.end_date.slice(0, 10) : "");
+                setCurrency(parentProject.currency || "USD");
+                setEstimatedBudget("");
+                setApprovedBudget("");
+                setIsBudgetApproved(false);
+                setSelectedMemberIds(
+                    parentProject.members && Array.isArray(parentProject.members)
+                        ? parentProject.members.map((m) => m.id || m.user_id).filter(Boolean)
+                        : []
+                );
+            } else {
+                setName("");
+                setCode("");
+                setDescription("");
+                setNotes("");
+                setKeyDeliverables("");
+                setRisksConstraints("");
+                setPriority("medium");
+                setOwnerId("");
+                setSponsorId("");
+                setStartDate(new Date().toISOString().slice(0, 10));
+                setEndDate("");
+                setCurrency("USD");
+                setEstimatedBudget("");
+                setApprovedBudget("");
+                setIsBudgetApproved(false);
+                setSelectedMemberIds([]);
+            }
+
+            getTaskMetadata()
+                .then((metaRes) => {
+                    if (metaRes.data?.success && metaRes.data.data) {
+                        setUsers(metaRes.data.data.users || []);
+                        setCompanies(metaRes.data.data.companies || []);
+                        setDepartments(metaRes.data.data.departments || []);
+                    }
+                })
+                .catch(() => ({ data: { data: { users: [] } } }));
         }
-    }, [isOpen]);
+    }, [isOpen, parentProject]);
 
     if (!isOpen) return null;
 
@@ -44,10 +91,11 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const handleNameChange = (e) => {
         const val = e.target.value;
         setName(val);
-        if (!code || code.startsWith("PRJ-")) {
+        const prefix = parentProject?.code ? `${parentProject.code}-` : "PRJ-";
+        if (!code || code.startsWith("PRJ-") || (parentProject?.code && code.startsWith(`${parentProject.code}-`))) {
             const clean = val.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase();
             if (clean) {
-                setCode(`PRJ-${clean}`);
+                setCode(`${prefix}${clean}`);
             }
         }
     };
@@ -55,7 +103,7 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!name.trim()) {
-            toast.error("Project name is required");
+            toast.error(parentProject ? "Sub-project name is required" : "Project name is required");
             setActiveTab("basic");
             return;
         }
@@ -63,49 +111,42 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
         try {
             setSubmitting(true);
 
-            if (selectedTemplateId) {
-                // Creation via template
-                const res = await createProjectFromTemplate({
-                    template_id: selectedTemplateId,
-                    name: name.trim(),
-                    code: code.trim(),
-                    owner_id: ownerId || null,
-                    sponsor_id: sponsorId || null,
-                    start_date: startDate || null,
-                    end_date: endDate || null,
-                    estimated_budget: Number(estimatedBudget) || 50000
-                });
-                if (res.data?.success) {
-                    toast.success(res.data.message || "Project created from template!");
-                    onCreated(res.data.data);
-                    onClose();
-                }
+            // Combine project notes and detailed requirements
+            const combinedNotes = [
+                notes.trim(),
+                keyDeliverables.trim() ? `Key Deliverables & Scope:\n${keyDeliverables.trim()}` : "",
+                risksConstraints.trim() ? `Known Risks & Constraints:\n${risksConstraints.trim()}` : ""
+            ].filter(Boolean).join("\n\n");
+
+            const res = await createProject({
+                name: name.trim(),
+                code: code.trim(),
+                description: description.trim(),
+                notes: combinedNotes,
+                parent_project_id: parentProject?.id || null,
+                priority,
+                visibility: "private",
+                owner_id: ownerId || null,
+                sponsor_id: sponsorId || null,
+                start_date: startDate || null,
+                end_date: endDate || null,
+                currency,
+                estimated_budget: Number(estimatedBudget) || 0,
+                approved_budget: isBudgetApproved ? (Number(approvedBudget) || Number(estimatedBudget) || 0) : 0,
+                is_budget_approved: isBudgetApproved,
+                members: selectedMemberIds
+            });
+
+            if (res.data?.success) {
+                toast.success(parentProject ? "Sub-project created successfully!" : "Project created successfully!");
+                onCreated(res.data.data);
+                onClose();
             } else {
-                // Standard project creation
-                const res = await createProject({
-                    name: name.trim(),
-                    code: code.trim(),
-                    description: description.trim(),
-                    priority,
-                    visibility,
-                    owner_id: ownerId || null,
-                    sponsor_id: sponsorId || null,
-                    start_date: startDate || null,
-                    end_date: endDate || null,
-                    currency,
-                    estimated_budget: Number(estimatedBudget) || 0,
-                    approved_budget: isBudgetApproved ? (Number(approvedBudget) || Number(estimatedBudget) || 0) : 0,
-                    is_budget_approved: isBudgetApproved
-                });
-                if (res.data?.success) {
-                    toast.success("Project created successfully!");
-                    onCreated(res.data.data);
-                    onClose();
-                }
+                toast.error(res.data?.message || (parentProject ? "Failed to create sub-project" : "Failed to create project"));
             }
         } catch (err) {
             console.error("Create project error:", err);
-            toast.error(err.response?.data?.message || "Failed to create project");
+            toast.error(err.response?.data?.message || (parentProject ? "Failed to create sub-project" : "Failed to create project"));
         } finally {
             setSubmitting(false);
         }
@@ -118,11 +159,17 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
                     <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#17365D] flex items-center justify-center font-bold text-sm">
-                            <i className="fa-solid fa-folder-plus"></i>
+                            <i className={parentProject ? "fa-solid fa-folder-tree text-[#2878C7]" : "fa-solid fa-folder-plus"}></i>
                         </div>
                         <div>
-                            <h2 className="text-base font-bold text-[#17212F]">Create New Project</h2>
-                            <p className="text-xs text-[#5B6573]">Set up an enterprise initiative with governance & budget</p>
+                            <h2 className="text-base font-bold text-[#17212F]">
+                                {parentProject ? "Create Sub-Project" : "Create New Project"}
+                            </h2>
+                            <p className="text-xs text-[#5B6573]">
+                                {parentProject
+                                    ? `Child workstream governed under ${parentProject.name} (${parentProject.code})`
+                                    : "Set up an enterprise initiative with governance & budget"}
+                            </p>
                         </div>
                     </div>
                     <button
@@ -161,15 +208,15 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                     </button>
                     <button
                         type="button"
-                        onClick={() => setActiveTab("template")}
+                        onClick={() => setActiveTab("notes_details")}
                         className={`py-3 border-b-2 cursor-pointer transition-colors flex items-center gap-1.5 ${
-                            activeTab === "template"
+                            activeTab === "notes_details"
                                 ? "border-[#17365D] text-[#17365D]"
                                 : "border-transparent text-[#5B6573] hover:text-[#17212F]"
                         }`}
                     >
-                        <i className="fa-solid fa-cubes"></i>
-                        <span>3. Blueprint Template</span>
+                        <i className="fa-solid fa-file-lines"></i>
+                        <span>3. Notes &amp; Details</span>
                     </button>
                 </div>
 
@@ -177,15 +224,27 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
                     {activeTab === "basic" && (
                         <div className="space-y-4 animate-in fade-in duration-150">
+                            {parentProject && (
+                                <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-xl flex items-center justify-between text-xs text-[#17365D]">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fa-solid fa-diagram-project text-[#2878C7]"></i>
+                                        <span>Sub-project under <strong>{parentProject.name}</strong> ({parentProject.code})</span>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-[#17365D] bg-white px-2 py-0.5 rounded border border-blue-100">
+                                        Common items prefilled
+                                    </span>
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                    Project Name <span className="text-red-500">*</span>
+                                    {parentProject ? "Sub-project Name" : "Project Name"} <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
                                     value={name}
                                     onChange={handleNameChange}
-                                    placeholder="e.g. Next-Gen Mobile App Client"
+                                    placeholder={parentProject ? "e.g. Mobile Core Client Workstream" : "e.g. Next-Gen Mobile App Client"}
                                     className="w-full text-sm px-3.5 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all"
                                     required
                                 />
@@ -236,22 +295,7 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                 />
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                        Visibility
-                                    </label>
-                                    <select
-                                        value={visibility}
-                                        onChange={(e) => setVisibility(e.target.value)}
-                                        className="w-full text-sm px-3.5 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
-                                    >
-                                        <option value="public">Public to Workspace</option>
-                                        <option value="private">Private to Team Members</option>
-                                        <option value="restricted">Restricted / Confidential</option>
-                                    </select>
-                                </div>
-
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-xs font-semibold text-[#17212F] mb-1">
                                         Start Date
@@ -275,6 +319,22 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                         className="w-full text-sm px-3.5 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
                                     />
                                 </div>
+                            </div>
+
+                            {/* Included Team Members (Multi-Select) */}
+                            <div className="pt-2 border-t border-slate-200">
+                                <AssigneeMultiSelect
+                                    label="Included Team Members"
+                                    placeholder="Search and select people included in this project..."
+                                    users={users}
+                                    selectedUserIds={selectedMemberIds}
+                                    onChange={setSelectedMemberIds}
+                                    companies={companies}
+                                    departments={departments}
+                                />
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                    Selected members will be included and granted access to this project
+                                </p>
                             </div>
                         </div>
                     )}
@@ -319,6 +379,22 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                     </select>
                                     <p className="text-[11px] text-slate-400 mt-1">Business stakeholder providing budget and strategic sign-off</p>
                                 </div>
+                            </div>
+
+                            {/* Project Team Members (Multi-Select) */}
+                            <div className="pt-2 border-t border-slate-200">
+                                <AssigneeMultiSelect
+                                    label="Included Team Members"
+                                    placeholder="Search and select people included in this project..."
+                                    users={users}
+                                    selectedUserIds={selectedMemberIds}
+                                    onChange={setSelectedMemberIds}
+                                    companies={companies}
+                                    departments={departments}
+                                />
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                    Team members will be granted access and assigned to this project
+                                </p>
                             </div>
 
                             <div className="pt-2 border-t border-slate-200">
@@ -383,72 +459,73 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                         </div>
                     )}
 
-                    {activeTab === "template" && (
+                    {activeTab === "notes_details" && (
                         <div className="space-y-4 animate-in fade-in duration-150">
-                            <p className="text-xs text-[#5B6573]">
-                                Choose an enterprise blueprint to automatically populate standard phases, key milestones, and starter tasks for this project.
-                            </p>
+                            <div>
+                                <label className="block text-xs font-semibold text-[#17212F] mb-1">
+                                    Project Notes &amp; Operating Guidelines
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    placeholder="Add context, general guidelines, operational instructions, or handover notes for the project team..."
+                                    className="w-full text-sm px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all resize-none"
+                                />
+                            </div>
 
-                            <div className="grid grid-cols-1 gap-3">
-                                <div
-                                    onClick={() => setSelectedTemplateId("")}
-                                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                                        selectedTemplateId === ""
-                                            ? "border-[#17365D] bg-slate-50 ring-2 ring-[#17365D]/10"
-                                            : "border-slate-200 hover:border-slate-300 bg-white"
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2.5">
-                                            <div className="w-8 h-8 rounded-lg bg-slate-200 text-slate-700 flex items-center justify-center text-sm font-bold">
-                                                <i className="fa-solid fa-file"></i>
-                                            </div>
-                                            <div>
-                                                <h4 className="text-sm font-bold text-[#17212F]">Blank Project</h4>
-                                                <p className="text-xs text-[#5B6573]">Start with an empty structure and define phases manually</p>
-                                            </div>
-                                        </div>
-                                        {selectedTemplateId === "" && (
-                                            <span className="text-blue-600 font-bold text-sm">
-                                                <i className="fa-solid fa-circle-check"></i>
-                                            </span>
-                                        )}
+                            <div>
+                                <label className="block text-xs font-semibold text-[#17212F] mb-1">
+                                    Key Deliverables &amp; Specific Scope Details
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={keyDeliverables}
+                                    onChange={(e) => setKeyDeliverables(e.target.value)}
+                                    placeholder="Enumerate concrete milestones, deliverables, expected business outputs, and acceptance criteria..."
+                                    className="w-full text-sm px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all resize-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-[#17212F] mb-1">
+                                    Known Risks, Assumptions &amp; Dependencies
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={risksConstraints}
+                                    onChange={(e) => setRisksConstraints(e.target.value)}
+                                    placeholder="Note down critical risks, external vendor dependencies, budget constraints, or regulatory assumptions..."
+                                    className="w-full text-sm px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all resize-none"
+                                />
+                            </div>
+
+                            {/* Summary Card */}
+                            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                                <span className="text-[11px] font-bold text-[#17365D] uppercase tracking-wider flex items-center gap-1.5">
+                                    <i className="fa-solid fa-clipboard-check text-[#2878C7]"></i>
+                                    <span>Initiative Summary Preview</span>
+                                </span>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                                        <span className="text-[10px] text-slate-400 block font-semibold uppercase">Code</span>
+                                        <span className="font-bold text-[#17212F]">{code || "Auto"}</span>
+                                    </div>
+                                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                                        <span className="text-[10px] text-slate-400 block font-semibold uppercase">Priority</span>
+                                        <span className="font-bold text-[#17212F] capitalize">{priority}</span>
+                                    </div>
+                                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                                        <span className="text-[10px] text-slate-400 block font-semibold uppercase">Est. Budget</span>
+                                        <span className="font-bold text-[#17212F]">
+                                            {currency} {Number(estimatedBudget || 0).toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                                        <span className="text-[10px] text-slate-400 block font-semibold uppercase">Members</span>
+                                        <span className="font-bold text-[#17212F]">{selectedMemberIds.length} Assigned</span>
                                     </div>
                                 </div>
-
-                                {templates.map((tpl) => (
-                                    <div
-                                        key={tpl.id}
-                                        onClick={() => setSelectedTemplateId(tpl.id)}
-                                        className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                                            selectedTemplateId === tpl.id
-                                                ? "border-[#2878C7] bg-blue-50/50 ring-2 ring-[#2878C7]/20"
-                                                : "border-slate-200 hover:border-slate-300 bg-white"
-                                        }`}
-                                    >
-                                        <div className="flex items-center justify-between mb-1">
-                                            <div className="flex items-center gap-2.5">
-                                                <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#17365D] flex items-center justify-center text-sm font-bold">
-                                                    <i className="fa-solid fa-layer-group"></i>
-                                                </div>
-                                                <div>
-                                                    <h4 className="text-sm font-bold text-[#17212F]">{tpl.name}</h4>
-                                                    <span className="text-[10px] font-semibold text-blue-700 uppercase tracking-wider">
-                                                        {tpl.category}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {selectedTemplateId === tpl.id && (
-                                                <span className="text-[#2878C7] font-bold text-sm">
-                                                    <i className="fa-solid fa-circle-check"></i>
-                                                </span>
-                                            )}
-                                        </div>
-                                        <p className="text-xs text-[#5B6573] line-clamp-2 mt-1">
-                                            {tpl.description}
-                                        </p>
-                                    </div>
-                                ))}
                             </div>
                         </div>
                     )}
@@ -464,10 +541,10 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                         </button>
 
                         <div className="flex items-center gap-2">
-                            {activeTab !== "template" ? (
+                            {activeTab !== "notes_details" ? (
                                 <button
                                     type="button"
-                                    onClick={() => setActiveTab(activeTab === "basic" ? "finance" : "template")}
+                                    onClick={() => setActiveTab(activeTab === "basic" ? "finance" : "notes_details")}
                                     className="px-4 py-2 text-xs font-semibold text-[#17365D] bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors cursor-pointer flex items-center gap-1.5"
                                 >
                                     <span>Next Step</span>
@@ -483,12 +560,12 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                 {submitting ? (
                                     <>
                                         <i className="fa-solid fa-circle-notch fa-spin"></i>
-                                        <span>Creating Project...</span>
+                                        <span>{parentProject ? "Creating Sub-Project..." : "Creating Project..."}</span>
                                     </>
                                 ) : (
                                     <>
                                         <i className="fa-solid fa-check"></i>
-                                        <span>Create Project</span>
+                                        <span>{parentProject ? "Create Sub-Project" : "Create Project"}</span>
                                     </>
                                 )}
                             </button>

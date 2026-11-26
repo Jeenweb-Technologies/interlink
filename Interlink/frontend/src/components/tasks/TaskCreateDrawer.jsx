@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { createTask } from "../../api/taskApi";
+import AssigneeMultiSelect from "./AssigneeMultiSelect";
 
 export default function TaskCreateDrawer({
     isOpen,
@@ -301,33 +302,17 @@ export default function TaskCreateDrawer({
                     </div>
 
                     {/* Assignees Selector */}
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
-                        <label className="block text-xs font-bold text-[#17212F] uppercase tracking-wider">
-                            Assignees ({selectedAssignees.length} selected)
-                        </label>
-                        <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
-                            {metadata.users?.map((u) => {
-                                const isSelected = selectedAssignees.includes(u.id);
-                                return (
-                                    <button
-                                        type="button"
-                                        key={u.id}
-                                        onClick={() => handleToggleAssignee(u.id)}
-                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                                            isSelected
-                                                ? "bg-[#17365D] text-white border-[#17365D] shadow-xs"
-                                                : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                                        }`}
-                                    >
-                                        <span className="w-4 h-4 rounded-full bg-white/20 text-current flex items-center justify-center text-[10px] font-bold">
-                                            {u.name[0].toUpperCase()}
-                                        </span>
-                                        <span>{u.name}</span>
-                                        {isSelected && <i className="fa-solid fa-check text-[10px] ml-0.5"></i>}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                        <AssigneeMultiSelect
+                            users={metadata.users}
+                            selectedUserIds={selectedAssignees}
+                            onChange={(ids) => {
+                                setIsDirty(true);
+                                setSelectedAssignees(ids);
+                            }}
+                            companies={metadata.companies}
+                            departments={metadata.departments}
+                        />
                     </div>
 
                     {/* Universal Labels */}

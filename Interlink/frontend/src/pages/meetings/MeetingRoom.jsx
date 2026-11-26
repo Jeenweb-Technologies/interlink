@@ -69,6 +69,7 @@ export default function MeetingRoom() {
     const socketRef = useRef(null);
     const peersRef = useRef({});
     const localStreamRef = useRef(null);
+    const mediaStartedRef = useRef(false);
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
 
@@ -380,7 +381,15 @@ export default function MeetingRoom() {
                     if (localStreamRef.current) {
                         localStreamRef.current.getTracks().forEach((t) => t.stop());
                     }
-                    toast.error("The host has ended the meeting.");
+                    toast("The meeting has concluded.", {
+                        icon: "👋",
+                        style: {
+                            borderRadius: "12px",
+                            background: "#0f172a",
+                            color: "#f8fafc",
+                            border: "1px solid rgba(255, 255, 255, 0.1)"
+                        }
+                    });
                     navigate(`/meetings/history/${res.data.meeting.id}`, { replace: true });
                 });
 
@@ -422,6 +431,8 @@ export default function MeetingRoom() {
     // 2. Initialize Camera & Mic Stream
     useEffect(() => {
         if (!meeting || isMeetingEnded || meeting.status === "ended" || meeting.status === "cancelled") return;
+        if (mediaStartedRef.current) return;
+        mediaStartedRef.current = true;
         let active = true;
 
         const startLocalMedia = async () => {
@@ -467,7 +478,9 @@ export default function MeetingRoom() {
                 }
 
                 if (localVideoRef.current && !cameraBusy) {
-                    localVideoRef.current.srcObject = stream;
+                    if (localVideoRef.current.srcObject !== stream) {
+                        localVideoRef.current.srcObject = stream;
+                    }
                 }
             }
         };
@@ -476,8 +489,9 @@ export default function MeetingRoom() {
 
         return () => {
             active = false;
-            if (localStream) {
-                localStream.getTracks().forEach((t) => t.stop());
+            mediaStartedRef.current = false;
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach((t) => t.stop());
             }
         };
     }, [meeting, isMeetingEnded]);
@@ -508,8 +522,9 @@ export default function MeetingRoom() {
 
     // Toggle Mic
     const handleToggleMic = () => {
-        if (localStream) {
-            localStream.getAudioTracks().forEach((t) => {
+        const stream = localStreamRef.current || localStream;
+        if (stream) {
+            stream.getAudioTracks().forEach((t) => {
                 t.enabled = isMicMuted;
             });
         }
@@ -743,30 +758,36 @@ export default function MeetingRoom() {
         return (
             <div className="min-h-screen w-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 select-none font-sans">
                 <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-3xl p-8 text-center shadow-2xl space-y-6">
-                    <div className="w-20 h-20 mx-auto rounded-3xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center text-3xl shadow-inner">
-                        <i className="fa-solid fa-flag-checkered"></i>
+                    <div className="w-20 h-20 mx-auto rounded-3xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-3xl shadow-inner">
+                        <i className="fa-solid fa-circle-check"></i>
                     </div>
 
                     <div className="space-y-2">
-                        <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold uppercase tracking-wider border border-rose-500/30">
+                        <span className="px-3.5 py-1 rounded-full bg-blue-500/10 text-blue-400 text-[11px] font-bold uppercase tracking-wider border border-blue-500/20">
                             Meeting Concluded
                         </span>
                         <h2 className="text-2xl font-black text-white tracking-tight">
-                            This Meeting Has Ended
+                            Meeting Has Ended
                         </h2>
-                        <p className="text-sm text-slate-400 leading-relaxed">
-                            {meeting?.title ? `"${meeting.title}"` : "This meeting"} has concluded. You cannot re-enter an ended meeting session.
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                            Thank you for participating. {meeting?.title ? `"${meeting.title}"` : "The meeting session"} has concluded.
                         </p>
                     </div>
 
-                    {meeting?.scheduled_end && (
-                        <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 flex items-center justify-between">
-                            <span className="text-slate-400">Ended At:</span>
-                            <span className="font-semibold text-slate-200">
-                                {new Date(meeting.scheduled_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Host:</span>
+                            <span className="font-semibold text-slate-200">{meeting?.host_name || "Meeting Host"}</span>
                         </div>
-                    )}
+                        {meeting?.scheduled_end && (
+                            <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Ended At:</span>
+                                <span className="font-semibold text-slate-200">
+                                    {new Date(meeting.scheduled_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="pt-2 flex flex-col gap-3">
                         {meeting?.id && (
@@ -775,7 +796,7 @@ export default function MeetingRoom() {
                                 className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
                             >
                                 <i className="fa-solid fa-file-lines"></i>
-                                <span>View Meeting Summary & Notes</span>
+                                <span>View Meeting Summary &amp; Notes</span>
                             </button>
                         )}
                         <button
@@ -929,8 +950,12 @@ export default function MeetingRoom() {
                                     <video
                                         ref={(el) => {
                                             localVideoRef.current = el;
-                                            if (el && localStream) {
-                                                el.srcObject = localStream;
+                                            if (el) {
+                                                el.muted = true;
+                                                el.defaultMuted = true;
+                                                if (localStream && el.srcObject !== localStream) {
+                                                    el.srcObject = localStream;
+                                                }
                                             }
                                         }}
                                         autoPlay

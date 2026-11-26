@@ -2,14 +2,34 @@ const db = require("../config/db.js");
 const {
     findCompaniesByOrgId,
     findCompanyById,
-    createCompanyRecord
+    createCompanyRecord,
+    getUserCompanies,
+    checkUserCompanyAccess
 } = require("../models/companyModel.js");
 
 // 1. Get all companies under the authenticated user's organization
 const getCompanies = async (req, res) => {
     try {
         const organizationId = req.user?.organization_id || 1;
-        const companies = await findCompaniesByOrgId(organizationId);
+        const userId = req.user?.id;
+        const isSuperOrAdmin = req.user?.role === "admin" || req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
+        const scopeAll = req.query.scope === "all" || req.query.all === "true";
+
+        let companies = [];
+        if (isSuperOrAdmin || scopeAll) {
+            companies = await findCompaniesByOrgId(organizationId);
+        } else {
+            companies = await getUserCompanies(userId);
+            // If user has no specific user_companies assigned yet, fallback to active company or all org companies
+            if (companies.length === 0) {
+                const defaultComp = await findCompanyById(req.user?.company_id || 1);
+                if (defaultComp && defaultComp.organization_id === organizationId) {
+                    companies = [defaultComp];
+                } else {
+                    companies = await findCompaniesByOrgId(organizationId);
+                }
+            }
+        }
 
         return res.status(200).json({
             success: true,
@@ -93,6 +113,7 @@ const switchActiveCompany = async (req, res) => {
         const { companyId } = req.body;
         const userId = req.user?.id;
         const organizationId = req.user?.organization_id || 1;
+        const isSuperOrAdmin = req.user?.role === "admin" || req.user?.role === "super_admin" || req.user?.role === "super admin" || req.user?.role === "developer";
 
         if (!companyId) {
             return res.status(400).json({
@@ -108,6 +129,17 @@ const switchActiveCompany = async (req, res) => {
                 success: false,
                 message: "You do not have access to this company"
             });
+        }
+
+        // For non-admin employees, verify they have been granted access to this company
+        if (!isSuperOrAdmin) {
+            const hasAccess = await checkUserCompanyAccess(userId, companyId);
+            if (!hasAccess && req.user?.company_id !== parseInt(companyId, 10)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You do not have permission to access this company"
+                });
+            }
         }
 
         await db.execute(

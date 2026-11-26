@@ -8,6 +8,25 @@ exports.getPortfolioMetrics = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
+        let memberFilter = "";
+        let memberParams = [];
+        if (!isAdmin) {
+            memberFilter = ` AND (
+                p.owner_id = ? 
+                OR p.sponsor_id = ? 
+                OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+                OR p.parent_project_id IN (
+                    SELECT project_id FROM project_members WHERE user_id = ?
+                    UNION
+                    SELECT id FROM projects WHERE owner_id = ? OR sponsor_id = ?
+                )
+            )`;
+            memberParams = [userId, userId, userId, userId, userId, userId];
+        }
 
         // Base project counts
         const [counts] = await db.execute(`
@@ -21,17 +40,19 @@ exports.getPortfolioMetrics = async (req, res) => {
                 SUM(estimated_budget) as total_estimated_budget,
                 SUM(approved_budget) as total_approved_budget,
                 SUM(actual_cost) as total_actual_cost
-            FROM projects 
-            WHERE tenant_id = ? AND company_id = ? AND parent_project_id IS NULL AND deleted_at IS NULL
-        `, [tenantId, companyId]);
+            FROM projects p
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
+            ${memberFilter}
+        `, [tenantId, companyId, ...memberParams]);
 
         // Health distribution (On Track, At Risk, Delayed)
         const [projects] = await db.execute(`
             SELECT p.id, p.end_date, p.progress_percentage, p.approved_budget, p.actual_cost,
                    (SELECT COUNT(*) FROM project_risks r WHERE r.project_id = p.id AND r.severity_score >= 12 AND r.status != 'closed') as high_risks_count
             FROM projects p
-            WHERE p.tenant_id = ? AND p.company_id = ? AND p.parent_project_id IS NULL AND p.deleted_at IS NULL AND p.status = 'active'
-        `, [tenantId, companyId]);
+            WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
+            ${memberFilter}
+        `, [tenantId, companyId, ...memberParams]);
 
         let onTrack = 0;
         let atRisk = 0;
@@ -87,12 +108,17 @@ exports.getProjects = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
         const { search, status, priority, owner_id, sponsor_id, visibility, include_subprojects } = req.query;
 
         let query = `
             SELECT p.*,
                    u_owner.name as owner_name, u_owner.email as owner_email,
                    u_sponsor.name as sponsor_name, u_sponsor.email as sponsor_email,
+                   parent.name as parent_project_name, parent.code as parent_project_code,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.deleted_at IS NULL) as tasks_count,
                    (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.status = 'done' AND t.deleted_at IS NULL) as completed_tasks_count,
                    (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) as members_count,
@@ -101,14 +127,33 @@ exports.getProjects = async (req, res) => {
             FROM projects p
             LEFT JOIN users u_owner ON p.owner_id = u_owner.id
             LEFT JOIN users u_sponsor ON p.sponsor_id = u_sponsor.id
+            LEFT JOIN projects parent ON p.parent_project_id = parent.id
             WHERE p.tenant_id = ? AND p.company_id = ? AND p.deleted_at IS NULL
         `;
 
         const params = [tenantId, companyId];
 
-        // By default show top-level projects unless user requests subprojects explicitly
-        if (include_subprojects !== 'true') {
+        // Non-admin members only see projects where they are explicitly included as a member, owner, sponsor, or parent project member
+        if (!isAdmin) {
+            query += ` AND (
+                p.owner_id = ?
+                OR p.sponsor_id = ?
+                OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+                OR p.parent_project_id IN (
+                    SELECT project_id FROM project_members WHERE user_id = ?
+                    UNION
+                    SELECT id FROM projects WHERE owner_id = ? OR sponsor_id = ?
+                )
+            )`;
+            params.push(userId, userId, userId, userId, userId, userId);
+        }
+
+        // Support explicit filtering: top-level only or by parent project
+        if (req.query.top_level_only === 'true') {
             query += " AND p.parent_project_id IS NULL";
+        } else if (req.query.parent_project_id) {
+            query += " AND p.parent_project_id = ?";
+            params.push(req.query.parent_project_id);
         }
 
         if (status) {
@@ -162,6 +207,29 @@ exports.getProjectById = async (req, res) => {
         const { id } = req.params;
         const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
+
+        // Access control: Only included members, owner, sponsor, parent project members, or administrators can view
+        if (!isAdmin) {
+            const [membership] = await db.execute(`
+                SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
+                UNION
+                SELECT 1 FROM projects WHERE id = ? AND (owner_id = ? OR sponsor_id = ?)
+                UNION
+                SELECT 1 FROM project_members WHERE project_id = (SELECT parent_project_id FROM projects WHERE id = ?) AND user_id = ?
+                UNION
+                SELECT 1 FROM projects WHERE id = (SELECT parent_project_id FROM projects WHERE id = ?) AND (owner_id = ? OR sponsor_id = ?)
+            `, [id, userId, id, userId, userId, id, userId, id, userId, userId]);
+
+            if (membership.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Access denied. Only included members can view this project."
+                });
+            }
+        }
 
         const [rows] = await db.execute(`
             SELECT p.*,
@@ -248,6 +316,7 @@ exports.createProject = async (req, res) => {
             name,
             code,
             description,
+            notes,
             parent_project_id,
             status = 'planning',
             priority = 'medium',
@@ -277,21 +346,26 @@ exports.createProject = async (req, res) => {
         }
 
         const projectOwnerId = owner_id || userId;
+        const allowedStatuses = ['planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled'];
+        const projectStatus = allowedStatuses.includes(String(status).toLowerCase())
+            ? String(status).toLowerCase()
+            : 'planning';
 
         const [result] = await db.execute(`
             INSERT INTO projects (
-                tenant_id, company_id, code, name, description, parent_project_id, status, priority, visibility,
+                tenant_id, company_id, code, name, description, notes, parent_project_id, status, priority, visibility,
                 owner_id, sponsor_id, start_date, end_date, baseline_start_date, baseline_end_date,
                 currency, estimated_budget, approved_budget, is_budget_approved, actual_cost, progress_percentage
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.00, 0.00)
         `, [
             tenantId,
             companyId,
             projectCode,
             name.trim(),
             description || null,
+            notes || null,
             parent_project_id || null,
-            status,
+            projectStatus,
             priority,
             visibility,
             projectOwnerId,
@@ -361,6 +435,7 @@ exports.updateProject = async (req, res) => {
             name,
             code,
             description,
+            notes,
             status,
             priority,
             visibility,
@@ -382,7 +457,15 @@ exports.updateProject = async (req, res) => {
         if (name !== undefined) { updates.push("name = ?"); params.push(name.trim()); }
         if (code !== undefined) { updates.push("code = ?"); params.push(code.trim().toUpperCase()); }
         if (description !== undefined) { updates.push("description = ?"); params.push(description); }
-        if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+        if (notes !== undefined) { updates.push("notes = ?"); params.push(notes); }
+        if (status !== undefined) {
+            const allowedStatuses = ['planning', 'active', 'on_hold', 'completed', 'archived', 'cancelled'];
+            const validStatus = allowedStatuses.includes(String(status).toLowerCase())
+                ? String(status).toLowerCase()
+                : 'planning';
+            updates.push("status = ?");
+            params.push(validStatus);
+        }
         if (priority !== undefined) { updates.push("priority = ?"); params.push(priority); }
         if (visibility !== undefined) { updates.push("visibility = ?"); params.push(visibility); }
         if (owner_id !== undefined) { updates.push("owner_id = ?"); params.push(owner_id); }
@@ -462,7 +545,7 @@ exports.createProjectFromTemplate = async (req, res) => {
     try {
         const tenantId = req.user?.tenant_id || 1;
         const userId = req.user?.id || 1;
-        const { template_id, name, code, start_date, end_date, owner_id, sponsor_id, estimated_budget } = req.body;
+        const { template_id, name, code, start_date, end_date, owner_id, sponsor_id, estimated_budget, members = [] } = req.body;
 
         const [templates] = await db.execute("SELECT * FROM project_templates WHERE id = ? AND tenant_id = ?", [template_id, tenantId]);
         if (templates.length === 0) {
@@ -497,6 +580,21 @@ exports.createProjectFromTemplate = async (req, res) => {
             INSERT IGNORE INTO project_members (project_id, user_id, role, allocation_percentage)
             VALUES (?, ?, 'project_manager', 100)
         `, [newProjectId, owner_id || userId]);
+
+        // Add additional team members
+        if (Array.isArray(members) && members.length > 0) {
+            for (const m of members) {
+                const uId = typeof m === 'object' ? m.user_id : m;
+                const role = (typeof m === 'object' && m.role) ? m.role : 'contributor';
+                const alloc = (typeof m === 'object' && m.allocation_percentage) ? m.allocation_percentage : 100;
+                if (uId && Number(uId) !== Number(owner_id || userId)) {
+                    await db.execute(`
+                        INSERT IGNORE INTO project_members (project_id, user_id, role, allocation_percentage)
+                        VALUES (?, ?, ?, ?)
+                    `, [newProjectId, uId, role, alloc]);
+                }
+            }
+        }
 
         // Insert Phases & track IDs
         const phaseIdMap = {};
@@ -1030,8 +1128,14 @@ exports.getDocuments = async (req, res) => {
             ORDER BY d.created_at DESC
         `, [id]);
 
-        res.json({ success: true, data: docs });
+        const formattedDocs = (docs || []).map(d => ({
+            ...d,
+            file_url: uploadConfig.getFileUrl(d.file_path)
+        }));
+
+        res.json({ success: true, data: formattedDocs });
     } catch (err) {
+        console.error("Error getDocuments:", err);
         res.status(500).json({ success: false, message: "Failed to load documents" });
     }
 };

@@ -201,23 +201,20 @@ export default function ProjectWorkspacePage() {
 
                         {/* Navigation Filter / Workspace Tabs Bar: Full width, strictly equal spacing, clean typography without icons */}
                         <div className="w-full bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-x-auto scrollbar-none">
-                            <div className="grid grid-cols-8 w-full min-w-[820px] text-xs font-semibold">
-                                {tabs.map((tab) => {
-                                    const isActive = activeTab === tab.id;
-                                    return (
-                                        <button
-                                            key={tab.id}
-                                            onClick={() => setActiveTab(tab.id)}
-                                            className={`py-3.5 px-3 border-b-2 transition-all cursor-pointer flex items-center justify-center whitespace-nowrap text-center select-none ${
-                                                isActive
-                                                    ? "border-[#17365D] text-[#17365D] font-bold bg-slate-50/50"
-                                                    : "border-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/30"
-                                            }`}
-                                        >
-                                            <span>{tab.label}</span>
-                                        </button>
-                                    );
-                                })}
+                            <div className="grid grid-cols-8 w-full min-w-[800px] text-xs font-bold">
+                                {tabs.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`py-3.5 px-2 border-b-2 transition-all cursor-pointer flex items-center justify-center whitespace-nowrap text-center ${
+                                            activeTab === tab.id
+                                                ? "border-b-[#17365D] text-[#17365D] bg-blue-50/20"
+                                                : "border-b-transparent text-[#5B6573] hover:text-[#17212F] hover:bg-slate-50/50"
+                                        }`}
+                                    >
+                                        <span>{tab.label}</span>
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
@@ -235,6 +232,18 @@ export default function ProjectWorkspacePage() {
                                             <p className="text-xs text-[#5B6573] leading-relaxed">
                                                 {project.description || "No detailed charter provided. Edit project details to establish scope and success criteria."}
                                             </p>
+
+                                            {project.notes && (
+                                                <div className="pt-3 border-t border-slate-100">
+                                                    <h4 className="text-xs font-bold text-[#17365D] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <i className="fa-solid fa-note-sticky text-[#2878C7]"></i>
+                                                        <span>Project Notes &amp; Operational Details</span>
+                                                    </h4>
+                                                    <div className="text-xs text-[#5B6573] whitespace-pre-wrap leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+                                                        {project.notes}
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-100">
                                                 <div className="p-3 bg-slate-50 rounded-lg">
@@ -296,7 +305,7 @@ export default function ProjectWorkspacePage() {
                             {/* 3. Sub-projects Tab */}
                             {activeTab === "subprojects" && (
                                 <div className="animate-in fade-in duration-150">
-                                    <ProjectSubprojectsView projectId={id} projectCode={project.code} />
+                                    <ProjectSubprojectsView projectId={id} projectCode={project.code} parentProject={project} />
                                 </div>
                             )}
 

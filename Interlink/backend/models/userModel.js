@@ -63,6 +63,10 @@ const createUsersTable = async () => {
         {
             name: 'department_id',
             query: 'ALTER TABLE users ADD COLUMN department_id INT DEFAULT NULL'
+        },
+        {
+            name: 'designation',
+            query: 'ALTER TABLE users ADD COLUMN designation VARCHAR(150) DEFAULT NULL'
         }
     ];
 
@@ -108,13 +112,14 @@ const createUser = async (
     role = 'user',
     organizationId = 1,
     companyId = 1,
-    departmentId = null
+    departmentId = null,
+    designation = null
 ) => {
 
     const query = `
         INSERT INTO users
-        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role, organization_id, company_id, department_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (name, username, email, password, user_type_id, mob_no, date_of_join, device_verification_required, active, role, organization_id, company_id, department_id, designation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await db.execute(query, [
@@ -130,7 +135,8 @@ const createUser = async (
         role,
         organizationId,
         companyId,
-        departmentId || null
+        departmentId || null,
+        designation ? designation.trim() : null
     ]);
 
     return result;
@@ -179,6 +185,7 @@ const getAllUsers = async (includeInactive = false, organizationId = null, compa
         SELECT 
             u.id, u.name, u.username, u.email,
             u.user_type_id, u.mob_no, u.date_of_join, u.device_verification_required,
+            u.designation,
             ut.type_name AS user_type_name, u.active, u.organization_id, u.company_id
         FROM users u
         LEFT JOIN user_types ut ON u.user_type_id = ut.id

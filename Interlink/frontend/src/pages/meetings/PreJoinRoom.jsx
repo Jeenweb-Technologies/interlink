@@ -31,7 +31,6 @@ export default function PreJoinRoom() {
 
     const [isMicMuted, setIsMicMuted] = useState(false);
     const [isCamOff, setIsCamOff] = useState(false);
-    const [micVolume, setMicVolume] = useState(0);
 
     // Lobby / Waiting Room State
     const [isWaitingInLobby, setIsWaitingInLobby] = useState(false);
@@ -43,6 +42,7 @@ export default function PreJoinRoom() {
     const audioContextRef = useRef(null);
     const analyserRef = useRef(null);
     const animationFrameRef = useRef(null);
+    const volumeBarRef = useRef(null);
     const socketRef = useRef(null);
     const hasJoinedRef = useRef(false);
     const meetingRef = useRef(null);
@@ -185,13 +185,17 @@ export default function PreJoinRoom() {
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
                 const updateMeter = () => {
+                    if (!analyserRef.current) return;
                     analyser.getByteFrequencyData(dataArray);
                     let sum = 0;
                     for (let i = 0; i < dataArray.length; i++) {
                         sum += dataArray[i];
                     }
                     const avg = sum / dataArray.length;
-                    setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+                    const vol = Math.min(100, Math.round((avg / 128) * 100));
+                    if (volumeBarRef.current) {
+                        volumeBarRef.current.style.width = `${vol}%`;
+                    }
                     animationFrameRef.current = requestAnimationFrame(updateMeter);
                 };
                 updateMeter();
@@ -220,9 +224,13 @@ export default function PreJoinRoom() {
     // Handle Mic Toggle
     const handleToggleMic = () => {
         if (streamRef.current) {
+            const nextMuted = !isMicMuted;
             streamRef.current.getAudioTracks().forEach((track) => {
-                track.enabled = isMicMuted;
+                track.enabled = !nextMuted;
             });
+            if (nextMuted && volumeBarRef.current) {
+                volumeBarRef.current.style.width = "0%";
+            }
         }
         setIsMicMuted(!isMicMuted);
     };
@@ -316,6 +324,9 @@ export default function PreJoinRoom() {
                             displayName: payload.guest_name
                         }
                     });
+                } else if (res.data?.status === "ended") {
+                    setIsWaitingInLobby(false);
+                    setIsMeetingEnded(true);
                 } else if (res.data?.status === "rejected") {
                     setIsWaitingInLobby(false);
                     toast.error("The host has declined your request to join.");
@@ -350,6 +361,12 @@ export default function PreJoinRoom() {
 
             const res = await getMeetingToken(roomCode, payload);
 
+            if (res.data?.status === "ended") {
+                setIsWaitingInLobby(false);
+                setIsMeetingEnded(true);
+                return;
+            }
+
             if (res.data?.status === "waiting_room") {
                 const myPartId = res.data.participantId;
                 setWaitingParticipantId(myPartId);
@@ -370,6 +387,12 @@ export default function PreJoinRoom() {
                         name: payload.guest_name,
                         email: payload.guest_email
                     }
+                });
+
+                socket.off("meeting_ended");
+                socket.on("meeting_ended", () => {
+                    setIsWaitingInLobby(false);
+                    setIsMeetingEnded(true);
                 });
 
                 socket.off("participant_admitted");
@@ -430,7 +453,12 @@ export default function PreJoinRoom() {
                 toast.error(res.data?.message || "Failed to join meeting");
             }
         } catch (err) {
-            toast.error(err.response?.data?.message || err.message || "Failed to join meeting");
+            const errorMsg = err.response?.data?.message || err.message || "";
+            if (errorMsg.toLowerCase().includes("ended") || err.response?.data?.status === "ended") {
+                setIsMeetingEnded(true);
+                return;
+            }
+            toast.error(errorMsg || "Failed to join meeting");
         } finally {
             setJoining(false);
         }
@@ -481,30 +509,36 @@ export default function PreJoinRoom() {
         return (
             <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 select-none font-sans">
                 <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-3xl p-8 text-center shadow-2xl space-y-6">
-                    <div className="w-20 h-20 mx-auto rounded-3xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center text-3xl shadow-inner">
-                        <i className="fa-solid fa-flag-checkered"></i>
+                    <div className="w-20 h-20 mx-auto rounded-3xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-3xl shadow-inner">
+                        <i className="fa-solid fa-circle-check"></i>
                     </div>
 
                     <div className="space-y-2">
-                        <span className="px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 text-[11px] font-bold uppercase tracking-wider border border-rose-500/30">
+                        <span className="px-3.5 py-1 rounded-full bg-blue-500/10 text-blue-400 text-[11px] font-bold uppercase tracking-wider border border-blue-500/20">
                             Meeting Concluded
                         </span>
                         <h2 className="text-2xl font-black text-white tracking-tight">
-                            This Meeting Has Ended
+                            Meeting Has Ended
                         </h2>
-                        <p className="text-sm text-slate-400 leading-relaxed">
-                            {meeting?.title ? `"${meeting.title}"` : "This meeting"} has concluded. You cannot join or re-enter an ended meeting session.
+                        <p className="text-sm text-slate-300 leading-relaxed">
+                            Thank you for participating. {meeting?.title ? `"${meeting.title}"` : "The meeting session"} has concluded.
                         </p>
                     </div>
 
-                    {meeting?.scheduled_end && (
-                        <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 flex items-center justify-between">
-                            <span className="text-slate-400">Ended At:</span>
-                            <span className="font-semibold text-slate-200">
-                                {new Date(meeting.scheduled_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-xs text-slate-300 space-y-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Host:</span>
+                            <span className="font-semibold text-slate-200">{meeting?.host_name || "Meeting Host"}</span>
                         </div>
-                    )}
+                        {meeting?.scheduled_end && (
+                            <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Ended At:</span>
+                                <span className="font-semibold text-slate-200">
+                                    {new Date(meeting.scheduled_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="pt-2 flex flex-col gap-3">
                         {meeting?.id && (
@@ -513,7 +547,7 @@ export default function PreJoinRoom() {
                                 className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer"
                             >
                                 <i className="fa-solid fa-file-lines"></i>
-                                <span>View Meeting Summary & Notes</span>
+                                <span>View Meeting Summary &amp; Notes</span>
                             </button>
                         )}
                         <button
@@ -601,8 +635,12 @@ export default function PreJoinRoom() {
                                 <video
                                     ref={(el) => {
                                         videoRef.current = el;
-                                        if (el && streamRef.current) {
-                                            el.srcObject = streamRef.current;
+                                        if (el) {
+                                            el.muted = true;
+                                            el.defaultMuted = true;
+                                            if (streamRef.current && el.srcObject !== streamRef.current) {
+                                                el.srcObject = streamRef.current;
+                                            }
                                         }
                                     }}
                                     autoPlay
@@ -618,8 +656,9 @@ export default function PreJoinRoom() {
                                     <i className="fa-solid fa-microphone text-xs text-emerald-400"></i>
                                     <div className="w-16 h-2 bg-white/20 rounded-full overflow-hidden">
                                         <div
+                                            ref={volumeBarRef}
                                             className="h-full bg-emerald-400 transition-all duration-75 rounded-full"
-                                            style={{ width: `${micVolume}%` }}
+                                            style={{ width: "0%" }}
                                         ></div>
                                     </div>
                                 </div>

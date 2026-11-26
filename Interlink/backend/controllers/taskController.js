@@ -1241,16 +1241,32 @@ exports.getTaskMetadata = async (req, res) => {
     try {
         const tenantId = req.user?.organization_id || 1;
         const companyId = req.user?.company_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
 
-        const [projects] = await db.execute(
-            "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ? ORDER BY name ASC",
-            [tenantId, companyId]
-        );
-        const [users] = await db.execute(
-            "SELECT id, name, username, email, role FROM users WHERE active = 1 AND organization_id = ? AND company_id = ? ORDER BY name ASC",
-            [tenantId, companyId]
-        );
+        let projectsQuery = "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?";
+        const projectsParams = [tenantId, companyId];
+        if (!isAdmin) {
+            projectsQuery += " AND (owner_id = ? OR sponsor_id = ? OR id IN (SELECT project_id FROM project_members WHERE user_id = ?) OR parent_project_id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
+            projectsParams.push(userId, userId, userId, userId);
+        }
+        projectsQuery += " ORDER BY name ASC";
+        const [projects] = await db.execute(projectsQuery, projectsParams);
+        const [users] = await db.execute(`
+            SELECT 
+                u.id, u.name, u.username, u.email, u.role, u.company_id, u.department_id,
+                COALESCE(c.name, 'Default Company') as company_name,
+                COALESCE(dept.department_name, 'General') as department_name
+            FROM users u
+            LEFT JOIN companies c ON u.company_id = c.id
+            LEFT JOIN departments dept ON u.department_id = dept.id
+            WHERE u.active = 1
+            ORDER BY u.name ASC
+        `);
         const [labels] = await db.execute("SELECT id, name, color FROM task_labels ORDER BY name ASC");
+        const [companies] = await db.execute("SELECT id, name FROM companies ORDER BY name ASC");
+        const [departments] = await db.execute("SELECT id, department_name FROM departments ORDER BY department_name ASC");
 
         res.status(200).json({
             success: true,
@@ -1258,6 +1274,8 @@ exports.getTaskMetadata = async (req, res) => {
                 projects,
                 users,
                 labels,
+                companies,
+                departments,
                 statuses: ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled', 'blocked'],
                 priorities: ['low', 'medium', 'high', 'urgent']
             }

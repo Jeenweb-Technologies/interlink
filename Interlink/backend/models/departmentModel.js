@@ -263,26 +263,56 @@ const getDepartmentMembers = async (departmentId) => {
 };
 
 /**
- * Assign a user to a department
+ * Assign a user to multiple departments (syncs user_departments junction table)
  */
-const assignUserDepartment = async (userId, departmentId, role = 'USER') => {
-    if (!departmentId) {
+const assignUserDepartments = async (userId, departmentIds = [], defaultRole = 'USER') => {
+    const validIds = Array.isArray(departmentIds)
+        ? departmentIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id) && id > 0)
+        : (departmentIds ? [parseInt(departmentIds, 10)].filter(id => !isNaN(id) && id > 0) : []);
+
+    // Clear previous assignments for this user
+    await db.execute("DELETE FROM user_departments WHERE user_id = ?", [userId]);
+
+    if (validIds.length === 0) {
         await db.execute("UPDATE users SET department_id = NULL WHERE id = ?", [userId]);
-        await db.execute("DELETE FROM user_departments WHERE user_id = ?", [userId]);
-        return { userId, departmentId: null };
+        return { userId, departmentIds: [] };
     }
 
-    const numDeptId = parseInt(departmentId, 10);
-    await db.execute("UPDATE users SET department_id = ? WHERE id = ?", [numDeptId, userId]);
+    // Set primary department on users table
+    const primaryId = validIds[0];
+    await db.execute("UPDATE users SET department_id = ? WHERE id = ?", [primaryId, userId]);
 
-    // Sync into user_departments
-    await db.execute(`
-        INSERT INTO user_departments (user_id, department_id, department_role)
-        VALUES (?, ?, ?)
-        ON DUPLICATE KEY UPDATE department_role = VALUES(department_role), updated_at = NOW()
-    `, [userId, numDeptId, role || 'USER']);
+    // Insert all into user_departments
+    for (const dId of validIds) {
+        await db.execute(`
+            INSERT INTO user_departments (user_id, department_id, department_role)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE department_role = VALUES(department_role), updated_at = NOW()
+        `, [userId, dId, defaultRole || 'USER']);
+    }
 
-    return { userId, departmentId: numDeptId };
+    return { userId, departmentIds: validIds };
+};
+
+/**
+ * Assign a user to a single department (wrapper for backward compatibility)
+ */
+const assignUserDepartment = async (userId, departmentId, role = 'USER') => {
+    return await assignUserDepartments(userId, departmentId ? [departmentId] : [], role);
+};
+
+/**
+ * Get all departments assigned to a specific user
+ */
+const getUserDepartments = async (userId) => {
+    const [rows] = await db.execute(`
+        SELECT d.id, d.department_name, d.description, ud.department_role
+        FROM user_departments ud
+        JOIN departments d ON ud.department_id = d.id
+        WHERE ud.user_id = ?
+        ORDER BY d.department_name ASC
+    `, [userId]);
+    return rows;
 };
 
 module.exports = {
@@ -294,5 +324,7 @@ module.exports = {
     deleteDepartment,
     toggleDepartmentStatus,
     getDepartmentMembers,
-    assignUserDepartment
+    assignUserDepartment,
+    assignUserDepartments,
+    getUserDepartments
 };
