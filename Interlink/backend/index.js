@@ -91,6 +91,10 @@ app.use((req, res, next) => {
     next();
 });
 
+// Initialize HTTP server & Socket.IO BEFORE routes and 404 handler
+const server = http.createServer(app);
+const io = initSocket(server, app);
+
 // Health check and root endpoints for cPanel / Passenger / uptime probes
 app.get(["/", "/api", "/api/health", "/health"], (req, res) => {
     res.status(200).json({
@@ -119,7 +123,7 @@ app.use(["/api/calendar", "/calendar"], calendarRoutes);
 app.use(["/api/reminders", "/reminders"], reminderRoutes);
 
 
-// Global 404 handler
+// Global 404 handler (must remain after all routes and Socket.IO handler)
 app.use((req, res) => {
     res.status(404).json({ success: false, message: "Route not found" });
 });
@@ -133,8 +137,6 @@ app.use((err, req, res, next) => {
 const startServer = () => {
     try {
         const PORT = process.env.PORT || 5000;
-        const server = http.createServer(app);
-        const io = initSocket(server);
 
         server.listen(PORT, () => {
             console.log(`Server & Socket.IO Running on Port ${PORT}`);

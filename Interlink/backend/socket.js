@@ -34,7 +34,7 @@ const checkAndAutoEndMeeting = (roomCode) => {
     }, 5000);
 };
 
-const initSocket = (server) => {
+const initSocket = (server, app) => {
     // Intercept and normalize /api/socket.io to /socket.io so Socket.IO works behind Passenger /api mount
     if (server) {
         server.prependListener("request", (req, res) => {
@@ -59,6 +59,14 @@ const initSocket = (server) => {
         transports: ["polling", "websocket"],
         allowEIO3: true
     });
+
+    // Directly bind /api/socket.io and /socket.io in Express for cPanel / Passenger environments
+    if (app) {
+        app.use(["/api/socket.io", "/socket.io"], (req, res) => {
+            req.url = (req.originalUrl || req.url).replace(/^.*\/socket\.io/, "/socket.io");
+            io.engine.handleRequest(req, res);
+        });
+    }
 
     // Authentication middleware
     io.use((socket, next) => {

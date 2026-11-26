@@ -19,32 +19,14 @@ Options -Indexes
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
     # --------------------------------------------------------------------------
-    # 2. Reverse Proxy & Passenger Routing to Node.js Backend
+    # 2. Socket.IO & API Routing for cPanel Phusion Passenger
     # --------------------------------------------------------------------------
-
-    # Socket.IO WebSocket Upgrade (when mod_proxy_wstunnel is available)
-    <IfModule mod_proxy_wstunnel.c>
-        RewriteCond %{HTTP:Upgrade} websocket [NC]
-        RewriteCond %{HTTP:Connection} upgrade [NC]
-        RewriteRule ^socket\.io/(.*)$ ws://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
-        RewriteRule ^api/socket\.io/(.*)$ ws://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
+    # Disable response buffering so real-time polling updates stream without delay
+    <IfModule mod_passenger.c>
+        PassengerBufferResponse off
     </IfModule>
 
-    # Socket.IO HTTP Polling & API Proxy (when mod_proxy is available)
-    <IfModule mod_proxy.c>
-        RewriteCond %{REQUEST_URI} ^/socket\.io [NC]
-        RewriteRule ^socket\.io/(.*)$ http://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
-
-        RewriteCond %{REQUEST_URI} ^/api/ [NC]
-        RewriteRule ^api/(.*)$ http://127.0.0.1:5000/api/$1 [P,L,QSA]
-
-        RewriteCond %{REQUEST_URI} ^/uploads/ [NC]
-        RewriteCond %{REQUEST_FILENAME} !-f
-        RewriteRule ^uploads/(.*)$ http://127.0.0.1:5000/uploads/$1 [P,L,QSA]
-    </IfModule>
-
-    # If backend is running under cPanel Phusion Passenger mounted at /api:
-    # Route /socket.io through to /api/socket.io so Passenger catches it
+    # Route any direct /socket.io requests to /api/socket.io for Passenger
     RewriteCond %{REQUEST_URI} ^/socket\.io [NC]
     RewriteRule ^socket\.io/(.*)$ /api/socket.io/$1 [PT,L,QSA]
 
