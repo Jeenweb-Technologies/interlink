@@ -52,6 +52,10 @@ export const removeProjectMember = async (id, userId) => {
     return apiClient.delete(`/projects/${id}/members/${userId}`);
 };
 
+export const emailProjectMembers = async (id, data) => {
+    return apiClient.post(`/projects/${id}/email`, data);
+};
+
 // ─── Phases & Stage Gates ───────────────────────────────────────────────────
 export const getProjectPhases = async (id) => {
     return apiClient.get(`/projects/${id}/phases`);

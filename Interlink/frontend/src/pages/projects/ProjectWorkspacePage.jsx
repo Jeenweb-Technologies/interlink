@@ -6,6 +6,9 @@ import { getTasks, getTaskMetadata, updateTask, bulkUpdateTasks } from "../../ap
 import { createInstantMeeting } from "../../api/meetingApi";
 import ProjectStateWrapper from "../../components/projects/ProjectStateWrapper";
 import ProjectHeader from "../../components/projects/ProjectHeader";
+import ProjectEmailTeamModal from "../../components/projects/ProjectEmailTeamModal";
+import ProjectEditModal from "../../components/projects/ProjectEditModal";
+import ProjectDeleteConfirmModal from "../../components/projects/ProjectDeleteConfirmModal";
 import TaskListView from "../../components/tasks/TaskListView";
 import TaskCreateDrawer from "../../components/tasks/TaskCreateDrawer";
 import TaskDetailDrawer from "../../components/tasks/TaskDetailDrawer";
@@ -53,6 +56,27 @@ export default function ProjectWorkspacePage() {
     // Drawers & Modals
     const [createTaskDrawerOpen, setCreateTaskDrawerOpen] = useState(false);
     const [selectedTaskIdForDetail, setSelectedTaskIdForDetail] = useState(null);
+    const [emailTeamModalOpen, setEmailTeamModalOpen] = useState(false);
+    const [editModalOpen, setEditModalOpen] = useState(false);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+    // Current user & admin / owner permission check for deletion
+    const currentUser = React.useMemo(() => {
+        try {
+            return JSON.parse(localStorage.getItem("user") || "{}");
+        } catch {
+            return {};
+        }
+    }, []);
+
+    const role = (currentUser.role || "").toLowerCase();
+    const isAdmin = role === "admin" || role === "super admin" || role === "super_admin" || role === "developer";
+
+    const canDeleteProject = React.useCallback((proj) => {
+        if (!proj) return false;
+        if (isAdmin) return true;
+        return Number(proj.owner_id) === Number(currentUser.id) || Number(proj.sponsor_id) === Number(currentUser.id);
+    }, [isAdmin, currentUser.id]);
 
     // Selection for Bulk Actions
     const [selectedTaskIds, setSelectedTaskIds] = useState([]);
@@ -197,6 +221,9 @@ export default function ProjectWorkspacePage() {
                             onOpenCreateMilestone={() => setActiveTab("milestones_risks")}
                             onOpenBaselineModal={handleFreezeBaseline}
                             onStartMeeting={handleStartProjectMeeting}
+                            onOpenEmailTeamModal={() => setEmailTeamModalOpen(true)}
+                            onOpenEditModal={() => setEditModalOpen(true)}
+                            onDeleteProject={canDeleteProject(project) ? () => setDeleteModalOpen(true) : null}
                         />
 
                         {/* Navigation Filter / Workspace Tabs Bar: Full width, strictly equal spacing, clean typography without icons */}
@@ -362,6 +389,32 @@ export default function ProjectWorkspacePage() {
                             onClose={handleCloseDetail}
                             onUpdated={loadProject}
                             allTasks={tasks}
+                        />
+
+                        {/* Email Team Modal */}
+                        <ProjectEmailTeamModal
+                            project={project}
+                            isOpen={emailTeamModalOpen}
+                            onClose={() => setEmailTeamModalOpen(false)}
+                        />
+
+                        {/* Edit Project Specifications Modal */}
+                        <ProjectEditModal
+                            isOpen={editModalOpen}
+                            onClose={() => setEditModalOpen(false)}
+                            project={project}
+                            onUpdated={(updated) => {
+                                setProject(prev => ({ ...prev, ...updated }));
+                                loadProject();
+                            }}
+                        />
+
+                        {/* Delete Project Confirmation Modal */}
+                        <ProjectDeleteConfirmModal
+                            isOpen={deleteModalOpen}
+                            onClose={() => setDeleteModalOpen(false)}
+                            project={project}
+                            onDeleted={() => navigate("/projects")}
                         />
                     </>
                 )}

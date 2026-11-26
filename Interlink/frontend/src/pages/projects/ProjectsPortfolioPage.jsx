@@ -6,6 +6,8 @@ import DataTable from "../../components/DataTable";
 import ProjectStateWrapper from "../../components/projects/ProjectStateWrapper";
 import ProjectCard from "../../components/projects/ProjectCard";
 import ProjectCreateModal from "../../components/projects/ProjectCreateModal";
+import ProjectEditModal from "../../components/projects/ProjectEditModal";
+import ProjectDeleteConfirmModal from "../../components/projects/ProjectDeleteConfirmModal";
 
 export default function ProjectsPortfolioPage() {
     const navigate = useNavigate();
@@ -26,8 +28,30 @@ export default function ProjectsPortfolioPage() {
     const [viewByOpen, setViewByOpen] = useState(false);
     const viewByRef = useRef(null);
 
-    // Modal
+    // Modals
     const [createModalOpen, setCreateModalOpen] = useState(false);
+    const [projectToEdit, setProjectToEdit] = useState(null);
+    const [editModalOpen, setEditModalOpen] = useState(false);
+    const [projectToDelete, setProjectToDelete] = useState(null);
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+    // Current user & admin / owner permission check for deletion
+    const currentUser = useMemo(() => {
+        try {
+            return JSON.parse(localStorage.getItem("user") || "{}");
+        } catch {
+            return {};
+        }
+    }, []);
+
+    const role = (currentUser.role || "").toLowerCase();
+    const isAdmin = role === "admin" || role === "super admin" || role === "super_admin" || role === "developer";
+
+    const canDeleteProject = useCallback((proj) => {
+        if (!proj) return false;
+        if (isAdmin) return true;
+        return Number(proj.owner_id) === Number(currentUser.id) || Number(proj.sponsor_id) === Number(currentUser.id);
+    }, [isAdmin, currentUser.id]);
 
     // Close "View By" popover on click outside
     useEffect(() => {
@@ -288,17 +312,45 @@ export default function ProjectsPortfolioPage() {
             key: "actions",
             label: "Action",
             sortable: false,
-            minWidth: "80px",
+            minWidth: "110px",
             render: (row) => (
-                <button
-                    onClick={() => navigate(`/projects/${row.id}`)}
-                    className="px-2.5 py-1 text-xs font-semibold text-[#17365D] bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-                >
-                    View
-                </button>
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                        type="button"
+                        onClick={() => navigate(`/projects/${row.id}`)}
+                        className="w-7 h-7 rounded-lg text-slate-500 hover:text-[#17365D] hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
+                        title="Open Project Workspace"
+                    >
+                        <i className="fa-solid fa-arrow-up-right-from-square text-xs"></i>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setProjectToEdit(row);
+                            setEditModalOpen(true);
+                        }}
+                        className="w-7 h-7 rounded-lg text-slate-500 hover:text-[#2878C7] hover:bg-blue-50 flex items-center justify-center transition-colors cursor-pointer"
+                        title="Edit Project Specifications"
+                    >
+                        <i className="fa-regular fa-pen-to-square text-xs"></i>
+                    </button>
+                    {canDeleteProject(row) && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setProjectToDelete(row);
+                                setDeleteModalOpen(true);
+                            }}
+                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors cursor-pointer"
+                            title="Delete Project (Admin & Owner only)"
+                        >
+                            <i className="fa-regular fa-trash-can text-xs"></i>
+                        </button>
+                    )}
+                </div>
             )
         }
-    ], [navigate]);
+    ], [navigate, canDeleteProject]);
 
     // Custom Title: Exactly like in Task Management (Navy square icon badge + 2xl bold text)
     const customTitle = (
@@ -558,7 +610,18 @@ export default function ProjectsPortfolioPage() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {filteredProjects.map((proj) => (
-                                    <ProjectCard key={proj.id} project={proj} />
+                                    <ProjectCard
+                                        key={proj.id}
+                                        project={proj}
+                                        onEdit={(p) => {
+                                            setProjectToEdit(p);
+                                            setEditModalOpen(true);
+                                        }}
+                                        onDelete={canDeleteProject(proj) ? (p) => {
+                                            setProjectToDelete(p);
+                                            setDeleteModalOpen(true);
+                                        } : null}
+                                    />
                                 ))}
                             </div>
                         )}
@@ -571,6 +634,28 @@ export default function ProjectsPortfolioPage() {
                 isOpen={createModalOpen}
                 onClose={() => setCreateModalOpen(false)}
                 onCreated={() => loadData()}
+            />
+
+            {/* Edit Project Specifications Modal */}
+            <ProjectEditModal
+                isOpen={editModalOpen}
+                onClose={() => {
+                    setEditModalOpen(false);
+                    setProjectToEdit(null);
+                }}
+                project={projectToEdit}
+                onUpdated={() => loadData()}
+            />
+
+            {/* Delete Project Confirmation Modal */}
+            <ProjectDeleteConfirmModal
+                isOpen={deleteModalOpen}
+                onClose={() => {
+                    setDeleteModalOpen(false);
+                    setProjectToDelete(null);
+                }}
+                project={projectToDelete}
+                onDeleted={() => loadData()}
             />
         </div>
     );

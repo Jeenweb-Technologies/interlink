@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
-export default function ProjectCard({ project }) {
+export default function ProjectCard({ project, onEdit, onDelete }) {
     const navigate = useNavigate();
 
     const getStatusStyle = (status) => {
@@ -156,8 +156,8 @@ export default function ProjectCard({ project }) {
                     </span>
                 </div>
 
-                {/* Micro metrics */}
-                <div className="flex items-center gap-3 text-[11px] font-semibold">
+                {/* Micro metrics & Actions */}
+                <div className="flex items-center gap-2.5 text-[11px] font-semibold">
                     <span className="flex items-center gap-1" title="Tasks">
                         <i className="fa-solid fa-list-check text-slate-400"></i>
                         <span>{project.completed_tasks_count || 0}/{project.tasks_count || 0}</span>
@@ -167,6 +167,31 @@ export default function ProjectCard({ project }) {
                             <i className="fa-solid fa-shield-halved"></i>
                             <span>{project.open_risks_count}</span>
                         </span>
+                    )}
+
+                    {(onEdit || onDelete) && (
+                        <div className="flex items-center gap-1 border-l border-slate-200 pl-2 ml-1" onClick={(e) => e.stopPropagation()}>
+                            {onEdit && (
+                                <button
+                                    type="button"
+                                    onClick={() => onEdit(project)}
+                                    className="w-6 h-6 rounded-md text-slate-400 hover:text-[#2878C7] hover:bg-blue-50 flex items-center justify-center transition-colors cursor-pointer"
+                                    title="Edit Project Specifications"
+                                >
+                                    <i className="fa-regular fa-pen-to-square text-[11px]"></i>
+                                </button>
+                            )}
+                            {onDelete && (
+                                <button
+                                    type="button"
+                                    onClick={() => onDelete(project)}
+                                    className="w-6 h-6 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors cursor-pointer"
+                                    title="Delete Project"
+                                >
+                                    <i className="fa-regular fa-trash-can text-[11px]"></i>
+                                </button>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>
