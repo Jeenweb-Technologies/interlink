@@ -1248,8 +1248,8 @@ exports.getTaskMetadata = async (req, res) => {
         let projectsQuery = "SELECT id, name, code, status FROM projects WHERE deleted_at IS NULL AND tenant_id = ? AND company_id = ?";
         const projectsParams = [tenantId, companyId];
         if (!isAdmin) {
-            projectsQuery += " AND (owner_id = ? OR sponsor_id = ? OR id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
-            projectsParams.push(userId, userId, userId);
+            projectsQuery += " AND (owner_id = ? OR sponsor_id = ? OR id IN (SELECT project_id FROM project_members WHERE user_id = ?) OR parent_project_id IN (SELECT project_id FROM project_members WHERE user_id = ?))";
+            projectsParams.push(userId, userId, userId, userId);
         }
         projectsQuery += " ORDER BY name ASC";
         const [projects] = await db.execute(projectsQuery, projectsParams);

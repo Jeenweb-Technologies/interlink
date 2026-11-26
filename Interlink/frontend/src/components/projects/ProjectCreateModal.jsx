@@ -4,7 +4,7 @@ import { createProject } from "../../api/projectApi";
 import { getTaskMetadata } from "../../api/taskApi";
 import AssigneeMultiSelect from "../tasks/AssigneeMultiSelect";
 
-export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
+export default function ProjectCreateModal({ isOpen, onClose, onCreated, parentProject = null }) {
     const [activeTab, setActiveTab] = useState("basic"); // 'basic' | 'finance' | 'notes_details'
     const [users, setUsers] = useState([]);
     const [companies, setCompanies] = useState([]);
@@ -29,9 +29,50 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const [approvedBudget, setApprovedBudget] = useState("");
     const [isBudgetApproved, setIsBudgetApproved] = useState(false);
 
-    // Load users, companies, and departments metadata
+    // Initialize/prefill state when modal opens or parentProject changes
     useEffect(() => {
         if (isOpen) {
+            setActiveTab("basic");
+            if (parentProject) {
+                setName("");
+                setCode(parentProject.code ? `${parentProject.code}-SUB` : "SUB-");
+                setDescription("");
+                setNotes("");
+                setKeyDeliverables("");
+                setRisksConstraints("");
+                setPriority(parentProject.priority || "medium");
+                setOwnerId(parentProject.owner_id || "");
+                setSponsorId(parentProject.sponsor_id || "");
+                setStartDate(parentProject.start_date ? parentProject.start_date.slice(0, 10) : new Date().toISOString().slice(0, 10));
+                setEndDate(parentProject.end_date ? parentProject.end_date.slice(0, 10) : "");
+                setCurrency(parentProject.currency || "USD");
+                setEstimatedBudget("");
+                setApprovedBudget("");
+                setIsBudgetApproved(false);
+                setSelectedMemberIds(
+                    parentProject.members && Array.isArray(parentProject.members)
+                        ? parentProject.members.map((m) => m.id || m.user_id).filter(Boolean)
+                        : []
+                );
+            } else {
+                setName("");
+                setCode("");
+                setDescription("");
+                setNotes("");
+                setKeyDeliverables("");
+                setRisksConstraints("");
+                setPriority("medium");
+                setOwnerId("");
+                setSponsorId("");
+                setStartDate(new Date().toISOString().slice(0, 10));
+                setEndDate("");
+                setCurrency("USD");
+                setEstimatedBudget("");
+                setApprovedBudget("");
+                setIsBudgetApproved(false);
+                setSelectedMemberIds([]);
+            }
+
             getTaskMetadata()
                 .then((metaRes) => {
                     if (metaRes.data?.success && metaRes.data.data) {
@@ -42,7 +83,7 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 })
                 .catch(() => ({ data: { data: { users: [] } } }));
         }
-    }, [isOpen]);
+    }, [isOpen, parentProject]);
 
     if (!isOpen) return null;
 
@@ -50,10 +91,11 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const handleNameChange = (e) => {
         const val = e.target.value;
         setName(val);
-        if (!code || code.startsWith("PRJ-")) {
+        const prefix = parentProject?.code ? `${parentProject.code}-` : "PRJ-";
+        if (!code || code.startsWith("PRJ-") || (parentProject?.code && code.startsWith(`${parentProject.code}-`))) {
             const clean = val.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase();
             if (clean) {
-                setCode(`PRJ-${clean}`);
+                setCode(`${prefix}${clean}`);
             }
         }
     };
@@ -61,7 +103,7 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (!name.trim()) {
-            toast.error("Project name is required");
+            toast.error(parentProject ? "Sub-project name is required" : "Project name is required");
             setActiveTab("basic");
             return;
         }
@@ -81,6 +123,7 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 code: code.trim(),
                 description: description.trim(),
                 notes: combinedNotes,
+                parent_project_id: parentProject?.id || null,
                 priority,
                 visibility: "private",
                 owner_id: ownerId || null,
@@ -95,15 +138,15 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
             });
 
             if (res.data?.success) {
-                toast.success("Project created successfully!");
+                toast.success(parentProject ? "Sub-project created successfully!" : "Project created successfully!");
                 onCreated(res.data.data);
                 onClose();
             } else {
-                toast.error(res.data?.message || "Failed to create project");
+                toast.error(res.data?.message || (parentProject ? "Failed to create sub-project" : "Failed to create project"));
             }
         } catch (err) {
             console.error("Create project error:", err);
-            toast.error(err.response?.data?.message || "Failed to create project");
+            toast.error(err.response?.data?.message || (parentProject ? "Failed to create sub-project" : "Failed to create project"));
         } finally {
             setSubmitting(false);
         }
@@ -116,11 +159,17 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
                     <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#17365D] flex items-center justify-center font-bold text-sm">
-                            <i className="fa-solid fa-folder-plus"></i>
+                            <i className={parentProject ? "fa-solid fa-folder-tree text-[#2878C7]" : "fa-solid fa-folder-plus"}></i>
                         </div>
                         <div>
-                            <h2 className="text-base font-bold text-[#17212F]">Create New Project</h2>
-                            <p className="text-xs text-[#5B6573]">Set up an enterprise initiative with governance & budget</p>
+                            <h2 className="text-base font-bold text-[#17212F]">
+                                {parentProject ? "Create Sub-Project" : "Create New Project"}
+                            </h2>
+                            <p className="text-xs text-[#5B6573]">
+                                {parentProject
+                                    ? `Child workstream governed under ${parentProject.name} (${parentProject.code})`
+                                    : "Set up an enterprise initiative with governance & budget"}
+                            </p>
                         </div>
                     </div>
                     <button
@@ -175,15 +224,27 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                 <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
                     {activeTab === "basic" && (
                         <div className="space-y-4 animate-in fade-in duration-150">
+                            {parentProject && (
+                                <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-xl flex items-center justify-between text-xs text-[#17365D]">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fa-solid fa-diagram-project text-[#2878C7]"></i>
+                                        <span>Sub-project under <strong>{parentProject.name}</strong> ({parentProject.code})</span>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-[#17365D] bg-white px-2 py-0.5 rounded border border-blue-100">
+                                        Common items prefilled
+                                    </span>
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                    Project Name <span className="text-red-500">*</span>
+                                    {parentProject ? "Sub-project Name" : "Project Name"} <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
                                     value={name}
                                     onChange={handleNameChange}
-                                    placeholder="e.g. Next-Gen Mobile App Client"
+                                    placeholder={parentProject ? "e.g. Mobile Core Client Workstream" : "e.g. Next-Gen Mobile App Client"}
                                     className="w-full text-sm px-3.5 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7] transition-all"
                                     required
                                 />
@@ -499,12 +560,12 @@ export default function ProjectCreateModal({ isOpen, onClose, onCreated }) {
                                 {submitting ? (
                                     <>
                                         <i className="fa-solid fa-circle-notch fa-spin"></i>
-                                        <span>Creating Project...</span>
+                                        <span>{parentProject ? "Creating Sub-Project..." : "Creating Project..."}</span>
                                     </>
                                 ) : (
                                     <>
                                         <i className="fa-solid fa-check"></i>
-                                        <span>Create Project</span>
+                                        <span>{parentProject ? "Create Sub-Project" : "Create Project"}</span>
                                     </>
                                 )}
                             </button>

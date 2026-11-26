@@ -1,22 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { getSubprojects, createProject } from "../../api/projectApi";
+import { getSubprojects } from "../../api/projectApi";
+import ProjectCreateModal from "./ProjectCreateModal";
 
-export default function ProjectSubprojectsView({ projectId, projectCode }) {
+export default function ProjectSubprojectsView({ projectId, projectCode, parentProject }) {
     const navigate = useNavigate();
     const [subprojects, setSubprojects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [createModalOpen, setCreateModalOpen] = useState(false);
-
-    // Form states
-    const [name, setName] = useState("");
-    const [description, setDescription] = useState("");
-    const [priority, setPriority] = useState("high");
-    const [budget, setBudget] = useState("");
-    const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
-    const [endDate, setEndDate] = useState("");
-    const [submitting, setSubmitting] = useState(false);
 
     const loadSubprojects = async () => {
         try {
@@ -38,44 +30,6 @@ export default function ProjectSubprojectsView({ projectId, projectCode }) {
             loadSubprojects();
         }
     }, [projectId]);
-
-    const handleCreateSubproject = async (e) => {
-        e.preventDefault();
-        if (!name.trim()) {
-            toast.error("Sub-project name is required");
-            return;
-        }
-
-        try {
-            setSubmitting(true);
-            const autoCode = `${projectCode}-SUB${subprojects.length + 1}`;
-            const res = await createProject({
-                name: name.trim(),
-                code: autoCode,
-                description: description.trim(),
-                parent_project_id: projectId,
-                priority,
-                start_date: startDate || null,
-                end_date: endDate || null,
-                estimated_budget: Number(budget) || 0,
-                approved_budget: Number(budget) || 0,
-                is_budget_approved: true
-            });
-
-            if (res.data?.success) {
-                toast.success("Sub-project created successfully!");
-                setName("");
-                setDescription("");
-                setBudget("");
-                setCreateModalOpen(false);
-                loadSubprojects();
-            }
-        } catch (err) {
-            toast.error(err.response?.data?.message || "Failed to create sub-project");
-        } finally {
-            setSubmitting(false);
-        }
-    };
 
     if (loading) {
         return (
@@ -176,114 +130,16 @@ export default function ProjectSubprojectsView({ projectId, projectCode }) {
                 </div>
             )}
 
-            {/* Create Subproject Modal */}
-            {createModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-lg p-6 space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <h3 className="text-base font-bold text-[#17212F]">Add Sub-Project</h3>
-                            <button
-                                onClick={() => setCreateModalOpen(false)}
-                                className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                            >
-                                <i className="fa-solid fa-xmark"></i>
-                            </button>
-                        </div>
-                        <form onSubmit={handleCreateSubproject} className="space-y-3.5">
-                            <div>
-                                <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                    Sub-project Name <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                    type="text"
-                                    value={name}
-                                    onChange={(e) => setName(e.target.value)}
-                                    placeholder="e.g. Backend Microservice Workstream"
-                                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                    Description
-                                </label>
-                                <textarea
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    rows={2}
-                                    placeholder="Workstream objectives and deliverables..."
-                                    className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                        Allocated Budget ($)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        value={budget}
-                                        onChange={(e) => setBudget(e.target.value)}
-                                        placeholder="15000"
-                                        className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-[#17212F] mb-1">
-                                        Priority
-                                    </label>
-                                    <select
-                                        value={priority}
-                                        onChange={(e) => setPriority(e.target.value)}
-                                        className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2878C7]/20 focus:border-[#2878C7]"
-                                    >
-                                        <option value="low">Low</option>
-                                        <option value="medium">Medium</option>
-                                        <option value="high">High</option>
-                                        <option value="urgent">Urgent</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-semibold text-[#17212F] mb-1">Start Date</label>
-                                    <input
-                                        type="date"
-                                        value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
-                                        className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-[#17212F] mb-1">End Date</label>
-                                    <input
-                                        type="date"
-                                        value={endDate}
-                                        onChange={(e) => setEndDate(e.target.value)}
-                                        className="w-full text-xs px-3 py-2 rounded-lg border border-slate-300"
-                                    />
-                                </div>
-                            </div>
-                            <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setCreateModalOpen(false)}
-                                    className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 cursor-pointer"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={submitting}
-                                    className="px-4 py-1.5 text-xs font-bold text-white bg-[#17365D] hover:bg-[#102642] rounded-lg shadow-sm cursor-pointer"
-                                >
-                                    {submitting ? "Creating..." : "Save Sub-project"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+            {/* Create Subproject Modal (reuses main project modal with common prefilled items) */}
+            <ProjectCreateModal
+                isOpen={createModalOpen}
+                onClose={() => setCreateModalOpen(false)}
+                parentProject={parentProject || { id: projectId, code: projectCode }}
+                onCreated={() => {
+                    setCreateModalOpen(false);
+                    loadSubprojects();
+                }}
+            />
         </div>
     );
 }

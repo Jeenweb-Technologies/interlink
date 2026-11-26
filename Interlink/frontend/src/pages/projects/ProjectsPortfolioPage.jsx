@@ -95,7 +95,9 @@ export default function ProjectsPortfolioPage() {
             (p.name && p.name.toLowerCase().includes(q)) ||
             (p.code && p.code.toLowerCase().includes(q)) ||
             (p.description && p.description.toLowerCase().includes(q)) ||
-            (p.owner_name && p.owner_name.toLowerCase().includes(q))
+            (p.owner_name && p.owner_name.toLowerCase().includes(q)) ||
+            (p.parent_project_name && p.parent_project_name.toLowerCase().includes(q)) ||
+            (p.parent_project_code && p.parent_project_code.toLowerCase().includes(q))
         );
     }, [processedProjects, search]);
 
@@ -124,12 +126,40 @@ export default function ProjectsPortfolioPage() {
                         <span className="font-bold text-xs text-[#17212F] group-hover:text-[#2878C7] transition-colors line-clamp-1">
                             {row.name}
                         </span>
+                        {row.parent_project_id && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#17365D] border border-blue-200 px-1.5 py-0.2 rounded flex items-center gap-1">
+                                <i className="fa-solid fa-diagram-project text-[9px] text-[#2878C7]"></i>
+                                Sub-project
+                            </span>
+                        )}
                         {row.visibility === "private" && (
                             <span title="Private project" className="text-slate-400 text-xs">
                                 <i className="fa-solid fa-lock"></i>
                             </span>
                         )}
                     </div>
+                    {row.parent_project_name && (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 mt-0.5">
+                            <span className="text-[#2878C7] font-semibold flex items-center gap-1">
+                                <i className="fa-solid fa-turn-up rotate-90 text-[10px]"></i>
+                                Sub-project of:
+                            </span>
+                            <span
+                                className="font-bold text-[#17365D] hover:underline cursor-pointer"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/projects/${row.parent_project_id}`);
+                                }}
+                            >
+                                {row.parent_project_name}
+                            </span>
+                            {row.parent_project_code && (
+                                <span className="font-mono text-[10px] text-slate-400">
+                                    ({row.parent_project_code})
+                                </span>
+                            )}
+                        </div>
+                    )}
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
                         {row.subprojects_count > 0 && (
                             <span className="text-blue-600 font-semibold inline-flex items-center gap-1">

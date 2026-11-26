@@ -53,6 +53,12 @@ export default function ProjectCard({ project }) {
                         <span className="text-[11px] font-bold font-mono text-[#17365D] bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                             {project.code}
                         </span>
+                        {project.parent_project_id && (
+                            <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#17365D] border border-blue-200 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <i className="fa-solid fa-diagram-project text-[9px] text-[#2878C7]"></i>
+                                Sub-project
+                            </span>
+                        )}
                         {project.visibility === "private" && (
                             <span title="Private project" className="text-slate-400 text-xs">
                                 <i className="fa-solid fa-lock"></i>
@@ -78,6 +84,28 @@ export default function ProjectCard({ project }) {
                 <h3 className="text-base font-bold text-[#17212F] group-hover:text-[#2878C7] transition-colors line-clamp-1 mb-1.5">
                     {project.name}
                 </h3>
+                {project.parent_project_name && (
+                    <div
+                        className="flex items-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-lg mb-2 w-fit hover:bg-slate-100 transition-colors"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/projects/${project.parent_project_id}`);
+                        }}
+                    >
+                        <span className="text-[#2878C7] font-semibold flex items-center gap-1">
+                            <i className="fa-solid fa-turn-up rotate-90 text-[10px]"></i>
+                            Sub-project of:
+                        </span>
+                        <span className="font-bold text-[#17365D]">
+                            {project.parent_project_name}
+                        </span>
+                        {project.parent_project_code && (
+                            <span className="font-mono text-[10px] text-slate-400">
+                                ({project.parent_project_code})
+                            </span>
+                        )}
+                    </div>
+                )}
                 <p className="text-xs text-[#5B6573] line-clamp-2 leading-relaxed mb-4">
                     {project.description || "No description provided."}
                 </p>

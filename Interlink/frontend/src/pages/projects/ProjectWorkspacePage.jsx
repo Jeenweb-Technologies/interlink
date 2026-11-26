@@ -305,7 +305,7 @@ export default function ProjectWorkspacePage() {
                             {/* 3. Sub-projects Tab */}
                             {activeTab === "subprojects" && (
                                 <div className="animate-in fade-in duration-150">
-                                    <ProjectSubprojectsView projectId={id} projectCode={project.code} />
+                                    <ProjectSubprojectsView projectId={id} projectCode={project.code} parentProject={project} />
                                 </div>
                             )}
 
