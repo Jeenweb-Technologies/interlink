@@ -194,14 +194,14 @@ export default function ProjectWorkspacePage() {
     };
 
     const tabs = [
-        { id: "overview", label: "Overview", icon: "fa-solid fa-gauge-high" },
-        { id: "tasks", label: `Tasks (${tasks.length})`, icon: "fa-solid fa-list-check" },
-        { id: "subprojects", label: `Sub-projects (${project?.metrics?.subprojects_count || 0})`, icon: "fa-solid fa-folder-tree" },
-        { id: "gantt", label: "Gantt & Timeline", icon: "fa-solid fa-chart-gantt" },
-        { id: "milestones_risks", label: "Milestones & Risks", icon: "fa-solid fa-shield-halved" },
-        { id: "workload", label: "Team Workload", icon: "fa-solid fa-users-gear" },
-        { id: "documents", label: `Files (${project?.metrics?.total_documents || 0})`, icon: "fa-regular fa-folder-open" },
-        { id: "report", label: "Status Report", icon: "fa-solid fa-file-contract" }
+        { id: "overview", label: "Overview" },
+        { id: "tasks", label: `Tasks (${tasks.length})` },
+        { id: "subprojects", label: `Sub-projects (${project?.metrics?.subprojects_count || 0})` },
+        { id: "gantt", label: "Gantt & Timeline" },
+        { id: "milestones_risks", label: "Milestones & Risks" },
+        { id: "workload", label: "Team Workload" },
+        { id: "documents", label: `Files (${project?.metrics?.total_documents || 0})` },
+        { id: "report", label: "Status Report" }
     ];
 
     return (
@@ -226,7 +226,7 @@ export default function ProjectWorkspacePage() {
                             onDeleteProject={canDeleteProject(project) ? () => setDeleteModalOpen(true) : null}
                         />
 
-                        {/* Navigation Tabs Bar: Full width, strictly equal spacing across all 8 tabs */}
+                        {/* Navigation Filter / Workspace Tabs Bar: Full width, strictly equal spacing, clean typography without icons */}
                         <div className="w-full bg-white rounded-xl border border-[#E2E8F0] shadow-sm overflow-x-auto scrollbar-none">
                             <div className="grid grid-cols-8 w-full min-w-[800px] text-xs font-bold">
                                 {tabs.map((tab) => (
