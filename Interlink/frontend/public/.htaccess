@@ -19,31 +19,42 @@ Options -Indexes
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
     # --------------------------------------------------------------------------
-    # 2. Reverse Proxy to Node.js Backend (Socket.IO, /api, /uploads)
-    # Default backend port: 5000 (Adjust port if running on different cPanel port)
+    # 2. Reverse Proxy & Passenger Routing to Node.js Backend
     # --------------------------------------------------------------------------
 
-    # Socket.IO WebSocket Upgrade
-    RewriteCond %{HTTP:Upgrade} =websocket [NC]
-    RewriteCond %{HTTP:Connection} upgrade [NC]
-    RewriteRule ^socket\.io/(.*) ws://127.0.0.1:5000/socket.io/$1 [P,L]
+    # Socket.IO WebSocket Upgrade (when mod_proxy_wstunnel is available)
+    <IfModule mod_proxy_wstunnel.c>
+        RewriteCond %{HTTP:Upgrade} websocket [NC]
+        RewriteCond %{HTTP:Connection} upgrade [NC]
+        RewriteRule ^socket\.io/(.*)$ ws://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
+        RewriteRule ^api/socket\.io/(.*)$ ws://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
+    </IfModule>
 
-    # Socket.IO HTTP Polling
-    RewriteCond %{REQUEST_URI} ^/socket\.io/ [NC]
-    RewriteRule ^socket\.io/(.*) http://127.0.0.1:5000/socket.io/$1 [P,L]
+    # Socket.IO HTTP Polling & API Proxy (when mod_proxy is available)
+    <IfModule mod_proxy.c>
+        RewriteCond %{REQUEST_URI} ^/socket\.io [NC]
+        RewriteRule ^socket\.io/(.*)$ http://127.0.0.1:5000/socket.io/$1 [P,L,QSA]
 
-    # Backend API Endpoints (/api/*)
-    RewriteCond %{REQUEST_URI} ^/api/ [NC]
-    RewriteRule ^api/(.*) http://127.0.0.1:5000/api/$1 [P,L]
+        RewriteCond %{REQUEST_URI} ^/api/ [NC]
+        RewriteRule ^api/(.*)$ http://127.0.0.1:5000/api/$1 [P,L,QSA]
 
-    # Backend Uploads (/uploads/*) if not physically present in public_html
-    RewriteCond %{REQUEST_URI} ^/uploads/ [NC]
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^uploads/(.*) http://127.0.0.1:5000/uploads/$1 [P,L]
+        RewriteCond %{REQUEST_URI} ^/uploads/ [NC]
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteRule ^uploads/(.*)$ http://127.0.0.1:5000/uploads/$1 [P,L,QSA]
+    </IfModule>
+
+    # If backend is running under cPanel Phusion Passenger mounted at /api:
+    # Route /socket.io through to /api/socket.io so Passenger catches it
+    RewriteCond %{REQUEST_URI} ^/socket\.io [NC]
+    RewriteRule ^socket\.io/(.*)$ /api/socket.io/$1 [PT,L,QSA]
 
     # --------------------------------------------------------------------------
     # 3. Single Page Application (React / Vite) Client-Side Routing
     # --------------------------------------------------------------------------
+    # Do NOT rewrite API or Socket.IO requests to index.html
+    RewriteCond %{REQUEST_URI} ^/(api|socket\.io) [NC]
+    RewriteRule ^ - [L]
+
     # If the requested resource exists as a physical file or directory, serve it
     RewriteCond %{REQUEST_FILENAME} -f [OR]
     RewriteCond %{REQUEST_FILENAME} -d

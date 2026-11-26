@@ -9,6 +9,9 @@ export const getMeetingSocket = () => {
     return io(socketUrl, {
         auth: { token },
         withCredentials: true,
-        transports: ["websocket", "polling"]
+        transports: ["polling", "websocket"],
+        reconnectionAttempts: 10,
+        reconnectionDelay: 2000,
+        timeout: 20000
     });
 };

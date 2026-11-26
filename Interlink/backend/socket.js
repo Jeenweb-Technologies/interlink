@@ -35,12 +35,29 @@ const checkAndAutoEndMeeting = (roomCode) => {
 };
 
 const initSocket = (server) => {
+    // Intercept and normalize /api/socket.io to /socket.io so Socket.IO works behind Passenger /api mount
+    if (server) {
+        server.prependListener("request", (req, res) => {
+            if (req.url && req.url.startsWith("/api/socket.io")) {
+                req.url = req.url.replace(/^\/api\/socket\.io/, "/socket.io");
+            }
+        });
+
+        server.prependListener("upgrade", (req, socket, head) => {
+            if (req.url && req.url.startsWith("/api/socket.io")) {
+                req.url = req.url.replace(/^\/api\/socket\.io/, "/socket.io");
+            }
+        });
+    }
+
     io = new Server(server, {
         cors: {
             origin: (origin, callback) => callback(null, true),
             credentials: true,
             methods: ["GET", "POST"]
-        }
+        },
+        transports: ["polling", "websocket"],
+        allowEIO3: true
     });
 
     // Authentication middleware
