@@ -43,6 +43,8 @@ router.get("/:id/subprojects", projectController.getSubprojects);
 router.get("/:id/members", projectController.getMembers);
 router.post("/:id/members", projectController.addMember);
 router.delete("/:id/members/:userId", projectController.removeMember);
+router.post("/:id/email", projectController.sendEmailToProjectMembers);
+router.post("/:id/broadcast-email", projectController.sendEmailToProjectMembers);
 
 // ─── Phases ─────────────────────────────────────────────────────────────────
 router.get("/:id/phases", projectController.getPhases);

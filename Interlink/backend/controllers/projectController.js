@@ -2,6 +2,7 @@ const db = require("../config/db.js");
 const path = require("path");
 const fs = require("fs");
 const uploadConfig = require("../config/uploadConfig.js");
+const { sendProjectEnrollmentEmail, sendProjectBroadcastEmail } = require("../services/emailService.js");
 
 // ─── 1. Portfolio Metrics (PROJ-01) ──────────────────────────────────────────
 exports.getPortfolioMetrics = async (req, res) => {
@@ -414,6 +415,32 @@ exports.createProject = async (req, res) => {
             }
         }
 
+        // Notify enrolled team members asynchronously via email
+        try {
+            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+            const [enrolledUsers] = await db.execute(`
+                SELECT pm.role, u.name, u.email 
+                FROM project_members pm
+                JOIN users u ON pm.user_id = u.id
+                WHERE pm.project_id = ? AND u.email IS NOT NULL AND u.email != ''
+            `, [newProjectId]);
+
+            for (const member of enrolledUsers) {
+                sendProjectEnrollmentEmail({
+                    to: member.email,
+                    userName: member.name,
+                    projectName: name,
+                    projectCode,
+                    role: member.role,
+                    projectManagerName: req.user?.name || "Project Lead",
+                    description,
+                    deepLinkUrl: `${frontendUrl}/projects/${newProjectId}`
+                }).catch(e => console.warn(`[ProjectEmail] Failed sending initial enrollment email to ${member.email}:`, e.message));
+            }
+        } catch (mailErr) {
+            console.warn("[ProjectEmail] Non-fatal error dispatching creation enrollment emails:", mailErr.message);
+        }
+
         res.status(201).json({
             success: true,
             message: "Project created successfully",
@@ -429,7 +456,7 @@ exports.createProject = async (req, res) => {
 exports.updateProject = async (req, res) => {
     try {
         const { id } = req.params;
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
 
         const {
             name,
@@ -448,7 +475,8 @@ exports.updateProject = async (req, res) => {
             approved_budget,
             is_budget_approved,
             actual_cost,
-            progress_percentage
+            progress_percentage,
+            members
         } = req.body;
 
         const updates = [];
@@ -468,7 +496,7 @@ exports.updateProject = async (req, res) => {
         }
         if (priority !== undefined) { updates.push("priority = ?"); params.push(priority); }
         if (visibility !== undefined) { updates.push("visibility = ?"); params.push(visibility); }
-        if (owner_id !== undefined) { updates.push("owner_id = ?"); params.push(owner_id); }
+        if (owner_id !== undefined) { updates.push("owner_id = ?"); params.push(owner_id || null); }
         if (sponsor_id !== undefined) { updates.push("sponsor_id = ?"); params.push(sponsor_id || null); }
         if (start_date !== undefined) { updates.push("start_date = ?"); params.push(start_date || null); }
         if (end_date !== undefined) { updates.push("end_date = ?"); params.push(end_date || null); }
@@ -485,19 +513,32 @@ exports.updateProject = async (req, res) => {
             params.push(id);
         }
 
-        if (updates.length === 0) {
-            return res.status(400).json({ success: false, message: "No valid fields to update" });
+        if (updates.length > 0) {
+            params.push(id, tenantId);
+            await db.execute(`
+                UPDATE projects SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?
+            `, params);
         }
 
-        params.push(id, tenantId);
-
-        await db.execute(`
-            UPDATE projects SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?
-        `, params);
+        // Sync members if provided
+        if (Array.isArray(members)) {
+            await db.execute(`DELETE FROM project_members WHERE project_id = ?`, [id]);
+            for (const item of members) {
+                const uId = typeof item === 'object' ? item.id || item.user_id : item;
+                const role = (typeof item === 'object' && item.role) ? item.role : 'contributor';
+                const alloc = (typeof item === 'object' && item.allocation_percentage) ? item.allocation_percentage : 100;
+                if (uId) {
+                    await db.execute(`
+                        INSERT IGNORE INTO project_members (project_id, user_id, role, allocation_percentage)
+                        VALUES (?, ?, ?, ?)
+                    `, [id, uId, role, alloc]);
+                }
+            }
+        }
 
         res.json({
             success: true,
-            message: "Project updated successfully"
+            message: "Project specifications updated successfully"
         });
     } catch (err) {
         console.error("Error updating project:", err);
@@ -509,8 +550,33 @@ exports.updateProject = async (req, res) => {
 exports.deleteProject = async (req, res) => {
     try {
         const { id } = req.params;
-        const tenantId = req.user?.tenant_id || 1;
+        const tenantId = req.user?.organization_id || req.user?.tenant_id || 1;
+        const userId = req.user?.id || 1;
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isAdmin = userRole === "admin" || userRole === "super admin" || userRole === "super_admin" || userRole === "developer";
         const { archive } = req.query;
+
+        // Fetch project to verify existence and check owner / sponsor permission
+        const [projRows] = await db.execute(`
+            SELECT id, owner_id, sponsor_id, tenant_id FROM projects WHERE id = ? AND deleted_at IS NULL
+        `, [id]);
+
+        if (projRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Project not found" });
+        }
+
+        const project = projRows[0];
+
+        // Permission check: Only Admin, Project Owner, or Project Sponsor can delete
+        const isOwner = Number(project.owner_id) === Number(userId);
+        const isSponsor = Number(project.sponsor_id) === Number(userId);
+
+        if (!isAdmin && !isOwner && !isSponsor) {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied. Only administrators and the project owner can delete this project."
+            });
+        }
 
         if (archive === 'true') {
             await db.execute(`UPDATE projects SET status = 'archived' WHERE id = ? AND tenant_id = ?`, [id, tenantId]);
@@ -708,6 +774,36 @@ exports.addMember = async (req, res) => {
                 allocation_percentage = VALUES(allocation_percentage),
                 hourly_billing_rate = VALUES(hourly_billing_rate)
         `, [id, user_id, role, allocation_percentage, hourly_billing_rate]);
+
+        // Dispatch enrollment email to newly assigned member
+        try {
+            const [userRows] = await db.execute("SELECT name, email FROM users WHERE id = ?", [user_id]);
+            const [projRows] = await db.execute(`
+                SELECT p.id, p.name, p.code, p.description, u.name as owner_name 
+                FROM projects p 
+                LEFT JOIN users u ON p.owner_id = u.id 
+                WHERE p.id = ?
+            `, [id]);
+
+            if (userRows.length > 0 && userRows[0].email && projRows.length > 0) {
+                const targetUser = userRows[0];
+                const proj = projRows[0];
+                const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+                sendProjectEnrollmentEmail({
+                    to: targetUser.email,
+                    userName: targetUser.name,
+                    projectName: proj.name,
+                    projectCode: proj.code,
+                    role,
+                    projectManagerName: proj.owner_name || "Project Lead",
+                    description: proj.description,
+                    deepLinkUrl: `${frontendUrl}/projects/${id}`
+                }).catch(e => console.warn(`[ProjectEmail] Failed to send enrollment email to ${targetUser.email}:`, e.message));
+            }
+        } catch (emailErr) {
+            console.warn("[ProjectEmail] Non-fatal error while preparing enrollment email:", emailErr.message);
+        }
 
         res.json({ success: true, message: "Team member updated successfully" });
     } catch (err) {
@@ -1239,5 +1335,73 @@ exports.getProjectReport = async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ success: false, message: "Failed to generate report" });
+    }
+};
+
+// ─── 13. Send Email to Enrolled Project Members ─────────────────────────────
+exports.sendEmailToProjectMembers = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { subject, message } = req.body;
+        const senderName = req.user?.name || req.user?.username || "Project Lead";
+
+        // 1. Fetch project details
+        const [projects] = await db.execute(`
+            SELECT p.*, u.name as owner_name, u.email as owner_email
+            FROM projects p
+            LEFT JOIN users u ON p.owner_id = u.id
+            WHERE p.id = ?
+        `, [id]);
+
+        if (projects.length === 0) {
+            return res.status(404).json({ success: false, message: "Project not found" });
+        }
+        const project = projects[0];
+
+        // 2. Fetch all enrolled members with valid emails
+        const [members] = await db.execute(`
+            SELECT pm.role, u.id as user_id, u.name, u.email
+            FROM project_members pm
+            JOIN users u ON pm.user_id = u.id
+            WHERE pm.project_id = ? AND u.email IS NOT NULL AND u.email != ''
+        `, [id]);
+
+        if (members.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "No enrolled members with email addresses found in this project." 
+            });
+        }
+
+        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const deepLinkUrl = `${frontendUrl}/projects/${id}`;
+
+        const sendPromises = members.map(member => 
+            sendProjectBroadcastEmail({
+                to: member.email,
+                userName: member.name,
+                projectName: project.name,
+                projectCode: project.code,
+                subject: subject || `Update on Project: ${project.name}`,
+                message: message || `This is an update regarding ${project.name} (${project.code}).`,
+                senderName,
+                deepLinkUrl
+            }).then(() => ({ email: member.email, name: member.name, status: "sent" }))
+              .catch(err => ({ email: member.email, name: member.name, status: "failed", error: err.message }))
+        );
+
+        const results = await Promise.all(sendPromises);
+        const sentCount = results.filter(r => r.status === "sent").length;
+
+        return res.json({
+            success: true,
+            message: `Email dispatched to ${sentCount} enrolled member(s)`,
+            total: members.length,
+            sentCount,
+            results
+        });
+    } catch (err) {
+        console.error("Error sending email to project members:", err);
+        return res.status(500).json({ success: false, message: err.message || "Failed to send email to project members" });
     }
 };

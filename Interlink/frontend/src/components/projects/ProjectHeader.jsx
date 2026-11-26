@@ -6,7 +6,10 @@ export default function ProjectHeader({
     onOpenCreateTask,
     onOpenCreateMilestone,
     onOpenBaselineModal,
-    onStartMeeting
+    onStartMeeting,
+    onOpenEmailTeamModal,
+    onOpenEditModal,
+    onDeleteProject
 }) {
     const navigate = useNavigate();
 
@@ -38,6 +41,16 @@ export default function ProjectHeader({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    {onOpenEmailTeamModal && (
+                        <button
+                            onClick={onOpenEmailTeamModal}
+                            className="px-3 py-1.5 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                            title="Send email notification to all enrolled team members"
+                        >
+                            <i className="fa-solid fa-envelope text-sky-600"></i>
+                            <span>Email Team</span>
+                        </button>
+                    )}
                     {onStartMeeting && (
                         <button
                             onClick={onStartMeeting}
@@ -73,6 +86,25 @@ export default function ProjectHeader({
                             className="px-3.5 py-1.5 text-xs font-bold text-white bg-[#17365D] hover:bg-[#102642] rounded-lg shadow-sm transition-all cursor-pointer flex items-center"
                         >
                             <span>+ Add Task</span>
+                        </button>
+                    )}
+                    {onOpenEditModal && (
+                        <button
+                            onClick={onOpenEditModal}
+                            className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                            title="Edit Project Specifications"
+                        >
+                            <i className="fa-regular fa-pen-to-square text-slate-600"></i>
+                            <span>Edit</span>
+                        </button>
+                    )}
+                    {onDeleteProject && (
+                        <button
+                            onClick={onDeleteProject}
+                            className="px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                            title="Delete this project"
+                        >
+                            <i className="fa-regular fa-trash-can text-red-500"></i>
                         </button>
                     )}
                 </div>
