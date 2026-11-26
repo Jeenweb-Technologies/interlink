@@ -417,7 +417,7 @@ exports.createProject = async (req, res) => {
 
         // Notify enrolled team members asynchronously via email
         try {
-            const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+            const frontendUrl = process.env.FRONTEND_URL || "https://interlink.jeenhost.in";
             const [enrolledUsers] = await db.execute(`
                 SELECT pm.role, u.name, u.email 
                 FROM project_members pm
@@ -788,7 +788,7 @@ exports.addMember = async (req, res) => {
             if (userRows.length > 0 && userRows[0].email && projRows.length > 0) {
                 const targetUser = userRows[0];
                 const proj = projRows[0];
-                const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+                const frontendUrl = process.env.FRONTEND_URL || "https://interlink.jeenhost.in";
 
                 sendProjectEnrollmentEmail({
                     to: targetUser.email,
@@ -1373,7 +1373,7 @@ exports.sendEmailToProjectMembers = async (req, res) => {
             });
         }
 
-        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+        const frontendUrl = process.env.FRONTEND_URL || "https://interlink.jeenhost.in";
         const deepLinkUrl = `${frontendUrl}/projects/${id}`;
 
         const sendPromises = members.map(member => 

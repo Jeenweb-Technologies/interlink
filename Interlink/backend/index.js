@@ -6,6 +6,7 @@ const cookieParser = require("cookie-parser");
 const http = require("http");
 const path = require("path");
 const uploadConfig = require("./config/uploadConfig.js");
+const db = require("./config/db.js");
 const { connectDB } = require("./config/db.js");
 const { initSocket } = require("./socket.js");
 
@@ -49,6 +50,8 @@ const { startReminderDaemon } = require("./services/reminderDaemon.js");
 const app = express();
 
 const allowedOrigins = [
+    "https://interlink.jeenhost.in",
+    "http://interlink.jeenhost.in",
     "http://localhost:5173",
     "http://localhost:5174",
     "http://localhost:5175",
@@ -58,7 +61,10 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || allowedOrigins.includes(origin)) {
+        if (!origin) return callback(null, true);
+        const cleanOrigin = origin.replace(/\/+$/, "");
+        const allowedClean = allowedOrigins.map(o => o.replace(/\/+$/, ""));
+        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(cleanOrigin) || allowedClean.includes(cleanOrigin)) {
             return callback(null, true);
         }
         return callback(new Error("Not allowed by CORS"));
@@ -83,6 +89,16 @@ app.use((req, res, next) => {
         req.method = methodOverride.toUpperCase();
     }
     next();
+});
+
+// Health check and root endpoints for cPanel / Passenger / uptime probes
+app.get(["/", "/api", "/api/health", "/health"], (req, res) => {
+    res.status(200).json({
+        success: true,
+        status: "ok",
+        message: "Interlink API is running",
+        timestamp: new Date().toISOString()
+    });
 });
 
 app.use(["/api/auth", "/auth"], authRoutes);
@@ -114,42 +130,69 @@ app.use((err, req, res, next) => {
     res.status(500).json({ success: false, message: "Something went wrong" });
 });
 
-const startServer = async () => {
+const startServer = () => {
     try {
-        await connectDB();
-
-        console.log("Initializing database tables...");
-        // Initialize tables in correct dependency order
-        await initCompanyModel();
-        await createDepartmentTables();
-        await initUserModel();
-        await createUserTypesTable();
-        await createUserTypePermissionsTable();
-        await createAuditLogsTable();
-        await createUserDevicesTable();
-        await createTaskTables();
-        await createProjectTables();
-        await createChatTables();
-        await createNoteTables();
-        await createMeetingTables();
-        await initAttendanceTables();
-        await initTimesheetTables();
-        await initCalendarTables();
-        await initReminderTables();
-
-        console.log("All database tables are initialized and ready.");
-
         const PORT = process.env.PORT || 5000;
         const server = http.createServer(app);
         const io = initSocket(server);
-        startReminderDaemon(io);
 
         server.listen(PORT, () => {
             console.log(`Server & Socket.IO Running on Port ${PORT}`);
+
+            // Asynchronously initialize database tables once server is listening
+            (async () => {
+                try {
+                    const isConnected = await connectDB();
+                    if (isConnected) {
+                        console.log("Initializing database tables with safe foreign key checks...");
+                        await db.execute("SET FOREIGN_KEY_CHECKS = 0");
+
+                        // 1. Core Users table - MUST BE INITIALIZED FIRST so foreign keys resolve
+                        await initUserModel();
+
+                        // 2. Base Organization & Companies tables (organizations, companies, user_companies)
+                        await initCompanyModel();
+
+                        // 3. User Types & Permissions (user_types, user_type_permissions)
+                        await createUserTypesTable();
+                        await createUserTypePermissionsTable();
+
+                        // 4. Departments & User-Departments Junction (departments, user_departments)
+                        await createDepartmentTables();
+
+                        // 5. System Devices & Audit Logging (audit_logs, user_devices)
+                        await createAuditLogsTable();
+                        await createUserDevicesTable();
+
+                        // 6. Collaboration & Workspaces (projects, tasks, chat, notes, meetings)
+                        await createProjectTables();
+                        await createTaskTables();
+                        await createChatTables();
+                        await createNoteTables();
+                        await createMeetingTables();
+
+                        // 7. Operations & HR (attendance, timesheets, calendar, reminders)
+                        await initAttendanceTables();
+                        await initTimesheetTables();
+                        await initCalendarTables();
+                        await initReminderTables();
+
+                        await db.execute("SET FOREIGN_KEY_CHECKS = 1");
+                        console.log("All database tables are initialized and ready.");
+
+                        // Start background reminder scheduler ONLY after database tables are ready
+                        startReminderDaemon(io);
+                    } else {
+                        console.warn("[Database] Could not connect to MySQL on boot. Please verify database credentials in .env");
+                    }
+                } catch (dbInitErr) {
+                    console.error("Database initialization warning:", dbInitErr.message);
+                    try { await db.execute("SET FOREIGN_KEY_CHECKS = 1"); } catch (_) {}
+                }
+            })();
         });
     } catch (error) {
         console.error("Failed to start application server:", error);
-        process.exit(1);
     }
 };
 

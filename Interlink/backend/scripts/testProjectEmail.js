@@ -64,7 +64,7 @@ async function main() {
     console.log(`\nDispatching email to ${validMembers.length} enrolled member(s)...`);
     console.log(`Subject: "${customSubject}"`);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://interlink.jeenhost.in';
     const deepLinkUrl = `${frontendUrl}/projects/${project.id}`;
 
     let successCount = 0;

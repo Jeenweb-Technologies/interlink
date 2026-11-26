@@ -32,9 +32,12 @@ export default function ProjectDocumentsView({ projectId }) {
     }, [projectId]);
 
     const handleOpenFile = (doc) => {
+        const uploadBase = import.meta.env.VITE_UPLOAD_URL 
+            || (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "/uploads") : null)
+            || "https://interlink.jeenhost.in/uploads";
         const fileUrl = doc.file_url || (doc.file_path?.startsWith("http")
             ? doc.file_path
-            : `http://localhost:5000/uploads/${doc.file_path}`);
+            : `${uploadBase}/${doc.file_path}`);
         setPreviewFile({
             name: doc.file_name,
             url: fileUrl,

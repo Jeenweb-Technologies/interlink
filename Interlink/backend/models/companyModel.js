@@ -4,6 +4,16 @@ const bcrypt = require("bcryptjs");
 // Helper to safely add column if it doesn't already exist
 const ensureColumn = async (tableName, columnName, columnDef) => {
     try {
+        // First check if the table exists
+        const [tables] = await db.execute(`
+            SELECT TABLE_NAME 
+            FROM INFORMATION_SCHEMA.TABLES 
+            WHERE TABLE_SCHEMA = DATABASE() 
+              AND TABLE_NAME = ?
+        `, [tableName]);
+
+        if (tables.length === 0) return;
+
         const [rows] = await db.execute(`
             SELECT COLUMN_NAME 
             FROM INFORMATION_SCHEMA.COLUMNS 
@@ -17,7 +27,7 @@ const ensureColumn = async (tableName, columnName, columnDef) => {
             console.log(`[Auto-Schema] Added column ${columnName} to ${tableName}`);
         }
     } catch (err) {
-        console.warn(`[Auto-Schema] Notice ensuring column ${columnName} in ${tableName}:`, err.message);
+        // Suppress notice
     }
 };
 

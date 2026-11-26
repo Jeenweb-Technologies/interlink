@@ -37,7 +37,11 @@ const createDepartmentTables = async () => {
             FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
-    await db.execute(createUserDeptsQuery);
+    try {
+        await db.execute(createUserDeptsQuery);
+    } catch (udErr) {
+        console.warn("[Auto-Schema] Notice initializing user_departments table:", udErr.message);
+    }
 
     // 3. Ensure department_id column exists on users table
     try {
