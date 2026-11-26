@@ -142,6 +142,9 @@ const getReminders = async (userId, organizationId, options = {}) => {
         whereClauses.push(`r.status IN ('pending', 'snoozed')`);
     }
 
+    const safeLimit = Math.max(1, parseInt(limit, 10) || 50);
+    const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+
     const query = `
         SELECT 
             r.*,
@@ -160,10 +163,9 @@ const getReminders = async (userId, organizationId, options = {}) => {
                 ELSE 4
             END ASC,
             r.trigger_at ASC
-        LIMIT ? OFFSET ?
+        LIMIT ${safeLimit} OFFSET ${safeOffset}
     `;
 
-    params.push(Number(limit), Number(offset));
     const [rows] = await db.execute(query, params);
     return rows;
 };
@@ -384,6 +386,7 @@ const updateReminderPreferences = async (userId, prefs) => {
 
 // Scheduler worker fetch
 const getDueRemindersForWorker = async (limit = 100) => {
+    const safeLimit = Math.max(1, parseInt(limit, 10) || 100);
     const [rows] = await db.execute(`
         SELECT 
             r.*,
@@ -394,8 +397,8 @@ const getDueRemindersForWorker = async (limit = 100) => {
         WHERE (r.status = 'pending' AND r.trigger_at <= UTC_TIMESTAMP())
            OR (r.status = 'snoozed' AND r.snooze_until <= UTC_TIMESTAMP())
         ORDER BY r.trigger_at ASC
-        LIMIT ?
-    `, [Number(limit)]);
+        LIMIT ${safeLimit}
+    `);
     return rows;
 };
 
