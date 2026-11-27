@@ -197,25 +197,25 @@ const initSocket = (server, app) => {
                     ...(participant || {}),
                     socketId: socket.id,
                     id: participant?.id || (socket.user?.id ? `user_${socket.user.id}` : socket.id),
+                    user_id: socket.user?.id || (typeof participant?.id === "string" && participant.id.startsWith("user_") ? Number(participant.id.replace("user_", "")) : undefined),
                     name: participant?.name || socket.user?.name || "Participant"
                 };
 
-                // Find existing peers already in this meeting room (excluding self)
+                // Find existing peers already in this meeting room (excluding self and deduplicating by peer identity)
                 const existingPeers = [];
+                const seenPeerKeys = new Set();
                 const room = io.sockets.adapter.rooms.get(roomKey);
                 if (room) {
                     for (const sId of room) {
                         if (sId !== socket.id) {
                             const peerSocket = io.sockets.sockets.get(sId);
-                            if (peerSocket && peerSocket.meetingParticipant) {
+                            const peerPart = peerSocket?.meetingParticipant || { socketId: sId, name: "Participant" };
+                            const peerKey = peerPart.id || sId;
+                            if (!seenPeerKeys.has(peerKey)) {
+                                seenPeerKeys.add(peerKey);
                                 existingPeers.push({
                                     socketId: sId,
-                                    participant: peerSocket.meetingParticipant
-                                });
-                            } else {
-                                existingPeers.push({
-                                    socketId: sId,
-                                    participant: { socketId: sId, name: "Participant" }
+                                    participant: peerPart
                                 });
                             }
                         }

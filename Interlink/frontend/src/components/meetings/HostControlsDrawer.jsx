@@ -12,7 +12,7 @@ export default function HostControlsDrawer({
     onAdmitSuccess,
     onDenySuccess,
     onHostAction,
-    permissions = { canShareScreen: true, canEditWhiteboard: true, canChat: true },
+    permissions = { canShareScreen: true, canEditWhiteboard: true, canChat: true, canTurnOnVideo: true },
     onUpdatePermissions
 }) {
     if (!isOpen) return null;
@@ -169,10 +169,23 @@ export default function HostControlsDrawer({
 
                     <div className="space-y-2 text-xs text-slate-300">
                         <label className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/5 cursor-pointer">
+                            <span>Allow Participant Cameras</span>
+                            <input
+                                type="checkbox"
+                                checked={permissions.canTurnOnVideo !== false}
+                                onChange={(e) =>
+                                    onUpdatePermissions &&
+                                    onUpdatePermissions({ ...permissions, canTurnOnVideo: e.target.checked })
+                                }
+                                className="rounded text-blue-600 focus:ring-blue-500"
+                            />
+                        </label>
+
+                        <label className="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/5 cursor-pointer">
                             <span>Allow Screen Sharing</span>
                             <input
                                 type="checkbox"
-                                checked={permissions.canShareScreen}
+                                checked={permissions.canShareScreen !== false}
                                 onChange={(e) =>
                                     onUpdatePermissions &&
                                     onUpdatePermissions({ ...permissions, canShareScreen: e.target.checked })
@@ -185,7 +198,7 @@ export default function HostControlsDrawer({
                             <span>Allow Whiteboard Collaboration</span>
                             <input
                                 type="checkbox"
-                                checked={permissions.canEditWhiteboard}
+                                checked={permissions.canEditWhiteboard !== false}
                                 onChange={(e) =>
                                     onUpdatePermissions &&
                                     onUpdatePermissions({ ...permissions, canEditWhiteboard: e.target.checked })
@@ -198,7 +211,7 @@ export default function HostControlsDrawer({
                             <span>Allow In-Meeting Text Chat</span>
                             <input
                                 type="checkbox"
-                                checked={permissions.canChat}
+                                checked={permissions.canChat !== false}
                                 onChange={(e) =>
                                     onUpdatePermissions &&
                                     onUpdatePermissions({ ...permissions, canChat: e.target.checked })

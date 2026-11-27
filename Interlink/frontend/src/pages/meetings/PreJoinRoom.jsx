@@ -120,9 +120,16 @@ export default function PreJoinRoom() {
                 streamRef.current.getTracks().forEach((t) => t.stop());
             }
 
+            const audioConstraints = {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                ...(selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : {})
+            };
+
             const constraints = {
                 video: selectedVideoId ? { deviceId: { exact: selectedVideoId } } : true,
-                audio: selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : true
+                audio: audioConstraints
             };
 
             let stream = null;
@@ -136,7 +143,7 @@ export default function PreJoinRoom() {
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: false,
-                        audio: selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : true
+                        audio: audioConstraints
                     });
                     cameraUnavailable = true;
                     setIsCamOff(true);
