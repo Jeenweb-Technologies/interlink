@@ -124,14 +124,14 @@ const getReminders = async (userId, organizationId, options = {}) => {
     const now = new Date();
 
     if (status === 'overdue') {
-        whereClauses.push(`(r.status = 'pending' AND r.trigger_at < UTC_TIMESTAMP())`);
+        whereClauses.push(`(r.status = 'pending' AND r.trigger_at < NOW())`);
     } else if (status === 'today') {
         whereClauses.push(`(
-            (r.status IN ('pending', 'snoozed') AND DATE(r.trigger_at) = UTC_DATE())
-            OR (r.status = 'snoozed' AND DATE(r.snooze_until) = UTC_DATE())
+            (r.status IN ('pending', 'snoozed') AND DATE(r.trigger_at) = CURDATE())
+            OR (r.status = 'snoozed' AND DATE(r.snooze_until) = CURDATE())
         )`);
     } else if (status === 'upcoming') {
-        whereClauses.push(`(r.status = 'pending' AND r.trigger_at > UTC_TIMESTAMP())`);
+        whereClauses.push(`(r.status = 'pending' AND r.trigger_at > NOW())`);
     } else if (status === 'snoozed') {
         whereClauses.push(`r.status = 'snoozed'`);
     } else if (status === 'completed') {
@@ -148,6 +148,9 @@ const getReminders = async (userId, organizationId, options = {}) => {
     const query = `
         SELECT 
             r.*,
+            DATE_FORMAT(r.trigger_at, '%Y-%m-%d %H:%i:%s') as trigger_at,
+            DATE_FORMAT(r.snooze_until, '%Y-%m-%d %H:%i:%s') as snooze_until,
+            DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
             u.name as user_name,
             u.email as user_email,
             esc_u.name as escalated_to_user_name
@@ -157,7 +160,7 @@ const getReminders = async (userId, organizationId, options = {}) => {
         WHERE ${whereClauses.join(' AND ')}
         ORDER BY 
             CASE 
-                WHEN r.status = 'pending' AND r.trigger_at < UTC_TIMESTAMP() THEN 1
+                WHEN r.status = 'pending' AND r.trigger_at < NOW() THEN 1
                 WHEN r.status = 'snoozed' THEN 2
                 WHEN r.status = 'pending' THEN 3
                 ELSE 4
@@ -173,7 +176,13 @@ const getReminders = async (userId, organizationId, options = {}) => {
 // Get single reminder by ID
 const getReminderById = async (reminderId) => {
     const [rows] = await db.execute(`
-        SELECT r.*, u.name as user_name, u.email as user_email
+        SELECT 
+            r.*,
+            DATE_FORMAT(r.trigger_at, '%Y-%m-%d %H:%i:%s') as trigger_at,
+            DATE_FORMAT(r.snooze_until, '%Y-%m-%d %H:%i:%s') as snooze_until,
+            DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+            u.name as user_name,
+            u.email as user_email
         FROM reminders r
         JOIN users u ON r.user_id = u.id
         WHERE r.id = ?
@@ -241,15 +250,38 @@ const createReminder = async (reminderData) => {
 };
 
 // Snooze reminder
-const snoozeReminder = async (reminderId, snoozeUntil) => {
-    await db.execute(`
-        UPDATE reminders 
-        SET status = 'snoozed',
-            snooze_until = ?,
-            snooze_count = snooze_count + 1,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-    `, [snoozeUntil, reminderId]);
+const snoozeReminder = async (reminderId, snoozeData) => {
+    // If snoozeData is a string/date (backwards compatibility) or object
+    const minutes = (snoozeData && typeof snoozeData === 'object') ? snoozeData.minutes : null;
+    const snoozeUntil = (snoozeData && typeof snoozeData === 'object') ? snoozeData.snoozeUntil : snoozeData;
+
+    if (minutes && Number(minutes) > 0) {
+        await db.execute(`
+            UPDATE reminders 
+            SET status = 'snoozed',
+                snooze_until = DATE_ADD(NOW(), INTERVAL ? MINUTE),
+                snooze_count = snooze_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [Number(minutes), reminderId]);
+    } else if (snoozeUntil) {
+        let formattedSnooze = snoozeUntil;
+        if (typeof snoozeUntil === 'string' && snoozeUntil.includes('T')) {
+            const d = new Date(snoozeUntil);
+            if (!isNaN(d.getTime())) {
+                const pad = (n) => String(n).padStart(2, '0');
+                formattedSnooze = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            }
+        }
+        await db.execute(`
+            UPDATE reminders 
+            SET status = 'snoozed',
+                snooze_until = ?,
+                snooze_count = snooze_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [formattedSnooze, reminderId]);
+    }
     return true;
 };
 
@@ -390,12 +422,23 @@ const getDueRemindersForWorker = async (limit = 100) => {
     const [rows] = await db.execute(`
         SELECT 
             r.*,
+            DATE_FORMAT(r.trigger_at, '%Y-%m-%d %H:%i:%s') as trigger_at,
+            DATE_FORMAT(r.snooze_until, '%Y-%m-%d %H:%i:%s') as snooze_until,
             u.name as user_name,
             u.email as user_email
         FROM reminders r
         JOIN users u ON r.user_id = u.id
-        WHERE (r.status = 'pending' AND r.trigger_at <= UTC_TIMESTAMP())
-           OR (r.status = 'snoozed' AND r.snooze_until <= UTC_TIMESTAMP())
+        WHERE (
+            (r.status = 'pending' AND r.trigger_at <= NOW())
+            OR (r.status = 'snoozed' AND r.snooze_until <= NOW())
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM reminder_delivery_logs rdl 
+            WHERE rdl.reminder_id = r.id 
+              AND rdl.channel = 'in_app'
+              AND rdl.status = 'sent'
+              AND rdl.delivered_at >= COALESCE(r.snooze_until, r.trigger_at)
+        )
         ORDER BY r.trigger_at ASC
         LIMIT ${safeLimit}
     `);
@@ -413,11 +456,11 @@ const logReminderDelivery = async (reminderId, userId, channel, status = 'sent',
 const getReminderMetrics = async (userId, organizationId) => {
     const [rows] = await db.execute(`
         SELECT 
-            COUNT(CASE WHEN status = 'pending' AND trigger_at < UTC_TIMESTAMP() THEN 1 END) as overdue_count,
-            COUNT(CASE WHEN (status IN ('pending', 'snoozed') AND DATE(trigger_at) = UTC_DATE()) 
-                         OR (status = 'snoozed' AND DATE(snooze_until) = UTC_DATE()) THEN 1 END) as today_count,
+            COUNT(CASE WHEN status = 'pending' AND trigger_at < NOW() THEN 1 END) as overdue_count,
+            COUNT(CASE WHEN (status IN ('pending', 'snoozed') AND DATE(trigger_at) = CURDATE()) 
+                         OR (status = 'snoozed' AND DATE(snooze_until) = CURDATE()) THEN 1 END) as today_count,
             COUNT(CASE WHEN status = 'snoozed' THEN 1 END) as snoozed_count,
-            COUNT(CASE WHEN status = 'upcoming' OR (status = 'pending' AND trigger_at > UTC_TIMESTAMP()) THEN 1 END) as upcoming_count
+            COUNT(CASE WHEN status = 'upcoming' OR (status = 'pending' AND trigger_at > NOW()) THEN 1 END) as upcoming_count
         FROM reminders
         WHERE user_id = ? AND organization_id = ?
     `, [userId, organizationId]);

@@ -112,7 +112,15 @@ const login = async (req, res) => {
             console.warn("Could not fetch user companies:", e.message);
         }
 
-        if (user.role === "admin" && (user.device_verification_required === 0 || user.device_verification_required === false)) {
+        // ================= DEVICE VERIFICATION CHECK =================
+        const isDeviceVerificationRequired = !(
+            user.device_verification_required === 0 ||
+            user.device_verification_required === false ||
+            user.device_verification_required === '0' ||
+            user.device_verification_required === 'false'
+        );
+
+        if (user.role === "admin" && !isDeviceVerificationRequired) {
             const token = jwt.sign(
                 { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
                 process.env.JWT_SECRET,
@@ -139,7 +147,7 @@ const login = async (req, res) => {
         }
 
         // ================= DEVICE MATCHING =================
-        if (user.device_verification_required === 0 || user.device_verification_required === false) {
+        if (!isDeviceVerificationRequired) {
             const token = jwt.sign(
                 { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
                 process.env.JWT_SECRET,
@@ -165,64 +173,61 @@ const login = async (req, res) => {
             });
         }
 
-        const approvedDevice = await getApprovedDevice(user.id);
+        const cleanDeviceId = String(deviceId || "").trim();
 
-        if (approvedDevice) {
-            if (approvedDevice.device_id === deviceId) {
-                // Device matches, login successful
-                const token = jwt.sign(
-                    { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
-                    process.env.JWT_SECRET,
-                    { expiresIn: "1d" }
-                );
+        // 1. Check if THIS device is approved for the user
+        let approvedDevice = await getApprovedDevice(user.id, cleanDeviceId);
 
-                return res.status(200).json({
-                    success: true,
-                    message: "Login successful",
-                    token,
-                    user: {
-                        id: user.id,
-                        name: user.name,
-                        username: user.username,
-                        email: user.email,
-                        role: user.role,
-                        mob_no: user.mob_no,
-                        organization_id: userOrgId,
-                        company_id: userCompId,
-                        companies: userCompanies,
-                        modules: user.modules || []
-                    }
-                });
-            } else {
-                // Device mismatch, check if they have a pending device for this deviceId
-                const pendingDevice = await getPendingDevice(user.id);
-                if (pendingDevice && pendingDevice.device_id === deviceId) {
-                    return res.status(200).json({
-                        success: false,
-                        status: "PENDING_APPROVAL"
-                    });
-                }
-                return res.status(200).json({
-                    success: false,
-                    status: "DEVICE_REGISTRATION_REQUIRED",
-                    message: "New device detected. Registration required."
-                });
+        // Fallback: check if the user's latest approved active device matches (case-insensitive / trimmed)
+        if (!approvedDevice) {
+            const latestApproved = await getApprovedDevice(user.id);
+            if (latestApproved && String(latestApproved.device_id || "").trim().toLowerCase() === cleanDeviceId.toLowerCase()) {
+                approvedDevice = latestApproved;
             }
         }
 
-        // No approved device found
-        const pendingDevice = await getPendingDevice(user.id);
-        if (pendingDevice) {
+        if (approvedDevice) {
+            // Device matches, login successful
+            const token = jwt.sign(
+                { id: user.id, role: user.role, name: user.name, username: user.username, mob_no: user.mob_no, organization_id: userOrgId, company_id: userCompId },
+                process.env.JWT_SECRET,
+                { expiresIn: "1d" }
+            );
+
             return res.status(200).json({
-                success: false,
-                status: "PENDING_APPROVAL"
+                success: true,
+                message: "Login successful",
+                token,
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role,
+                    mob_no: user.mob_no,
+                    organization_id: userOrgId,
+                    company_id: userCompId,
+                    companies: userCompanies,
+                    modules: user.modules || []
+                }
             });
         }
 
-        // No pending or approved device, needs registration
+        // 2. Not approved. Check if this specific device is pending approval
+        const pendingDevice = await getPendingDevice(user.id, cleanDeviceId);
+        if (pendingDevice) {
+            return res.status(200).json({
+                success: false,
+                status: "PENDING_APPROVAL",
+                message: "This device is awaiting administrator approval."
+            });
+        }
+
+        // 3. Neither approved nor pending -> Device registration required
         return res.status(200).json({
             success: false,
-            status: "DEVICE_REGISTRATION_REQUIRED"
+            status: "DEVICE_REGISTRATION_REQUIRED",
+            message: "New device detected. Registration required."
         });
 
     } catch (error) {
@@ -264,20 +269,35 @@ const requestDeviceRegistration = async (req, res) => {
             return res.status(401).json({ success: false, message: "Invalid credentials" });
         }
 
-        // Create pending device
-        await createPendingDevice(user.id, deviceId);
+        const cleanDeviceId = String(deviceId || "").trim();
+
+        // Check if device is already approved
+        const alreadyApproved = await getApprovedDevice(user.id, cleanDeviceId);
+        if (alreadyApproved) {
+            return res.status(200).json({
+                success: true,
+                status: "APPROVED",
+                message: "This device is already approved. You can log in."
+            });
+        }
+
+        // Check if device is already pending
+        const existingPending = await getPendingDevice(user.id, cleanDeviceId);
+        if (!existingPending) {
+            await createPendingDevice(user.id, cleanDeviceId);
+        }
 
         await createAuditLog(
             user.id,
             user.name || user.username || 'Unknown',
-            deviceId,
+            cleanDeviceId,
             'Device Management',
             'registration_requested',
             null,
             {
                 user_id: user.id,
                 username: user.username,
-                device_id: deviceId,
+                device_id: cleanDeviceId,
                 status: 'pending'
             }
         );

@@ -194,7 +194,8 @@ exports.getProjects = async (req, res) => {
 
         res.json({
             success: true,
-            data: rows
+            data: rows,
+            projects: rows
         });
     } catch (err) {
         console.error("Error fetching projects:", err);

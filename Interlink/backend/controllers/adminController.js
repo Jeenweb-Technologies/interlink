@@ -53,7 +53,12 @@ const fetchUsers = async (req, res) => {
                 d.device_id, device_verification_required, u.active,
                 u.department_id, dept.department_name
             FROM users u
-            LEFT JOIN user_devices d ON d.user_id = u.id AND d.closed_at IS NULL
+            LEFT JOIN user_devices d ON d.id = (
+                SELECT id FROM user_devices
+                WHERE user_id = u.id AND closed_at IS NULL
+                ORDER BY CASE WHEN status = 'approved' THEN 1 WHEN status = 'pending' THEN 2 ELSE 3 END, approved_at DESC, submitted_at DESC, id DESC
+                LIMIT 1
+            )
             LEFT JOIN user_types ut ON u.user_type_id = ut.id
             LEFT JOIN departments dept ON u.department_id = dept.id
             ${whereSQL}

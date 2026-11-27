@@ -131,13 +131,13 @@ exports.createReminder = async (req, res) => {
 exports.snoozeReminder = async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id, 10);
-        const { snoozeUntil } = req.body;
+        const { snoozeUntil, minutes } = req.body;
 
-        if (!snoozeUntil) {
-            return res.status(400).json({ success: false, message: "snoozeUntil timestamp is required" });
+        if (!snoozeUntil && (!minutes || Number(minutes) <= 0)) {
+            return res.status(400).json({ success: false, message: "snoozeUntil timestamp or minutes duration is required" });
         }
 
-        await snoozeReminder(reminderId, snoozeUntil);
+        await snoozeReminder(reminderId, { snoozeUntil, minutes });
 
         return res.status(200).json({
             success: true,

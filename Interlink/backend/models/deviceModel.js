@@ -21,45 +21,72 @@ const createUserDevicesTable = async () => {
     console.log("User devices table ready");
 };
 
-// Get the current approved active device for login check
-const getApprovedDevice = async (userId) => {
-    const query = `
+// Get the current approved active device for login check (optionally matched by specific deviceId)
+const getApprovedDevice = async (userId, deviceId = null) => {
+    let query = `
         SELECT * FROM user_devices
         WHERE user_id = ? AND status = 'approved' AND closed_at IS NULL
-        LIMIT 1
     `;
-    const [rows] = await db.execute(query, [userId]);
+    const params = [userId];
+    if (deviceId) {
+        query += ` AND device_id = ?`;
+        params.push(String(deviceId).trim());
+    }
+    query += ` ORDER BY approved_at DESC, id DESC LIMIT 1`;
+    const [rows] = await db.execute(query, params);
     return rows[0];
 };
 
-// Get any pending active device for a user
-const getPendingDevice = async (userId) => {
-    const query = `
+// Get any pending active device for a user (optionally matched by specific deviceId)
+const getPendingDevice = async (userId, deviceId = null) => {
+    let query = `
         SELECT * FROM user_devices
         WHERE user_id = ? AND status = 'pending' AND closed_at IS NULL
-        ORDER BY submitted_at DESC
-        LIMIT 1
     `;
-    const [rows] = await db.execute(query, [userId]);
+    const params = [userId];
+    if (deviceId) {
+        query += ` AND device_id = ?`;
+        params.push(String(deviceId).trim());
+    }
+    query += ` ORDER BY submitted_at DESC, id DESC LIMIT 1`;
+    const [rows] = await db.execute(query, params);
     return rows[0];
 };
 
-// Insert a new pending device
+// Insert or update a pending device (prevent duplicate active pending rows)
 const createPendingDevice = async (userId, deviceId) => {
+    const cleanDeviceId = String(deviceId).trim();
+
+    // Check if an active pending row already exists for this user and device
+    const checkQuery = `
+        SELECT id FROM user_devices
+        WHERE user_id = ? AND device_id = ? AND status = 'pending' AND closed_at IS NULL
+        LIMIT 1
+    `;
+    const [existing] = await db.execute(checkQuery, [userId, cleanDeviceId]);
+    if (existing.length > 0) {
+        await db.execute(
+            `UPDATE user_devices SET submitted_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            [existing[0].id]
+        );
+        return existing[0];
+    }
+
     const query = `
         INSERT INTO user_devices (user_id, device_id, status)
         VALUES (?, ?, 'pending')
     `;
-    const [result] = await db.execute(query, [userId, deviceId]);
+    const [result] = await db.execute(query, [userId, cleanDeviceId]);
     return result;
 };
 
 // Approve a device
 const approveDevice = async (deviceRowId, adminId) => {
     // 1. Find the user_id for this device
-    const [rows] = await db.execute('SELECT user_id FROM user_devices WHERE id = ?', [deviceRowId]);
+    const [rows] = await db.execute('SELECT user_id, device_id FROM user_devices WHERE id = ?', [deviceRowId]);
     if (rows.length > 0) {
         const userId = rows[0].user_id;
+
         // 2. Revoke all other active devices for this user
         const revokeQuery = `
             UPDATE user_devices
@@ -100,7 +127,6 @@ const revokeAllActiveDevices = async (userId, adminId) => {
     const [result] = await db.execute(query, [adminId, userId]);
     return result;
 };
-
 
 // Get all device history for a specific user
 const getDeviceHistoryForUser = async (userId) => {

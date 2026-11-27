@@ -1,5 +1,6 @@
 import AppRoutes from "./routes";
 import Footer from "./components/Footer";
+import ReminderNotificationManager from "./components/reminders/ReminderNotificationManager";
 import { useLocation } from "react-router-dom";
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
 
     return (
         <div className="flex flex-col min-h-screen bg-slate-50 relative">
+            <ReminderNotificationManager />
             <div className="flex-1 flex flex-col">
                 <AppRoutes />
             </div>

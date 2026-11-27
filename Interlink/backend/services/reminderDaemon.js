@@ -75,7 +75,7 @@ const startReminderDaemon = (io) => {
                 WHERE r.status = 'pending'
                   AND r.escalation_enabled = TRUE
                   AND r.escalated_at IS NULL
-                  AND r.trigger_at <= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 MINUTE)
+                  AND r.trigger_at <= DATE_SUB(NOW(), INTERVAL 60 MINUTE)
                 LIMIT 20
             `);
 
@@ -125,9 +125,9 @@ const startReminderDaemon = (io) => {
         }
     };
 
-    // Run immediately on launch, then every 30 seconds
+    // Run immediately on launch, then every 15 seconds for precision alerting
     processTick();
-    daemonInterval = setInterval(processTick, 30000);
+    daemonInterval = setInterval(processTick, 15000);
 };
 
 const stopReminderDaemon = () => {

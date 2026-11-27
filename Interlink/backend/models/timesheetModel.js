@@ -79,13 +79,20 @@ const initTimesheetTables = async () => {
  * Helper to compute Monday of the week for a given date
  */
 const getWeekRange = (dateInput) => {
-    const d = dateInput ? new Date(dateInput) : new Date();
+    let d;
+    if (dateInput && typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput.slice(0, 10))) {
+        const [y, m, dayNum] = dateInput.slice(0, 10).split('-').map(Number);
+        d = new Date(y, m - 1, dayNum);
+    } else if (dateInput) {
+        d = new Date(dateInput);
+    } else {
+        d = new Date();
+    }
     const day = d.getDay(); // 0 is Sunday, 1 is Monday
     const diffToMonday = d.getDate() - day + (day === 0 ? -6 : 1);
     
-    const monday = new Date(d.setDate(diffToMonday));
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
+    const monday = new Date(d.getFullYear(), d.getMonth(), diffToMonday);
+    const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
 
     const pad = (n) => String(n).padStart(2, '0');
     const formatYMD = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -103,7 +110,13 @@ const getOrCreateWeeklyTimesheet = async (userId, organizationId, companyId, dat
     const { startDate, endDate } = getWeekRange(dateStr);
 
     let [rows] = await db.execute(`
-        SELECT * FROM timesheets 
+        SELECT 
+            id, organization_id, company_id, user_id,
+            DATE_FORMAT(period_start_date, '%Y-%m-%d') AS period_start_date,
+            DATE_FORMAT(period_end_date, '%Y-%m-%d') AS period_end_date,
+            total_hours, billable_hours, non_billable_hours,
+            status, is_locked, submitted_at, approved_at, created_at, updated_at
+        FROM timesheets 
         WHERE user_id = ? AND period_start_date = ?
     `, [userId, startDate]);
 
@@ -116,7 +129,15 @@ const getOrCreateWeeklyTimesheet = async (userId, organizationId, companyId, dat
             ) VALUES (?, ?, ?, ?, ?, 'DRAFT', FALSE)
         `, [organizationId, companyId, userId, startDate, endDate]);
         timesheetId = createRes.insertId;
-        const [fresh] = await db.execute(`SELECT * FROM timesheets WHERE id = ?`, [timesheetId]);
+        const [fresh] = await db.execute(`
+            SELECT 
+                id, organization_id, company_id, user_id,
+                DATE_FORMAT(period_start_date, '%Y-%m-%d') AS period_start_date,
+                DATE_FORMAT(period_end_date, '%Y-%m-%d') AS period_end_date,
+                total_hours, billable_hours, non_billable_hours,
+                status, is_locked, submitted_at, approved_at, created_at, updated_at
+            FROM timesheets WHERE id = ?
+        `, [timesheetId]);
         rows = fresh;
     } else {
         timesheetId = rows[0].id;
@@ -125,7 +146,11 @@ const getOrCreateWeeklyTimesheet = async (userId, organizationId, companyId, dat
     // Fetch entries
     const [entries] = await db.execute(`
         SELECT 
-            te.*,
+            te.id, te.organization_id, te.company_id, te.timesheet_id, te.user_id,
+            te.project_id, te.task_id,
+            DATE_FORMAT(te.work_date, '%Y-%m-%d') AS work_date,
+            te.duration_minutes, te.duration_hours, te.description, te.is_billable, te.category,
+            te.created_at, te.updated_at,
             p.name AS project_title,
             p.code AS project_code,
             t.title AS task_title
@@ -198,20 +223,22 @@ const addOrUpdateTimeEntry = async (userId, organizationId, companyId, entryData
         throw new Error("This timesheet is locked and cannot be edited.");
     }
 
+    const cleanWorkDate = String(work_date).slice(0, 10);
+
     let entryId = id;
     if (id) {
         await db.execute(`
             UPDATE time_entries 
             SET project_id = ?, task_id = ?, work_date = ?, duration_minutes = ?, description = ?, is_billable = ?, category = ?
             WHERE id = ? AND timesheet_id = ? AND user_id = ?
-        `, [project_id, task_id || null, work_date, duration_minutes, description, is_billable, category, id, timesheet_id, userId]);
+        `, [project_id, task_id || null, cleanWorkDate, duration_minutes, description, is_billable, category, id, timesheet_id, userId]);
     } else {
         const [res] = await db.execute(`
             INSERT INTO time_entries (
                 organization_id, company_id, timesheet_id, user_id,
                 project_id, task_id, work_date, duration_minutes, description, is_billable, category
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [organizationId, companyId, timesheet_id, userId, project_id, task_id || null, work_date, duration_minutes, description, is_billable, category]);
+        `, [organizationId, companyId, timesheet_id, userId, project_id, task_id || null, cleanWorkDate, duration_minutes, description, is_billable, category]);
         entryId = res.insertId;
     }
 
@@ -266,7 +293,12 @@ const submitTimesheet = async (timesheetId, userId, organizationId, companyId) =
 const getTimesheetApprovalsQueue = async (organizationId, companyId, statusFilter = 'SUBMITTED') => {
     let query = `
         SELECT 
-            ts.*,
+            ts.id, ts.organization_id, ts.company_id, ts.user_id,
+            DATE_FORMAT(ts.period_start_date, '%Y-%m-%d') AS period_start_date,
+            DATE_FORMAT(ts.period_end_date, '%Y-%m-%d') AS period_end_date,
+            ts.total_hours, ts.billable_hours, ts.non_billable_hours,
+            ts.status, ts.is_locked, ts.submitted_at, ts.approved_at,
+            ts.created_at, ts.updated_at,
             u.name AS user_name,
             u.email AS user_email,
             u.role AS user_role,
@@ -344,7 +376,7 @@ const getTimesheetReports = async (organizationId, companyId, filters = {}) => {
     let query = `
         SELECT 
             te.id,
-            te.work_date,
+            DATE_FORMAT(te.work_date, '%Y-%m-%d') AS work_date,
             te.duration_minutes,
             te.duration_hours,
             te.description,
