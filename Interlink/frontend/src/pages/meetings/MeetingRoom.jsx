@@ -14,6 +14,66 @@ import MeetingChatDrawer from "../../components/meetings/MeetingChatDrawer";
 import MeetingNotesDrawer from "../../components/meetings/MeetingNotesDrawer";
 import RecordingConsentModal from "../../components/meetings/RecordingConsentModal";
 
+function RemoteParticipantAudio({ stream, onAutoplayBlocked }) {
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        const audioEl = audioRef.current;
+        if (!audioEl || !stream) return;
+
+        if (audioEl.srcObject !== stream) {
+            audioEl.srcObject = stream;
+        }
+
+        const tryPlay = () => {
+            if (audioEl) {
+                audioEl.play().then(() => {
+                    if (onAutoplayBlocked) onAutoplayBlocked(false);
+                }).catch((err) => {
+                    console.warn("[RemoteAudio] Autoplay pending user interaction:", err.message);
+                    if (onAutoplayBlocked) onAutoplayBlocked(true);
+                });
+            }
+        };
+
+        tryPlay();
+
+        const onAddTrack = () => tryPlay();
+        stream.addEventListener("addtrack", onAddTrack);
+
+        stream.getAudioTracks().forEach((track) => {
+            track.addEventListener("unmute", tryPlay);
+        });
+
+        const onUserInteraction = () => {
+            tryPlay();
+        };
+
+        window.addEventListener("click", onUserInteraction);
+        window.addEventListener("touchstart", onUserInteraction);
+        window.addEventListener("keydown", onUserInteraction);
+
+        return () => {
+            stream.removeEventListener("addtrack", onAddTrack);
+            stream.getAudioTracks().forEach((track) => {
+                track.removeEventListener("unmute", tryPlay);
+            });
+            window.removeEventListener("click", onUserInteraction);
+            window.removeEventListener("touchstart", onUserInteraction);
+            window.removeEventListener("keydown", onUserInteraction);
+        };
+    }, [stream, onAutoplayBlocked]);
+
+    return (
+        <audio
+            ref={audioRef}
+            autoPlay
+            playsInline
+            style={{ display: "none" }}
+        />
+    );
+}
+
 export default function MeetingRoom() {
     const { roomCode } = useParams();
     const navigate = useNavigate();
@@ -27,6 +87,7 @@ export default function MeetingRoom() {
     const [loading, setLoading] = useState(true);
     const [isMeetingEnded, setIsMeetingEnded] = useState(false);
     const [isHost, setIsHost] = useState(false);
+    const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
     // Media Hardware & Streams
     const [localStream, setLocalStream] = useState(null);
@@ -138,6 +199,8 @@ export default function MeetingRoom() {
                     }
                     const next = { ...prev, [targetSocketId]: stream };
                     if (targetParticipant?.id) next[targetParticipant.id] = stream;
+                    if (targetParticipant?.socketId) next[targetParticipant.socketId] = stream;
+                    if (targetParticipant?.user_id) next[`user_${targetParticipant.user_id}`] = stream;
                     return next;
                 });
             };
@@ -148,6 +211,8 @@ export default function MeetingRoom() {
                         const next = { ...prev };
                         delete next[targetSocketId];
                         if (targetParticipant?.id) delete next[targetParticipant.id];
+                        if (targetParticipant?.socketId) delete next[targetParticipant.socketId];
+                        if (targetParticipant?.user_id) delete next[`user_${targetParticipant.user_id}`];
                         return next;
                     });
                 }
@@ -301,6 +366,13 @@ export default function MeetingRoom() {
                                 }
                                 pc._pendingCandidates = [];
                             }
+
+                            // Ensure transceivers on answerer are set to sendrecv so host audio/video are always transmitted
+                            pc.getTransceivers().forEach((t) => {
+                                if (t.direction === "recvonly") {
+                                    t.direction = "sendrecv";
+                                }
+                            });
 
                             const answer = await pc.createAnswer();
                             await pc.setLocalDescription(answer);
@@ -501,9 +573,9 @@ export default function MeetingRoom() {
                 ...(preJoinState.selectedAudioInputId ? { deviceId: { exact: preJoinState.selectedAudioInputId } } : {})
             };
 
-            const videoConstraints = !preJoinState.initialCamOff
-                ? (preJoinState.selectedVideoId ? { deviceId: { exact: preJoinState.selectedVideoId } } : true)
-                : false;
+            const videoConstraints = preJoinState.selectedVideoId
+                ? { deviceId: { exact: preJoinState.selectedVideoId } }
+                : true;
 
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -532,15 +604,21 @@ export default function MeetingRoom() {
             }
 
             if (stream) {
+                localStreamRef.current = stream;
                 setLocalStream(stream);
 
                 // Apply initial state from Green Room
                 if (preJoinState.initialMicMuted) {
                     stream.getAudioTracks().forEach((t) => (t.enabled = false));
+                } else {
+                    stream.getAudioTracks().forEach((t) => (t.enabled = true));
                 }
                 if (preJoinState.initialCamOff || cameraBusy) {
                     stream.getVideoTracks().forEach((t) => (t.enabled = false));
                     setIsCamOff(true);
+                } else {
+                    stream.getVideoTracks().forEach((t) => (t.enabled = true));
+                    setIsCamOff(false);
                 }
 
                 if (localVideoRef.current && !cameraBusy) {
@@ -576,6 +654,9 @@ export default function MeetingRoom() {
                     );
                     if (existingTransceiver && existingTransceiver.sender) {
                         existingTransceiver.sender.replaceTrack(track).catch(() => {});
+                        if (existingTransceiver.direction === "recvonly") {
+                            existingTransceiver.direction = "sendrecv";
+                        }
                     } else {
                         const senders = pc.getSenders();
                         const existingSender = senders.find((s) => s.track && s.track.kind === track.kind);
@@ -604,8 +685,9 @@ export default function MeetingRoom() {
     };
 
     const handleMuteLocal = () => {
-        if (localStream) {
-            localStream.getAudioTracks().forEach((t) => {
+        const stream = localStreamRef.current || localStream;
+        if (stream) {
+            stream.getAudioTracks().forEach((t) => {
                 t.enabled = false;
             });
         }
@@ -626,12 +708,21 @@ export default function MeetingRoom() {
             if (activeVideoTracks.length === 0) {
                 // If stream was audio-only (e.g. camera was locked upon join), try to acquire video track now
                 try {
-                    const vStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    const vStream = await navigator.mediaDevices.getUserMedia({
+                        video: preJoinState.selectedVideoId
+                            ? { deviceId: { exact: preJoinState.selectedVideoId } }
+                            : true
+                    });
                     const vTrack = vStream.getVideoTracks()[0];
                     if (vTrack) {
                         stream.addTrack(vTrack);
+                        const updatedStream = new MediaStream(stream.getTracks());
+                        localStreamRef.current = updatedStream;
+                        setLocalStream(updatedStream);
+
                         if (localVideoRef.current) {
-                            localVideoRef.current.srcObject = stream;
+                            localVideoRef.current.srcObject = updatedStream;
+                            localVideoRef.current.play().catch(() => {});
                         }
                         // Update peer connections with new video track
                         Object.values(peersRef.current).forEach((pc) => {
@@ -642,7 +733,7 @@ export default function MeetingRoom() {
                             if (existingSender) {
                                 existingSender.replaceTrack(vTrack).catch(() => {});
                             } else {
-                                pc.addTrack(vTrack, stream);
+                                pc.addTrack(vTrack, updatedStream);
                             }
                         });
                         setIsCamOff(false);
@@ -654,10 +745,11 @@ export default function MeetingRoom() {
                 return;
             }
 
+            const nextCamState = !isCamOff;
             activeVideoTracks.forEach((t) => {
-                t.enabled = isCamOff;
+                t.enabled = isCamOff; // if currently off, enable track; if on, disable track
             });
-            setIsCamOff(!isCamOff);
+            setIsCamOff(nextCamState);
         } else {
             try {
                 const newStream = await navigator.mediaDevices.getUserMedia({
@@ -1056,8 +1148,12 @@ export default function MeetingRoom() {
                                             if (el) {
                                                 el.muted = true;
                                                 el.defaultMuted = true;
-                                                if (localStream && el.srcObject !== localStream) {
-                                                    el.srcObject = localStream;
+                                                const curStream = localStreamRef.current || localStream;
+                                                if (curStream && el.srcObject !== curStream) {
+                                                    el.srcObject = curStream;
+                                                }
+                                                if (el.paused) {
+                                                    el.play().catch(() => {});
                                                 }
                                             }
                                         }}
@@ -1097,8 +1193,15 @@ export default function MeetingRoom() {
                                 const pId = p.socketId || p.id || p.identity;
                                 const isRemoteHandRaised = raisedHands.has(pId) || (p.id && raisedHands.has(p.id));
                                 const displayName = p.display_name || p.user_name || p.name || p.guest_name || "Participant";
-                                const remoteStream = (p.socketId && remoteStreams[p.socketId]) || (p.id && remoteStreams[p.id]) || (p.identity && remoteStreams[p.identity]);
-                                const hasVideo = remoteStream && remoteStream.getVideoTracks().length > 0 && remoteStream.getVideoTracks().some((t) => t.enabled);
+                                const remoteStream =
+                                    (p.socketId && remoteStreams[p.socketId]) ||
+                                    (p.id && remoteStreams[p.id]) ||
+                                    (p.identity && remoteStreams[p.identity]) ||
+                                    (p.user_id && remoteStreams[`user_${p.user_id}`]);
+                                const hasVideo =
+                                    remoteStream &&
+                                    remoteStream.getVideoTracks().length > 0 &&
+                                    remoteStream.getVideoTracks().some((t) => t.enabled);
 
                                 return (
                                     <div
@@ -1132,20 +1235,6 @@ export default function MeetingRoom() {
                                             </div>
                                         )}
 
-                                        {/* Remote Audio Track (dedicated audio element so voice is clean, non-duplicated, and never echoes) */}
-                                        {remoteStream && remoteStream.getAudioTracks().length > 0 && (
-                                            <audio
-                                                ref={(el) => {
-                                                    if (el && remoteStream && el.srcObject !== remoteStream) {
-                                                        el.srcObject = remoteStream;
-                                                        el.play().catch(() => {});
-                                                    }
-                                                }}
-                                                autoPlay
-                                                playsInline
-                                            />
-                                        )}
-
                                         <div className="absolute bottom-2.5 left-2.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
                                             <span>{displayName}</span>
                                             {p.role === "host" && (
@@ -1166,6 +1255,36 @@ export default function MeetingRoom() {
                         </div>
                     )}
                 </div>
+
+                {/* Global Dedicated Remote Audio Sink: ensures all remote audio streams (host & participants) are decoded and played seamlessly, avoiding mute conflicts and tile unmount issues */}
+                {Object.entries(remoteStreams).reduce((acc, [, s]) => {
+                    if (s && s.getAudioTracks && s.getAudioTracks().length > 0 && !acc.some((item) => item.id === s.id)) {
+                        acc.push(s);
+                    }
+                    return acc;
+                }, []).map((stream) => (
+                    <RemoteParticipantAudio
+                        key={stream.id}
+                        stream={stream}
+                        onAutoplayBlocked={setIsAutoplayBlocked}
+                    />
+                ))}
+
+                {/* Autoplay Unlock Banner for participants whose browsers suspended unmuted audio */}
+                {isAutoplayBlocked && (
+                    <div
+                        onClick={() => {
+                            document.querySelectorAll("audio").forEach((el) => {
+                                el.play?.().catch(() => {});
+                            });
+                            setIsAutoplayBlocked(false);
+                        }}
+                        className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 cursor-pointer transition-all animate-pulse border border-amber-300"
+                    >
+                        <i className="fa-solid fa-volume-high"></i>
+                        <span>Click anywhere to enable meeting audio</span>
+                    </div>
+                )}
 
                 {/* Drawers */}
                 <HostControlsDrawer
