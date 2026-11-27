@@ -118,6 +118,9 @@ const startReminderDaemon = (io) => {
                 }
             }
         } catch (err) {
+            if (err.code === 'ER_NO_SUCH_TABLE') {
+                return; // Suppress logs while tables are being established
+            }
             console.error("[ReminderDaemon] Error in processing cycle:", err.message);
         }
     };

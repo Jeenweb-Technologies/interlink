@@ -1,0 +1,87 @@
+# ==============================================================================
+# Interlink Production .htaccess (Apache / LiteSpeed / cPanel)
+# Domain: https://interlink.jeenhost.in/
+# ==============================================================================
+
+# Disable directory browsing
+Options -Indexes
+
+# ------------------------------------------------------------------------------
+# 1. Force HTTPS
+# ------------------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Redirect HTTP to HTTPS
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # --------------------------------------------------------------------------
+    # 2. Socket.IO & API Routing for cPanel Phusion Passenger
+    # --------------------------------------------------------------------------
+    # Disable response buffering so real-time polling updates stream without delay
+    <IfModule mod_passenger.c>
+        PassengerBufferResponse off
+    </IfModule>
+
+    # Route any direct /socket.io requests to /api/socket.io for Passenger
+    RewriteCond %{REQUEST_URI} ^/socket\.io [NC]
+    RewriteRule ^socket\.io/(.*)$ /api/socket.io/$1 [PT,L,QSA]
+
+    # --------------------------------------------------------------------------
+    # 3. Single Page Application (React / Vite) Client-Side Routing
+    # --------------------------------------------------------------------------
+    # Do NOT rewrite API or Socket.IO requests to index.html
+    RewriteCond %{REQUEST_URI} ^/(api|socket\.io) [NC]
+    RewriteRule ^ - [L]
+
+    # If the requested resource exists as a physical file or directory, serve it
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Otherwise fallback to index.html for React Router
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 4. Security Headers
+# ------------------------------------------------------------------------------
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+    # Cache Control: Never cache index.html so updates are instantly reflected
+    <Files "index.html">
+        Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+        Header set Pragma "no-cache"
+        Header set Expires "0"
+    </Files>
+
+    # Cache Control: Cache static assets (JS, CSS, images, fonts) for 1 year
+    <FilesMatch "\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf|eot)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 5. GZIP / Deflate Compression
+# ------------------------------------------------------------------------------
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/plain
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/xml
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE text/javascript
+    AddOutputFilterByType DEFLATE application/xml
+    AddOutputFilterByType DEFLATE application/xhtml+xml
+    AddOutputFilterByType DEFLATE application/javascript
+    AddOutputFilterByType DEFLATE application/x-javascript
+    AddOutputFilterByType DEFLATE application/json
+    AddOutputFilterByType DEFLATE image/svg+xml
+</IfModule>

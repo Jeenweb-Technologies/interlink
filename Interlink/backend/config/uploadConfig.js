@@ -20,12 +20,12 @@ if (!fs.existsSync(uploadDir)) {
 
 module.exports = {
     uploadDir,
-    uploadBaseUrl: process.env.UPLOAD_BASE_URL || "http://localhost:5000/uploads",
+    uploadBaseUrl: process.env.UPLOAD_BASE_URL || "https://interlink.jeenhost.in/uploads",
     serveMethod: process.env.UPLOAD_SERVE_METHOD || "express",
     
     // Helper to generate public URL for a file
     getFileUrl: (filename) => {
-        const baseUrl = process.env.UPLOAD_BASE_URL || "http://localhost:5000/uploads";
+        const baseUrl = process.env.UPLOAD_BASE_URL || "https://interlink.jeenhost.in/uploads";
         // Ensure base URL doesn't end with a slash, and filename doesn't start with one
         const cleanBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
         const cleanFilename = filename.startsWith("/") ? filename.slice(1) : filename;

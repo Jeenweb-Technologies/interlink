@@ -208,14 +208,19 @@ export default function ChatPage() {
     // Connect Socket.IO once on mount
     useEffect(() => {
         const token = localStorage.getItem("token");
-        const socketUrl = import.meta.env.VITE_API_URL
-            ? import.meta.env.VITE_API_URL.replace("/api", "")
-            : "http://localhost:5000";
+        const socketUrl = import.meta.env.VITE_SOCKET_URL
+            || (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "") : null)
+            || "https://interlink.jeenhost.in";
+        const socketPath = import.meta.env.VITE_SOCKET_PATH || "/api/socket.io";
 
         const socket = io(socketUrl, {
+            path: socketPath,
             auth: { token },
             withCredentials: true,
-            transports: ["websocket", "polling"]
+            transports: ["polling", "websocket"],
+            reconnectionAttempts: 10,
+            reconnectionDelay: 2000,
+            timeout: 20000
         });
         socketRef.current = socket;
 
@@ -479,9 +484,9 @@ export default function ChatPage() {
     const getFullFileUrl = (url) => {
         if (!url) return "";
         if (url.startsWith("http://") || url.startsWith("https://")) return url;
-        const apiBase = import.meta.env.VITE_API_URL
-            ? import.meta.env.VITE_API_URL.replace("/api", "")
-            : "http://localhost:5000";
+        const apiBase = import.meta.env.VITE_SOCKET_URL
+            || (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api\/?$/, "") : null)
+            || "https://interlink.jeenhost.in";
         return `${apiBase}${url.startsWith("/") ? "" : "/"}${url}`;
     };
 

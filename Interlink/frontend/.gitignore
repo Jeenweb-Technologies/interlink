@@ -33,4 +33,4 @@ dist-backup.zip
 Backend.zip
 
 # Apache config
-.htaccess
+# .htaccess
