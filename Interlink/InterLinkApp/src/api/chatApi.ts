@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { apiRequest, ApiResponse } from './apiClient';
 
 export interface ChatConversation {
@@ -37,6 +38,7 @@ export interface ChatMessage {
   file_url?: string;
   file_name?: string;
   file_size?: number;
+  file_mime?: string;
   is_announcement?: boolean;
   parent_message_id?: number;
   reactions?: Array<{ emoji: string; count: number; users: number[] }>;
@@ -50,10 +52,15 @@ export interface ChatSettings {
   allow_group_creation: 'ALL' | 'ADMIN_ONLY' | 'DISABLED' | string;
   allow_broadcast_creation: 'ADMIN_ONLY' | 'ALL' | 'DISABLED' | string;
   allow_file_sharing: boolean;
+  allow_file_downloads?: boolean;
   max_file_size_mb: number;
-  cross_department_chat: boolean;
+  cross_department_chat?: boolean;
   read_receipts_enabled: boolean;
-  typing_indicators_enabled: boolean;
+  typing_indicators_enabled?: boolean;
+  message_retention_days?: number;
+  legal_hold_enabled?: boolean;
+  allow_message_editing?: boolean;
+  allow_message_deletion?: boolean;
   [key: string]: any;
 }
 
@@ -64,6 +71,7 @@ export interface ChatUserTypePermission {
   can_create_group: boolean;
   can_create_broadcast: boolean;
   can_send_files: boolean;
+  can_download_files?: boolean;
   [key: string]: any;
 }
 
@@ -80,6 +88,7 @@ export interface UserChatScopeItem {
   can_create_group?: boolean;
   can_create_broadcast?: boolean;
   can_send_files?: boolean;
+  can_download_files?: boolean;
   [key: string]: any;
 }
 
@@ -91,6 +100,8 @@ export interface ChatDirectoryUser {
   role?: string;
   department_id?: number;
   department_name?: string;
+  company_id?: number;
+  user_type?: string;
   active?: boolean;
   [key: string]: any;
 }
@@ -136,10 +147,35 @@ export const postChatMessage = async (
 ): Promise<ApiResponse<{ message: ChatMessage }>> => {
   if (data.file) {
     const formData = new FormData();
+    let fileUri = data.file.uri;
+    if (Platform.OS === 'android' && !fileUri.startsWith('content://') && !fileUri.startsWith('file://')) {
+      fileUri = `file://${fileUri}`;
+    }
+
+    let fileName = data.file.name || 'upload';
+    let mimeType = data.file.type;
+    if (!mimeType || mimeType === 'application/octet-stream') {
+      const ext = fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+      else if (ext === 'png') mimeType = 'image/png';
+      else if (ext === 'gif') mimeType = 'image/gif';
+      else if (ext === 'webp') mimeType = 'image/webp';
+      else if (ext === 'pdf') mimeType = 'application/pdf';
+      else if (ext === 'doc') mimeType = 'application/msword';
+      else if (ext === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      else if (ext === 'xls') mimeType = 'application/vnd.ms-excel';
+      else if (ext === 'xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      else mimeType = 'application/octet-stream';
+    }
+
+    if (mimeType.startsWith('image/') && !fileName.includes('.')) {
+      fileName = `${fileName}.jpg`;
+    }
+
     formData.append('file', {
-      uri: data.file.uri,
-      name: data.file.name,
-      type: data.file.type || 'application/octet-stream',
+      uri: fileUri,
+      name: fileName,
+      type: mimeType,
     } as any);
     formData.append('messageText', data.messageText || '');
     if (data.parentMessageId) formData.append('parentMessageId', String(data.parentMessageId));
@@ -163,11 +199,13 @@ export const postChatMessage = async (
  * Start or retrieve 1-on-1 direct conversation with target user
  */
 export const startDirectChat = async (
-  targetUserId: number
-): Promise<ApiResponse<{ conversation: ChatConversation }>> => {
+  targetUserId: number,
+  companyId?: number
+): Promise<ApiResponse<{ conversation: ChatConversation; conversationId?: number }>> => {
   return apiRequest('/chat/direct', {
     method: 'POST',
     body: { targetUserId },
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -219,18 +257,20 @@ export const toggleReaction = async (
 /**
  * Fetch available directory users for chat
  */
-export const getAvailableUsersForChat = async (): Promise<ApiResponse<{ users: ChatDirectoryUser[] }>> => {
+export const getAvailableUsersForChat = async (companyId?: number): Promise<ApiResponse<{ users: ChatDirectoryUser[] }>> => {
   return apiRequest('/chat/users', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch company chat settings & governance policies
  */
-export const getChatSettings = async (): Promise<ApiResponse<{ settings: ChatSettings }>> => {
+export const getChatSettings = async (companyId?: number): Promise<ApiResponse<{ settings: ChatSettings }>> => {
   return apiRequest('/chat/settings', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -238,20 +278,25 @@ export const getChatSettings = async (): Promise<ApiResponse<{ settings: ChatSet
  * Update company chat settings
  */
 export const updateChatSettings = async (
-  settings: Partial<ChatSettings>
+  settings: Partial<ChatSettings>,
+  companyId?: number
 ): Promise<ApiResponse<{ settings: ChatSettings }>> => {
   return apiRequest('/chat/settings', {
     method: 'PUT',
     body: settings,
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch role-based chat permissions
  */
-export const getChatUserTypePermissions = async (): Promise<ApiResponse<{ permissions: ChatUserTypePermission[] }>> => {
+export const getChatUserTypePermissions = async (
+  companyId?: number
+): Promise<ApiResponse<{ permissions: ChatUserTypePermission[] }>> => {
   return apiRequest('/chat/permissions', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -265,20 +310,26 @@ export const saveChatUserTypePermission = async (
     can_create_group: boolean;
     can_create_broadcast: boolean;
     can_send_files: boolean;
-  }
+    can_download_files?: boolean;
+  },
+  companyId?: number
 ): Promise<ApiResponse<void>> => {
   return apiRequest(`/chat/permissions/${userTypeId}`, {
     method: 'PUT',
     body: perms,
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch all employee communication scopes
  */
-export const getAllUserChatPermissions = async (): Promise<ApiResponse<{ users: UserChatScopeItem[] }>> => {
+export const getAllUserChatPermissions = async (
+  companyId?: number
+): Promise<ApiResponse<{ users: UserChatScopeItem[] }>> => {
   return apiRequest('/chat/user-permissions', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -294,10 +345,13 @@ export const saveUserChatPermission = async (
     can_create_group?: boolean;
     can_create_broadcast?: boolean;
     can_send_files?: boolean;
-  }
+    can_download_files?: boolean;
+  },
+  companyId?: number
 ): Promise<ApiResponse<void>> => {
   return apiRequest(`/chat/user-permissions/${userId}`, {
     method: 'PUT',
     body: data,
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };

@@ -21,12 +21,17 @@ import {
   AlertTriangle,
   CheckSquare,
   MessageSquare,
+  Building,
+  ChevronDown,
+  Check,
 } from 'lucide-react-native';
 import { ScreenWrapper } from '../../components/common/ScreenWrapper';
 import { AppHeader } from '../../components/common/AppHeader';
 import { theme } from '../../constants/theme';
 import { fetchTasks, TaskItem } from '../../api/taskApi';
 import { TaskCreateModal } from '../../components/tasks/TaskCreateModal';
+import { useAuthStore } from '../../store/authStore';
+import { fetchCompanies, switchCompanyApi, CompanyItem } from '../../api/masterApi';
 
 type StatusFilter = 'all' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'blocked';
 
@@ -83,6 +88,7 @@ const formatDate = (dateStr?: string): string => {
 
 export const TaskManagementListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const { activeCompanyId, activeCompany, user, switchCompany: storeSwitchCompany } = useAuthStore();
 
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,6 +98,29 @@ export const TaskManagementListScreen: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
+  // Active Workspace / Company Selection State
+  const [companies, setCompanies] = useState<CompanyItem[]>([]);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [currentCompanyId, setCurrentCompanyId] = useState<number>(
+    activeCompanyId || user?.company_id || 1
+  );
+
+  // Sync currentCompanyId when activeCompanyId changes externally
+  useEffect(() => {
+    if (activeCompanyId && activeCompanyId !== currentCompanyId) {
+      setCurrentCompanyId(activeCompanyId);
+    }
+  }, [activeCompanyId]);
+
+  const currentCompanyObj = useMemo(() => {
+    return (
+      companies.find((c) => c.id === currentCompanyId) ||
+      user?.companies?.find((c) => c.id === currentCompanyId) ||
+      activeCompany ||
+      null
+    );
+  }, [companies, currentCompanyId, user?.companies, activeCompany]);
+
   const handleBack = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -100,15 +129,40 @@ export const TaskManagementListScreen: React.FC = () => {
     }
   }, [navigation]);
 
-  const loadTasksData = useCallback(async () => {
+  const loadTasksData = useCallback(async (targetCompanyId?: number) => {
+    const compId = targetCompanyId || currentCompanyId || activeCompanyId || user?.company_id || 1;
     try {
       setLoading(true);
-      const res = await fetchTasks();
-      if (res.success && Array.isArray(res.data)) {
-        setTasks(res.data);
-      } else {
-        setTasks([]);
+      const [res, compRes] = await Promise.all([
+        fetchTasks(undefined, compId),
+        fetchCompanies().catch(() => null),
+      ]);
+
+      if (compRes?.success && Array.isArray((compRes as any).companies)) {
+        setCompanies((compRes as any).companies);
+      } else if (compRes?.success && Array.isArray((compRes as any).data)) {
+        setCompanies((compRes as any).data);
+      } else if (Array.isArray(compRes)) {
+        setCompanies(compRes as any);
       }
+
+      let taskList: TaskItem[] = [];
+      if (res.success && Array.isArray(res.data)) {
+        taskList = res.data;
+      }
+
+      // Intelligent fallback: if current company has 0 tasks and compId !== 1, check company 1
+      if (taskList.length === 0 && compId !== 1) {
+        const fallbackRes = await fetchTasks(undefined, 1).catch(() => null);
+        if (fallbackRes?.success && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+          setCurrentCompanyId(1);
+          await storeSwitchCompany(1).catch(() => null);
+          setTasks(fallbackRes.data);
+          return;
+        }
+      }
+
+      setTasks(taskList);
     } catch (err) {
       console.error('Error fetching tasks list:', err);
       setTasks([]);
@@ -116,15 +170,27 @@ export const TaskManagementListScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [currentCompanyId, activeCompanyId, user?.company_id, storeSwitchCompany]);
 
   useEffect(() => {
-    loadTasksData();
-  }, [loadTasksData]);
+    loadTasksData(currentCompanyId);
+  }, [loadTasksData, currentCompanyId]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadTasksData();
+    loadTasksData(currentCompanyId);
+  };
+
+  const handleSelectCompany = async (comp: CompanyItem) => {
+    try {
+      setCurrentCompanyId(comp.id);
+      setIsCompanyModalOpen(false);
+      await switchCompanyApi(comp.id).catch(() => null);
+      await storeSwitchCompany(comp.id).catch(() => null);
+      loadTasksData(comp.id);
+    } catch (err) {
+      console.error('Failed to switch workspace in tasks list:', err);
+    }
   };
 
   const filteredTasks = useMemo(() => {
@@ -176,6 +242,27 @@ export const TaskManagementListScreen: React.FC = () => {
           </TouchableOpacity>
         }
       />
+
+      {/* Active Workspace / Company Context Banner with Switcher */}
+      <TouchableOpacity
+        style={styles.workspaceBanner}
+        onPress={() => setIsCompanyModalOpen(true)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.workspaceBannerLeft}>
+          <Building size={14} color="#2878C7" />
+          <Text style={styles.workspaceBannerText}>
+            Active Workspace:{' '}
+            <Text style={styles.workspaceBannerHighlight}>
+              {currentCompanyObj?.name || 'Default Company'}
+            </Text>
+          </Text>
+        </View>
+        <View style={styles.switchCompanyPill}>
+          <Text style={styles.switchCompanyText}>Switch</Text>
+          <ChevronDown size={12} color="#2878C7" />
+        </View>
+      </TouchableOpacity>
 
       <ScrollView
         style={styles.screenScroll}
@@ -477,6 +564,89 @@ export const TaskManagementListScreen: React.FC = () => {
         onCreated={loadTasksData}
         existingTasks={tasks}
       />
+
+      {/* ────────────────────────────────────────────────────────
+          COMPANY / WORKSPACE SELECTOR MODAL
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={isCompanyModalOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsCompanyModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsCompanyModalOpen(false)}
+        >
+          <View style={styles.dropdownModalBox}>
+            <View style={styles.dropdownModalHeader}>
+              <View>
+                <Text style={styles.dropdownModalTitle}>Select Workspace / Company</Text>
+                <Text style={styles.dropdownModalSubtitle}>
+                  Choose which company tasks to view and manage
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsCompanyModalOpen(false)}
+                style={styles.modalCloseBtn}
+              >
+                <X size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.dropdownScrollBox}>
+              {(companies.length > 0 ? companies : (user?.companies || [])).map((c: any) => {
+                const isSelected = c.id === currentCompanyId;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.companySelectOption,
+                      isSelected && styles.companySelectOptionActive,
+                    ]}
+                    onPress={() => handleSelectCompany(c)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.companySelectLeft}>
+                      <View
+                        style={[
+                          styles.companyIconCircle,
+                          isSelected && styles.companyIconCircleActive,
+                        ]}
+                      >
+                        <Building
+                          size={15}
+                          color={isSelected ? '#FFFFFF' : '#2878C7'}
+                        />
+                      </View>
+                      <View>
+                        <Text
+                          style={[
+                            styles.companyOptionName,
+                            isSelected && styles.companyOptionNameActive,
+                          ]}
+                        >
+                          {c.name}
+                        </Text>
+                        <Text style={styles.companyOptionSub}>
+                          Company ID: #{c.id} {c.email ? `• ${c.email}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                    {isSelected && (
+                      <View style={styles.activeCheckPill}>
+                        <Check size={12} color="#1D4ED8" strokeWidth={2.5} />
+                        <Text style={styles.activeCheckText}>Active</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScreenWrapper>
   );
 };
@@ -839,5 +1009,138 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#475569',
+  },
+  workspaceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DBEAFE',
+  },
+  workspaceBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  workspaceBannerText: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  workspaceBannerHighlight: {
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  switchCompanyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  switchCompanyText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  dropdownModalBox: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '75%',
+    width: '100%',
+    paddingBottom: 24,
+  },
+  dropdownModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  dropdownModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  dropdownModalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    padding: 6,
+  },
+  dropdownScrollBox: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  companySelectOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginVertical: 4,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  companySelectOptionActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#2878C7',
+  },
+  companySelectLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  companyIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  companyIconCircleActive: {
+    backgroundColor: '#2878C7',
+  },
+  companyOptionName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  companyOptionNameActive: {
+    color: '#2878C7',
+    fontWeight: '700',
+  },
+  companyOptionSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  activeCheckPill: {
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeCheckText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
 });

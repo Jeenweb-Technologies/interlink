@@ -14,7 +14,13 @@ import {
   RefreshControl,
   KeyboardAvoidingView,
   Switch,
+  Image,
+  Linking,
+  Keyboard,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import {
   MessageSquare,
   Search,
@@ -32,12 +38,19 @@ import {
   AtSign,
   UserPlus,
   Share2,
+  Plus,
+  Image as ImageIcon,
+  Eye,
+  Download,
 } from 'lucide-react-native';
-import { pick, types, isErrorWithCode, errorCodes } from '@react-native-documents/picker';
+import { pick, types, isErrorWithCode, errorCodes, keepLocalCopy } from '@react-native-documents/picker';
 import { ScreenWrapper } from '../../components/common/ScreenWrapper';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
 import { theme } from '../../constants/theme';
 import { useAuthStore } from '../../store/authStore';
+import { usePermissionStore } from '../../store/permissionStore';
+import { apiRequest, getApiBaseUrl, DEFAULT_API_BASE_URL } from '../../api/apiClient';
 import {
   getConversations,
   getMessages,
@@ -51,7 +64,7 @@ import {
   ChatMessage,
   ChatDirectoryUser,
 } from '../../api/chatApi';
-import { fetchDepartments, DepartmentItem } from '../../api/masterApi';
+import { fetchDepartments, fetchAdminUsers, AdminUserItem, DepartmentItem } from '../../api/masterApi';
 
 type FilterCategory = 'ALL' | 'DIRECT' | 'GROUP' | 'BROADCAST' | 'UNREAD';
 
@@ -66,7 +79,33 @@ const EMOJI_TRAY = ['👍', '❤️', '🔥', '🎉', '👏', '🙌', '✅', '�
 
 export const ChatScreen: React.FC = () => {
   const { user } = useAuthStore();
-  const isAdmin = user?.role === 'admin' || user?.role === 'super admin';
+  const { hasPermission, isAdmin: isPermAdmin } = usePermissionStore();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super admin' || isPermAdmin;
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+
+  const canReadChat = isAdmin || hasPermission('chat', 'read');
+
+  if (!canReadChat) {
+    return (
+      <NoPermissionView
+        moduleName="Chat & Communication"
+        headerTitle="Chat"
+        onBackPress={() => {
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          } else {
+            navigation.navigate('HomeTab');
+          }
+        }}
+      />
+    );
+  }
+
+  // Status bar aware safe top padding to prevent header from being cut off by status bar, notches or punch-hole cameras
+  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 0;
+  const safeThreadTop = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28) + 10;
 
   // Conversations & Active Thread State
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
@@ -77,6 +116,39 @@ export const ChatScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState<FilterCategory>('ALL');
+
+  // Hide bottom tab bar when inside a conversation thread
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: selectedConvId ? { display: 'none' } : undefined,
+    });
+    return () => {
+      navigation.setOptions({ tabBarStyle: undefined });
+    };
+  }, [selectedConvId, navigation]);
+
+  // Track keyboard show/hide to elevate composer cleanly
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => {
+        setIsKeyboardVisible(true);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 80);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        setIsKeyboardVisible(false);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Composer State
   const [messageText, setMessageText] = useState('');
@@ -96,9 +168,22 @@ export const ChatScreen: React.FC = () => {
   const [isDirectModalOpen, setIsDirectModalOpen] = useState(false);
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
+  const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<{ url: string; name?: string } | null>(null);
+  const [selectedPreviewDoc, setSelectedPreviewDoc] = useState<ChatMessage | null>(null);
+
+  // API base url for resolving static uploaded files (uploads/...)
+  const [apiBaseUrl, setApiBaseUrl] = useState<string>(DEFAULT_API_BASE_URL);
+
+  useEffect(() => {
+    getApiBaseUrl().then((url) => {
+      if (url) setApiBaseUrl(url);
+    });
+  }, []);
 
   // Directory users & depts
   const [directoryUsers, setDirectoryUsers] = useState<ChatDirectoryUser[]>([]);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [departments, setDepartments] = useState<DepartmentItem[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState('');
 
@@ -148,21 +233,71 @@ export const ChatScreen: React.FC = () => {
   // 2. Load Directory Users & Departments
   const loadDirectory = useCallback(async () => {
     try {
-      const [uRes, dRes] = await Promise.all([
-        getAvailableUsersForChat().catch(() => null),
-        fetchDepartments(false).catch(() => null),
-      ]);
-      if (uRes?.success) {
-        const uList = extractList<ChatDirectoryUser>(uRes, 'users');
-        setDirectoryUsers(uList);
+      setLoadingDirectory(true);
+      // Attempt 1: Fetch users with current active company headers
+      let uRes = await getAvailableUsersForChat().catch(() => null);
+      let uList = uRes?.success ? extractList<ChatDirectoryUser>(uRes, 'users') : [];
+
+      // Attempt 2: If no users found (e.g. active company has no colleagues), fallback to Default Company 1
+      if (uList.length === 0) {
+        const uResCompany1 = await getAvailableUsersForChat(1).catch(() => null);
+        if (uResCompany1?.success) {
+          const list1 = extractList<ChatDirectoryUser>(uResCompany1, 'users');
+          if (list1.length > 0) {
+            uList = list1;
+          }
+        }
       }
+
+      // Attempt 3: If still empty, fetch from Admin User Master (/admin/users)
+      if (uList.length === 0) {
+        let adminUsers: AdminUserItem[] = [];
+        const adminRes = await fetchAdminUsers(false).catch(() => null);
+        if (adminRes?.success && Array.isArray(adminRes.data)) {
+          adminUsers = adminRes.data;
+        }
+
+        // Try direct call with company 1 header if still empty
+        if (adminUsers.length === 0) {
+          const adminDirectRes = await apiRequest<AdminUserItem[]>('/admin/users?includeInactive=false', {
+            method: 'GET',
+            headers: { 'x-company-id': '1', 'company-id': '1' },
+          }).catch(() => null);
+          if (adminDirectRes?.success && Array.isArray(adminDirectRes.data)) {
+            adminUsers = adminDirectRes.data;
+          }
+        }
+
+        if (adminUsers.length > 0) {
+          uList = adminUsers
+            .filter((u) => u.id !== user?.id && (u.active === 1 || u.active === true))
+            .map((u) => ({
+              id: u.id,
+              name: u.name,
+              username: u.username,
+              email: u.email,
+              role: u.role,
+              department_name: u.type_name || u.role || 'Colleague',
+              department_id: undefined,
+              user_type: u.type_name || u.role,
+              company_id: u.company_id,
+              active: true,
+            }));
+        }
+      }
+
+      setDirectoryUsers(uList);
+
+      const dRes = await fetchDepartments(false).catch(() => null);
       if (dRes?.success && Array.isArray(dRes.data)) {
         setDepartments(dRes.data);
       }
     } catch (err) {
       console.error('Error loading chat directory:', err);
+    } finally {
+      setLoadingDirectory(false);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     loadConversations();
@@ -202,6 +337,7 @@ export const ChatScreen: React.FC = () => {
       loadMessages(selectedConvId);
     } else {
       loadConversations();
+      loadDirectory();
     }
   };
 
@@ -283,17 +419,107 @@ export const ChatScreen: React.FC = () => {
       .slice(0, 6);
   }, [directoryUsers, mentionQuery]);
 
-  // Handle Pick Attachment Document
-  const handlePickAttachment = async () => {
+  // Helper to resolve full URL for uploaded files
+  const getFullFileUrl = useCallback(
+    (url?: string | null): string => {
+      if (!url) return '';
+      if (url.startsWith('http://') || url.startsWith('https://')) return url;
+      const host = apiBaseUrl.replace(/\/api\/?$/, '');
+      return `${host}${url.startsWith('/') ? '' : '/'}${url}`;
+    },
+    [apiBaseUrl]
+  );
+
+  // Helper to check if file is an image
+  const isImageFile = (fileName?: string, mime?: string): boolean => {
+    if (mime && mime.toLowerCase().startsWith('image/')) return true;
+    if (!fileName) return false;
+    return /\.(jpg|jpeg|png|gif|webp|svg|bmp|heic|heif)$/i.test(fileName);
+  };
+
+  // 1. Pick single image from gallery
+  const handlePickGallery = async () => {
+    setIsAttachmentModalOpen(false);
     try {
       const [res] = await pick({
         mode: 'open',
-        type: [types.allFiles],
+        type: [types.images],
+        allowMultiSelection: false,
       });
       if (res && res.uri) {
+        let finalUri = res.uri;
+        let fileName = res.name || `image_${Date.now()}.jpg`;
+        if (!fileName.includes('.')) fileName += '.jpg';
+
+        // On Android, copy content:// to app's cache directory so OkHttp/fetch doesn't hit permission denial
+        if (Platform.OS === 'android') {
+          try {
+            const copyRes = await keepLocalCopy({
+              files: [{ uri: res.uri, fileName }],
+              destination: 'cachesDirectory',
+            });
+            if (copyRes && copyRes[0]?.status === 'success' && copyRes[0]?.localUri) {
+              finalUri = copyRes[0].localUri;
+            }
+          } catch (copyErr) {
+            console.warn('Could not copy image to cache on Android:', copyErr);
+          }
+        }
+
         setSelectedFile({
-          uri: res.uri,
-          name: res.name || 'attachment',
+          uri: finalUri,
+          name: fileName,
+          type: res.type || 'image/jpeg',
+          size: res.size ?? undefined,
+        });
+      }
+    } catch (err: unknown) {
+      if (isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED) {
+        return;
+      }
+      Alert.alert('Notice', 'Could not select image from gallery');
+    }
+  };
+
+  // 2. Pick single file (PDF / Word / Excel / Docs)
+  const handlePickFile = async () => {
+    setIsAttachmentModalOpen(false);
+    try {
+      const [res] = await pick({
+        mode: 'open',
+        type: [
+          types.pdf,
+          types.doc,
+          types.docx,
+          types.xls,
+          types.xlsx,
+          types.csv,
+          types.plainText,
+        ],
+        allowMultiSelection: false,
+      });
+      if (res && res.uri) {
+        let finalUri = res.uri;
+        let fileName = res.name || `document_${Date.now()}`;
+
+        // On Android, copy content:// to app's cache directory
+        if (Platform.OS === 'android') {
+          try {
+            const copyRes = await keepLocalCopy({
+              files: [{ uri: res.uri, fileName }],
+              destination: 'cachesDirectory',
+            });
+            if (copyRes && copyRes[0]?.status === 'success' && copyRes[0]?.localUri) {
+              finalUri = copyRes[0].localUri;
+            }
+          } catch (copyErr) {
+            console.warn('Could not copy document to cache on Android:', copyErr);
+          }
+        }
+
+        setSelectedFile({
+          uri: finalUri,
+          name: fileName,
           type: res.type || 'application/octet-stream',
           size: res.size ?? undefined,
         });
@@ -303,6 +529,32 @@ export const ChatScreen: React.FC = () => {
         return;
       }
       Alert.alert('Notice', 'Could not select document');
+    }
+  };
+
+  // 3. Document Action Handlers (View & Download)
+  const handleViewDocument = async (url: string) => {
+    if (!url) {
+      Alert.alert('Notice', 'Document link is not available');
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Notice', 'Could not open document viewer for this file.');
+    }
+  };
+
+  const handleDownloadDocument = async (url: string, fileName?: string) => {
+    if (!url) {
+      Alert.alert('Notice', 'Document link is not available');
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+      Alert.alert('Download Started', `Downloading ${fileName || 'file'} in your browser.`);
+    } catch {
+      Alert.alert('Notice', 'Could not initiate download.');
     }
   };
 
@@ -379,7 +631,11 @@ export const ChatScreen: React.FC = () => {
   const handleStartDirect = async (targetUser: ChatDirectoryUser) => {
     try {
       setIsDirectModalOpen(false);
-      const res = await startDirectChat(targetUser.id);
+      let res = await startDirectChat(targetUser.id, targetUser.company_id);
+      if (!res.success && targetUser.company_id) {
+        // Fallback without companyId override
+        res = await startDirectChat(targetUser.id);
+      }
       if (res.success) {
         const convId = (res as any).conversationId || (res.data as any)?.conversationId;
         await loadConversations();
@@ -520,18 +776,23 @@ export const ChatScreen: React.FC = () => {
   }, [directoryUsers, userSearchQuery]);
 
   return (
-    <ScreenWrapper dark={false} edges={['right', 'bottom', 'left']} statusBarStyle="light-content">
+    <ScreenWrapper
+      dark={false}
+      edges={['left', 'right']}
+      statusBarStyle="light-content"
+      disableKeyboardAvoiding={true}
+    >
       {/* ────────────────────────────────────────────────────────
           VIEW 1: ACTIVE THREAD VIEW (MESSAGES & COMPOSER)
       ──────────────────────────────────────────────────────── */}
       {selectedConvId && activeConversation ? (
         <KeyboardAvoidingView
           style={styles.threadContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           {/* Thread Header */}
-          <View style={styles.threadHeader}>
+          <View style={[styles.threadHeader, { paddingTop: safeThreadTop }]}>
             <TouchableOpacity
               style={styles.backButton}
               onPress={() => setSelectedConvId(null)}
@@ -555,7 +816,7 @@ export const ChatScreen: React.FC = () => {
               </Text>
             </View>
 
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={styles.threadInfoBtn}
               onPress={() => {
                 Alert.alert(
@@ -565,7 +826,7 @@ export const ChatScreen: React.FC = () => {
               }}
             >
               <Share2 size={16} color="#FFFFFF" />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
 
           {/* Messages FlatList */}
@@ -581,10 +842,13 @@ export const ChatScreen: React.FC = () => {
               keyExtractor={(item) => String(item.id)}
               contentContainerStyle={styles.messagesListContent}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
               renderItem={({ item }) => {
                 const isMe = item.sender_id === user?.id;
                 const isBroadcast = item.is_announcement || activeConversation.type === 'BROADCAST';
+                const isImg = Boolean(item.file_name || item.file_url) && isImageFile(item.file_name, item.file_mime);
+                const isDoc = Boolean(item.file_name || item.file_url) && !isImg;
 
                 return (
                   <View
@@ -606,40 +870,102 @@ export const ChatScreen: React.FC = () => {
                         styles.messageBubble,
                         isMe ? styles.bubbleMe : styles.bubbleOther,
                         isBroadcast && styles.bubbleBroadcast,
+                        isDoc && styles.bubbleWithDoc,
+                        isImg && styles.bubbleWithImage,
                       ]}
                     >
                       {/* Broadcast banner badge */}
-                      {isBroadcast && (
-                        <View style={styles.broadcastBanner}>
-                          <Megaphone size={12} color="#D97706" />
-                          <Text style={styles.broadcastBannerText}>OFFICIAL ANNOUNCEMENT</Text>
-                        </View>
-                      )}
+                     
 
                       {!isMe && (
                         <Text style={styles.senderName}>{item.sender_name || 'Colleague'}</Text>
                       )}
 
-                      {/* File Attachment Pill */}
-                      {Boolean(item.file_name) && (
-                        <View style={styles.fileAttachmentRow}>
-                          <FileText size={15} color={isMe ? '#FFFFFF' : '#2563EB'} />
-                          <Text
+                      {/* 1. If Image Attachment */}
+                      {Boolean(item.file_name || item.file_url) && isImageFile(item.file_name, item.file_mime) && (
+                        <TouchableOpacity
+                          activeOpacity={0.9}
+                          style={styles.messageImageCard}
+                          onPress={() =>
+                            setSelectedPreviewImage({
+                              url: getFullFileUrl(item.file_url),
+                              name: item.file_name || 'Image Preview',
+                            })
+                          }
+                        >
+                          <Image
+                            source={{ uri: getFullFileUrl(item.file_url) }}
+                            style={styles.messageImageThumb}
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+                      )}
+
+                      {/* 2. If Document Attachment */}
+                      {isDoc && (
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          style={[
+                            styles.docAttachmentCard,
+                            isMe ? styles.docAttachmentCardMe : styles.docAttachmentCardOther,
+                          ]}
+                          onPress={() => setSelectedPreviewDoc(item)}
+                        >
+                          <View
                             style={[
-                              styles.fileNameText,
-                              isMe ? styles.fileNameTextMe : styles.fileNameTextOther,
+                              styles.docIconCircle,
+                              isMe ? styles.docIconCircleMe : styles.docIconCircleOther,
                             ]}
-                            numberOfLines={1}
                           >
-                            {item.file_name}
-                          </Text>
-                        </View>
+                            <FileText size={20} color={isMe ? '#FFFFFF' : '#2563EB'} />
+                          </View>
+                          <View style={styles.docInfoContainer}>
+                            <Text
+                              style={[
+                                styles.docTitleText,
+                                isMe ? styles.docTitleTextMe : styles.docTitleTextOther,
+                              ]}
+                              numberOfLines={1}
+                              ellipsizeMode="middle"
+                            >
+                              {(() => {
+                                try {
+                                  return decodeURIComponent(item.file_name || item.file_url?.split('/').pop() || 'Document');
+                                } catch {
+                                  return item.file_name || 'Document';
+                                }
+                              })()}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.docSubtitleText,
+                                isMe ? styles.docSubtitleTextMe : styles.docSubtitleTextOther,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {item.file_size
+                                ? item.file_size > 1024 * 1024
+                                  ? `${(item.file_size / (1024 * 1024)).toFixed(1)} MB`
+                                  : `${(item.file_size / 1024).toFixed(1)} KB`
+                                : 'Document'}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.docActionIconBox,
+                              isMe ? styles.docActionIconBoxMe : styles.docActionIconBoxOther,
+                            ]}
+                          >
+                            <Eye size={15} color={isMe ? '#FFFFFF' : '#2563EB'} />
+                          </View>
+                        </TouchableOpacity>
                       )}
 
                       {item.message_text ? (
                         <Text
                           style={[
                             styles.messageText,
+                            (isDoc || isImg) && styles.messageTextWithAttachment,
                             isMe ? styles.messageTextMe : styles.messageTextOther,
                           ]}
                         >
@@ -693,24 +1019,6 @@ export const ChatScreen: React.FC = () => {
             />
           )}
 
-          {/* Quick Reaction Bar */}
-          <View style={styles.quickReactionBar}>
-            {['👍', '❤️', '🎉', '🔥', '👏'].map((emoji) => (
-              <TouchableOpacity
-                key={emoji}
-                style={styles.quickReactionBtn}
-                onPress={() => {
-                  if (messages.length > 0) {
-                    const lastMsg = messages[messages.length - 1];
-                    handleReaction(lastMsg.id, emoji);
-                  }
-                }}
-              >
-                <Text style={styles.quickReactionEmoji}>{emoji}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
           {/* Announcement Mode Form Fields (Title & Expiry Date) */}
           {isAnnouncementMode && (
             <View style={styles.announcementComposerBox}>
@@ -745,11 +1053,18 @@ export const ChatScreen: React.FC = () => {
           {/* Attached File Preview Pill */}
           {selectedFile && (
             <View style={styles.selectedFilePill}>
-              <Paperclip size={13} color="#2563EB" />
+              {isImageFile(selectedFile.name, selectedFile.type) ? (
+                <ImageIcon size={14} color="#2563EB" />
+              ) : (
+                <FileText size={14} color="#059669" />
+              )}
               <Text style={styles.selectedFileName} numberOfLines={1}>
                 {selectedFile.name}
               </Text>
-              <TouchableOpacity onPress={() => setSelectedFile(null)}>
+              <TouchableOpacity
+                onPress={() => setSelectedFile(null)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <X size={14} color="#64748B" />
               </TouchableOpacity>
             </View>
@@ -780,7 +1095,6 @@ export const ChatScreen: React.FC = () => {
               ))}
             </View>
           )}
-
           {/* Emoji Tray Popover */}
           {showEmojiPicker && (
             <View style={styles.emojiTray}>
@@ -800,19 +1114,28 @@ export const ChatScreen: React.FC = () => {
           )}
 
           {/* Message Composer Toolbar & Text Input Field */}
-          <View style={styles.composerContainer}>
+          <View
+            style={[
+              styles.composerContainer,
+              {
+                paddingBottom: isKeyboardVisible
+                  ? 8
+                  : Math.max(insets.bottom, Platform.OS === 'ios' ? 20 : 10),
+              },
+            ]}
+          >
             <View style={styles.composerBar}>
-              {/* Paperclip Document Picker */}
+              {/* Paperclip Document/Image Picker */}
               <TouchableOpacity
                 style={styles.composerActionBtn}
-                onPress={handlePickAttachment}
+                onPress={() => setIsAttachmentModalOpen(true)}
                 accessibilityLabel="Attach Document or Image"
               >
                 <Paperclip size={18} color="#64748B" />
               </TouchableOpacity>
 
               {/* Announcement Mode Toggle (Admin only or Broadcast channel) */}
-              {(isAdmin || activeConversation?.type === 'BROADCAST') && (
+              {/* {(isAdmin || activeConversation?.type === 'BROADCAST') && (
                 <TouchableOpacity
                   style={[
                     styles.composerActionBtn,
@@ -826,7 +1149,7 @@ export const ChatScreen: React.FC = () => {
                     color={isAnnouncementMode ? '#D97706' : '#64748B'}
                   />
                 </TouchableOpacity>
-              )}
+              )} */}
 
               {/* @Mention Tag Button */}
               <TouchableOpacity
@@ -842,18 +1165,18 @@ export const ChatScreen: React.FC = () => {
               </TouchableOpacity>
 
               {/* Emoji Picker Button */}
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={styles.composerActionBtn}
                 onPress={() => setShowEmojiPicker(!showEmojiPicker)}
                 accessibilityLabel="Insert Emoji"
               >
                 <Smile size={18} color="#64748B" />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
               {/* Main Chat Text Input Field */}
               <TextInput
                 style={styles.composerInput}
-                placeholder={`Message ${getConvMeta(activeConversation).name}...`}
+                placeholder={'Type here..'}
                 placeholderTextColor="#94A3B8"
                 value={messageText}
                 onChangeText={(val) => {
@@ -902,22 +1225,34 @@ export const ChatScreen: React.FC = () => {
             curveRadius={65}
           />
 
-          {/* Search Box */}
+          {/* Search Box & Quick New Communication Button */}
           <View style={styles.searchContainer}>
-            <View style={styles.searchInner}>
-              <Search size={16} color="#94A3B8" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search chats, colleagues, or messages..."
-                placeholderTextColor="#94A3B8"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <X size={15} color="#94A3B8" />
-                </TouchableOpacity>
-              )}
+            <View style={styles.searchRow}>
+              <View style={styles.searchInner}>
+                <Search size={16} color="#94A3B8" />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search chats, colleagues, or messages..."
+                  placeholderTextColor="#94A3B8"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <X size={15} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* + Icon Button on the Right Side of Search Input */}
+              <TouchableOpacity
+                style={styles.searchAddBtn}
+                onPress={() => setIsNewMenuOpen(true)}
+                activeOpacity={0.8}
+                accessibilityLabel="New Chat or Group"
+              >
+                <Plus size={20} color="#FFFFFF" strokeWidth={2.5} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -1106,7 +1441,14 @@ export const ChatScreen: React.FC = () => {
           activeOpacity={1}
           onPress={() => setIsNewMenuOpen(false)}
         >
-          <View style={styles.actionSheet}>
+          <View
+            style={[
+              styles.actionSheet,
+              {
+                paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 20) + 16,
+              },
+            ]}
+          >
             <Text style={styles.actionSheetTitle}>Start New Communication</Text>
 
             {/* Direct Message Option */}
@@ -1119,10 +1461,10 @@ export const ChatScreen: React.FC = () => {
               }}
             >
               <View style={[styles.actionIconWrap, styles.actionIconBlue]}>
-                <User size={18} color="#2563EB" />
+                <UserPlus size={18} color="#2563EB" />
               </View>
               <View style={styles.actionItemTextCol}>
-                <Text style={styles.actionItemTitle}>New Direct Chat</Text>
+                <Text style={styles.actionItemTitle}>Direct</Text>
                 <Text style={styles.actionItemDesc}>1-on-1 private messaging with a colleague</Text>
               </View>
             </TouchableOpacity>
@@ -1140,7 +1482,7 @@ export const ChatScreen: React.FC = () => {
                 <Users size={18} color="#7C3AED" />
               </View>
               <View style={styles.actionItemTextCol}>
-                <Text style={styles.actionItemTitle}>New Channel / Group</Text>
+                <Text style={styles.actionItemTitle}>Create Group</Text>
                 <Text style={styles.actionItemDesc}>Team collaboration with multiple members</Text>
               </View>
             </TouchableOpacity>
@@ -1167,7 +1509,7 @@ export const ChatScreen: React.FC = () => {
       </Modal>
 
       {/* ────────────────────────────────────────────────────────
-          MODAL: NEW DIRECT CHAT (DIRECTORY)
+          MODAL: NEW DIRECT CHAT (DIRECTORFY)
       ──────────────────────────────────────────────────────── */}
       <Modal
         visible={isDirectModalOpen}
@@ -1196,35 +1538,42 @@ export const ChatScreen: React.FC = () => {
               />
             </View>
 
-            <FlatList
-              data={filteredUsers.filter((u) => u.id !== user?.id)}
-              keyExtractor={(item) => String(item.id)}
-              style={styles.modalListHeight380}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.userDirectoryRow}
-                  onPress={() => handleStartDirect(item)}
-                >
-                  <View style={styles.userDirAvatar}>
-                    <Text style={styles.userDirAvatarText}>
-                      {(item.name || 'U')[0].toUpperCase()}
-                    </Text>
+            {loadingDirectory ? (
+              <View style={styles.modalLoadingBox}>
+                <ActivityIndicator size="small" color="#2563EB" />
+                <Text style={styles.modalLoadingText}>Loading colleagues...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredUsers.filter((u) => u.id !== user?.id)}
+                keyExtractor={(item) => String(item.id)}
+                style={styles.modalListHeight380}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.userDirectoryRow}
+                    onPress={() => handleStartDirect(item)}
+                  >
+                    <View style={styles.userDirAvatar}>
+                      <Text style={styles.userDirAvatarText}>
+                        {(item.name || 'U')[0].toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.userDirInfo}>
+                      <Text style={styles.userDirName}>{item.name}</Text>
+                      <Text style={styles.userDirSub}>
+                        {item.department_name || item.role || 'Member'}
+                      </Text>
+                    </View>
+                    <ChevronRight size={14} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  <View style={styles.emptyBox}>
+                    <Text style={styles.emptyTitle}>No colleagues found</Text>
                   </View>
-                  <View style={styles.userDirInfo}>
-                    <Text style={styles.userDirName}>{item.name}</Text>
-                    <Text style={styles.userDirSub}>
-                      {item.department_name || item.role || 'Member'}
-                    </Text>
-                  </View>
-                  <ChevronRight size={14} color="#94A3B8" />
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyTitle}>No colleagues found</Text>
-                </View>
-              }
-            />
+                }
+              />
+            )}
           </View>
         </View>
       </Modal>
@@ -1459,6 +1808,194 @@ export const ChatScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {/* ────────────────────────────────────────────────────────
+          MODAL: ATTACHMENT SELECTOR (GALLERY VS FILE)
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={isAttachmentModalOpen}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setIsAttachmentModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.attachmentModalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsAttachmentModalOpen(false)}
+        >
+          <View
+            style={[
+              styles.attachmentModalSheet,
+              {
+                paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 20) + 20,
+              },
+            ]}
+          >
+            <View style={styles.attachmentModalHeader}>
+              <Text style={styles.attachmentModalTitle}>Send Attachment</Text>
+              <TouchableOpacity
+                onPress={() => setIsAttachmentModalOpen(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.attachmentOptionsRow}>
+              {/* Option 1: Gallery */}
+              <TouchableOpacity
+                style={styles.attachmentOptionCard}
+                onPress={handlePickGallery}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.attachmentOptionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+                  <ImageIcon size={26} color="#2563EB" />
+                </View>
+                <Text style={styles.attachmentOptionLabel}>Gallery</Text>
+                <Text style={styles.attachmentOptionSub}>Single Image</Text>
+              </TouchableOpacity>
+
+              {/* Option 2: File */}
+              <TouchableOpacity
+                style={styles.attachmentOptionCard}
+                onPress={handlePickFile}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.attachmentOptionIconWrap, { backgroundColor: '#ECFDF5' }]}>
+                  <FileText size={26} color="#059669" />
+                </View>
+                <Text style={styles.attachmentOptionLabel}>File</Text>
+                <Text style={styles.attachmentOptionSub}>PDF / Word / Excel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ────────────────────────────────────────────────────────
+          MODAL: FULLSCREEN BIG IMAGE PREVIEW (RIGHT CLOSE ICON)
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={Boolean(selectedPreviewImage)}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedPreviewImage(null)}
+      >
+        <View style={styles.imageModalBackdrop}>
+          <View style={styles.imageModalHeader}>
+            <Text style={styles.imageModalFileName} numberOfLines={1}>
+              {selectedPreviewImage?.name || 'Image Preview'}
+            </Text>
+            <TouchableOpacity
+              style={styles.imageModalCloseBtn}
+              onPress={() => setSelectedPreviewImage(null)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <X size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.imageModalImageContainer}>
+            {Boolean(selectedPreviewImage?.url) && (
+              <Image
+                source={{ uri: selectedPreviewImage?.url }}
+                style={styles.imageModalBigImage}
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ────────────────────────────────────────────────────────
+          MODAL: DOCUMENT ACTIONS (VIEW AND DOWNLOAD BUTTONS)
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={Boolean(selectedPreviewDoc)}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setSelectedPreviewDoc(null)}
+      >
+        <TouchableOpacity
+          style={styles.docModalOverlay}
+          activeOpacity={1}
+          onPress={() => setSelectedPreviewDoc(null)}
+        >
+          <View
+            style={[
+              styles.docModalSheet,
+              {
+                paddingBottom: Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 20) + 20,
+              },
+            ]}
+          >
+            <View style={styles.docModalHeader}>
+              <View style={styles.docModalFileMetaRow}>
+                <View style={styles.docModalFileIconWrap}>
+                  <FileText size={22} color="#2563EB" />
+                </View>
+                <View style={styles.docModalFileDetails}>
+                  <Text style={styles.docModalFileName} numberOfLines={2}>
+                    {(() => {
+                      try {
+                        return decodeURIComponent(
+                          selectedPreviewDoc?.file_name ||
+                            selectedPreviewDoc?.file_url?.split('/').pop() ||
+                            'Document'
+                        );
+                      } catch {
+                        return selectedPreviewDoc?.file_name || 'Document';
+                      }
+                    })()}
+                  </Text>
+                  <Text style={styles.docModalFileSize}>
+                    {selectedPreviewDoc?.file_size
+                      ? selectedPreviewDoc.file_size > 1024 * 1024
+                        ? `${(selectedPreviewDoc.file_size / (1024 * 1024)).toFixed(1)} MB`
+                        : `${(selectedPreviewDoc.file_size / 1024).toFixed(1)} KB`
+                      : 'Attachment Document'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedPreviewDoc(null)}
+                style={styles.docModalCloseBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.docModalButtonsRow}>
+              {/* View Button */}
+              <TouchableOpacity
+                style={styles.docViewActionBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const url = getFullFileUrl(selectedPreviewDoc?.file_url);
+                  handleViewDocument(url);
+                }}
+              >
+                <Eye size={18} color="#FFFFFF" />
+                <Text style={styles.docViewActionText}>View Document</Text>
+              </TouchableOpacity>
+
+              {/* Download Button */}
+              <TouchableOpacity
+                style={styles.docDownloadActionBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const url = getFullFileUrl(selectedPreviewDoc?.file_url);
+                  handleDownloadDocument(url, selectedPreviewDoc?.file_name);
+                }}
+              >
+                <Download size={18} color="#17365D" />
+                <Text style={styles.docDownloadActionText}>Download</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScreenWrapper>
   );
 };
@@ -1473,7 +2010,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#17365D',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 48 : 16,
     paddingBottom: 14,
   },
   backButton: {
@@ -1559,6 +2095,23 @@ const styles = StyleSheet.create({
   bubbleBroadcast: {
     borderColor: '#FDE68A',
     borderWidth: 1.5,
+  },
+  bubbleWithDoc: {
+    width: 270,
+    maxWidth: '85%',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  bubbleWithImage: {
+    paddingHorizontal: 6,
+    paddingTop: 6,
+    paddingBottom: 6,
+  },
+  messageTextWithAttachment: {
+    marginTop: 6,
+    paddingHorizontal: 4,
+    marginBottom: 2,
   },
   broadcastBanner: {
     flexDirection: 'row',
@@ -1853,25 +2406,49 @@ const styles = StyleSheet.create({
   /* Conversations Roster Styles */
   searchContainer: {
     paddingHorizontal: 16,
-    marginTop: -16,
-    marginBottom: 8,
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   searchInner: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   searchInput: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 13,
     color: '#0F172A',
     padding: 0,
+  },
+  searchAddBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#17365D',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#17365D',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3,
+    elevation: 3,
   },
   filterBar: {
     flexDirection: 'row',
@@ -2326,5 +2903,296 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 12,
     color: '#94A3B8',
+  },
+  modalLoadingBox: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalLoadingText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#64748B',
+  },
+
+  // Message Image Thumbnail
+  messageImageCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 6,
+    backgroundColor: '#00000008',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  messageImageThumb: {
+    width: 220,
+    height: 160,
+    borderRadius: 12,
+  },
+
+  // Message Document Card
+  docAttachmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: 4,
+    width: '100%',
+  },
+  docAttachmentCardMe: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  docAttachmentCardOther: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  docIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  docIconCircleMe: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  docIconCircleOther: {
+    backgroundColor: '#EFF6FF',
+  },
+  docInfoContainer: {
+    flex: 1,
+    marginLeft: 10,
+    marginRight: 6,
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  docTitleText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  docTitleTextMe: {
+    color: '#FFFFFF',
+  },
+  docTitleTextOther: {
+    color: '#0F172A',
+  },
+  docSubtitleText: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  docSubtitleTextMe: {
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  docSubtitleTextOther: {
+    color: '#64748B',
+  },
+  docActionIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  docActionIconBoxMe: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  docActionIconBoxOther: {
+    backgroundColor: '#EFF6FF',
+  },
+
+  // Attachment Modal (Gallery vs File)
+  attachmentModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  attachmentModalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+  },
+  attachmentModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    marginBottom: 16,
+  },
+  attachmentModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  attachmentOptionsRow: {
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'center',
+  },
+  attachmentOptionCard: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachmentOptionIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  attachmentOptionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  attachmentOptionSub: {
+    fontSize: 11,
+    color: '#64748B',
+    textAlign: 'center',
+  },
+
+  // Fullscreen Big Image Modal
+  imageModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.94)',
+  },
+  imageModalHeader: {
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  imageModalFileName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 12,
+  },
+  imageModalCloseBtn: {
+    padding: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 20,
+  },
+  imageModalImageContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  imageModalBigImage: {
+    width: '100%',
+    height: '100%',
+  },
+
+  // Document Modal (View & Download)
+  docModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  docModalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 52 : 32,
+  },
+  docModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    marginBottom: 16,
+  },
+  docModalFileMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+    marginRight: 10,
+  },
+  docModalFileIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  docModalFileDetails: {
+    flex: 1,
+  },
+  docModalFileName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  docModalFileSize: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  docModalCloseBtn: {
+    padding: 4,
+  },
+  docModalButtonsRow: {
+    flexDirection: 'column',
+    gap: 10,
+  },
+  docViewActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#2563EB',
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  docViewActionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  docDownloadActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  docDownloadActionText: {
+    color: '#17365D',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

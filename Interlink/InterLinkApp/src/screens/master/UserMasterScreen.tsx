@@ -42,6 +42,9 @@ import { StatusBadge } from '../../components/common/StatusBadge';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { useAuthStore } from '../../store/authStore';
+import { usePermissionStore } from '../../store/permissionStore';
 import {
   fetchAdminUsers,
   toggleUserActive,
@@ -69,6 +72,25 @@ const DEFAULT_USER_TYPES: UserTypeItem[] = [
 ];
 
 export const UserMasterScreen: React.FC<Props> = ({ navigation }) => {
+  const { user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadUsers =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('user_master', 'read');
+
+  if (!canReadUsers) {
+    return (
+      <NoPermissionView
+        moduleName="User Master"
+        headerTitle="User Master"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('users');
 
   // Users Tab State
@@ -529,7 +551,7 @@ export const UserMasterScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Search Bar & Secondary Controls */}
+        {/* Search Bar */}
         <View style={styles.searchRow}>
           <Input
             placeholder={
@@ -546,52 +568,6 @@ export const UserMasterScreen: React.FC<Props> = ({ navigation }) => {
             containerStyle={styles.searchContainer}
           />
         </View>
-
-        {/* Secondary Sub-Controls Per Tab */}
-        {activeTab === 'users' && (
-          <View style={styles.subFilterRow}>
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => setShowInactive((prev) => !prev)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.toggleSwitch, showInactive && styles.toggleSwitchActive]}>
-                <View style={[styles.toggleThumb, showInactive && styles.toggleThumbActive]} />
-              </View>
-              <Text style={styles.toggleLabel}>Show Deactivated</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.countSummary}>{filteredUsers.length} users</Text>
-          </View>
-        )}
-
-        {activeTab === 'history' && (
-          <View style={styles.subFilterRow}>
-            <TouchableOpacity
-              style={styles.historyUserFilterBtn}
-              onPress={() => setUserFilterModalOpen(true)}
-              activeOpacity={0.7}
-            >
-              <UserCheck size={13} color={theme.colors.accent} />
-              <Text style={styles.historyUserFilterText} numberOfLines={1}>
-                {selectedFilterUserName}
-              </Text>
-              <ChevronDown size={14} color={theme.colors.textSecondary} />
-            </TouchableOpacity>
-
-            {historyUserFilter !== 'all' && (
-              <TouchableOpacity
-                style={styles.clearFilterBtn}
-                onPress={() => setHistoryUserFilter('all')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.clearFilterText}>Reset</Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={styles.countSummary}>{filteredDeviceHistory.length} logs</Text>
-          </View>
-        )}
 
         {/* TAB 1: USERS DIRECTORY */}
         {activeTab === 'users' && (
@@ -1375,7 +1351,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   searchRow: {
-    marginBottom: 8,
+    marginBottom: 12,
   },
   searchContainer: {
     marginBottom: 0,

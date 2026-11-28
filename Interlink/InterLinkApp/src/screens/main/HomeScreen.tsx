@@ -223,11 +223,15 @@ export const HomeScreen: React.FC = () => {
             </View>
 
             <View style={styles.headerRight}>
-              <View style={styles.avatarContainer}>
+              <TouchableOpacity
+                style={styles.avatarContainer}
+                onPress={() => navigation.navigate('ProfileTab')}
+                activeOpacity={0.8}
+              >
                 <Text style={styles.avatarInitialsText}>
                   {getInitials(user?.name || user?.username)}
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -540,26 +544,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarContainer: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     backgroundColor: '#17365D',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
     ...Platform.select({
       ios: {
         shadowColor: '#17365D',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.18,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.22,
+        shadowRadius: 6,
       },
       android: {
-        elevation: 3,
+        elevation: 4,
       },
     }),
   },
   avatarInitialsText: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.5,

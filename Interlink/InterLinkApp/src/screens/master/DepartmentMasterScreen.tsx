@@ -34,6 +34,8 @@ import { Card } from '../../components/common/Card';
 import { StatusBadge } from '../../components/common/StatusBadge';
 import { Input } from '../../components/common/Input';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { usePermissionStore } from '../../store/permissionStore';
 import {
   fetchDepartments,
   createDepartmentApi,
@@ -68,6 +70,24 @@ const formatDate = (dateStr?: string): string => {
 
 export const DepartmentMasterScreen: React.FC<Props> = ({ navigation }) => {
   const { activeCompanyId, user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadDepartment =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('department_master', 'read');
+
+  if (!canReadDepartment) {
+    return (
+      <NoPermissionView
+        moduleName="Department Master"
+        headerTitle="Department Master"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
+
   const [departments, setDepartments] = useState<DepartmentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -94,16 +114,26 @@ export const DepartmentMasterScreen: React.FC<Props> = ({ navigation }) => {
   const loadDepartments = useCallback(async () => {
     try {
       const companyId = activeCompanyId || user?.company_id || null;
-      const res = await fetchDepartments(true, companyId);
-      if (res.success && Array.isArray(res.data)) {
-        setDepartments(res.data);
-      } else if (res.success && Array.isArray(res.departments)) {
-        setDepartments(res.departments);
-      } else if (Array.isArray(res)) {
-        setDepartments(res);
-      } else {
-        setDepartments([]);
+      let res = await fetchDepartments(true, companyId);
+      let list = (res.success && Array.isArray(res.data))
+        ? res.data
+        : (res.success && Array.isArray(res.departments))
+        ? res.departments
+        : Array.isArray(res)
+        ? res
+        : [];
+
+      // If active company has no departments, fallback to default company (1) where the core departments exist
+      if (list.length === 0 && companyId && Number(companyId) !== 1) {
+        const fallbackRes = await fetchDepartments(true, 1);
+        if (fallbackRes.success && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+          list = fallbackRes.data;
+        } else if (fallbackRes.success && Array.isArray(fallbackRes.departments) && fallbackRes.departments.length > 0) {
+          list = fallbackRes.departments;
+        }
       }
+
+      setDepartments(list);
     } catch (error) {
       console.error('Failed to load departments:', error);
       setDepartments([]);

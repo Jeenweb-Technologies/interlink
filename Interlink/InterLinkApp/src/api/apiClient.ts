@@ -3,12 +3,14 @@ import { Platform } from 'react-native';
 import { getDeviceId } from '../utils/device';
 
 // Default development API host (10.0.2.2 for Android emulator, localhost for iOS simulator)
-export const DEFAULT_API_BASE_URL = Platform.select({
-  android: 'http://10.0.2.2:5001/api',
-  // ios: 'http://192.168.1.10:5001/api',
-  ios: 'http://localhost:5001/api',
-  default: 'http://localhost:5001/api',
-});
+// export const DEFAULT_API_BASE_URL = Platform.select({
+//   // android: 'http://10.0.2.2:5001/api',
+//   android: 'http://192.168.1.10:5001/api',
+//   // ios: 'http://192.168.1.10:5001/api',
+//   ios: 'http://localhost:5001/api',
+//   default: 'http://localhost:5001/api',
+// });
+export const DEFAULT_API_BASE_URL = 'https://interlink.jeenhost.in/api';
 
 const TOKEN_KEY = '@interlink_token';
 const COMPANY_ID_KEY = '@interlink_active_company_id';
@@ -58,19 +60,46 @@ export async function apiRequest<T = any>(
 ): Promise<ApiResponse<T>> {
   const baseUrl = await getApiBaseUrl();
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  const url = `${baseUrl}${cleanEndpoint}`;
+
+  // Add cache buster to GET requests to prevent iOS/browser from returning stale cached responses
+  const isGet = !options.method || options.method === 'GET';
+  const hasQuery = cleanEndpoint.includes('?');
+  const finalEndpoint = isGet
+    ? `${cleanEndpoint}${hasQuery ? '&' : '?'}_t=${Date.now()}`
+    : cleanEndpoint;
+  const url = `${baseUrl}${finalEndpoint}`;
 
   const token = await AsyncStorage.getItem(TOKEN_KEY);
   const activeCompanyId = await AsyncStorage.getItem(COMPANY_ID_KEY);
   const deviceId = await getDeviceId();
 
-  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const isFormData = Boolean(
+    options.body &&
+    (
+      (typeof FormData !== 'undefined' && options.body instanceof FormData) ||
+      typeof (options.body as any).append === 'function' ||
+      Array.isArray((options.body as any)._parts)
+    )
+  );
 
   const reqHeaders: Record<string, string> = {
     Accept: 'application/json',
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(isGet
+      ? {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
+      }
+      : {}),
     ...(options.headers || {}),
   };
+
+  // When uploading FormData in React Native, ensure Content-Type is unset so fetch automatically generates boundary
+  if (isFormData) {
+    delete reqHeaders['Content-Type'];
+    delete reqHeaders['content-type'];
+  }
 
   if (token) {
     reqHeaders.Authorization = `Bearer ${token}`;
@@ -81,7 +110,10 @@ export async function apiRequest<T = any>(
     reqHeaders['device-id'] = deviceId;
   }
 
-  if (activeCompanyId) {
+  if (options.headers?.['x-company-id']) {
+    reqHeaders['x-company-id'] = options.headers['x-company-id'];
+    reqHeaders['company-id'] = options.headers['x-company-id'];
+  } else if (activeCompanyId) {
     reqHeaders['x-company-id'] = activeCompanyId;
     reqHeaders['company-id'] = activeCompanyId;
   }

@@ -16,14 +16,21 @@ import {
   LayoutChangeEvent,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Dimensions,
+  Vibration,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Clock,
   X,
   Calendar,
+  GripVertical,
 } from 'lucide-react-native';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { useAuthStore } from '../../store/authStore';
+import { usePermissionStore } from '../../store/permissionStore';
 import { theme } from '../../constants/theme';
 import { fetchTasks, updateTaskApi, TaskItem } from '../../api/taskApi';
 
@@ -58,20 +65,45 @@ const getPriorityStyle = (priority?: string) => {
 };
 
 export const TaskKanbanScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadTasks =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('tasks', 'read');
+
+  if (!canReadTasks) {
+    return (
+      <NoPermissionView
+        moduleName="Task Kanban"
+        headerTitle="Kanban Board"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
+
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
 
   // Drag and drop state
+  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const [draggingTask, setDraggingTask] = useState<TaskItem | null>(null);
   const [hoveredColumnKey, setHoveredColumnKey] = useState<string | null>(null);
 
+  const longPressTimer = useRef<any>(null);
   const panPosition = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const boardScrollRef = useRef<any>(null);
+  const boardAreaRef = useRef<any>(null);
   const boardScrollX = useRef(0);
-  const columnLayouts = useRef<{ [key: string]: { x: number; width: number } }>({});
-  const containerOffsetTop = useRef(140);
+  const containerLayout = useRef({ x: 0, y: 140 });
+  const screenWidth = Dimensions.get('window').width;
 
   const loadTasks = useCallback(async () => {
     try {
@@ -149,70 +181,111 @@ export const TaskKanbanScreen: React.FC = () => {
 
   const findColumnUnderPoint = useCallback((pageX: number) => {
     const adjustedX = pageX + boardScrollX.current - 16;
-    for (const col of COLUMNS) {
-      const layout = columnLayouts.current[col.key];
-      if (layout) {
-        if (adjustedX >= layout.x && adjustedX <= layout.x + layout.width) {
-          return col.key;
-        }
-      }
+    if (adjustedX < 0) return COLUMNS[0].key;
+    const colWidthWithGap = 265 + 12; // 277
+    const colIndex = Math.floor(adjustedX / colWidthWithGap);
+    if (colIndex >= 0 && colIndex < COLUMNS.length) {
+      return COLUMNS[colIndex].key;
+    }
+    if (colIndex >= COLUMNS.length) {
+      return COLUMNS[COLUMNS.length - 1].key;
     }
     return null;
   }, []);
 
   const createPanResponder = (task: TaskItem) => {
     return PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (
-        _e: GestureResponderEvent,
-        gestureState: PanResponderGestureState
-      ) => {
-        return Math.abs(gestureState.dx) > 8 || Math.abs(gestureState.dy) > 8;
-      },
-      onPanResponderGrant: (
-        e: GestureResponderEvent,
-        _gestureState: PanResponderGestureState
-      ) => {
-        setDraggingTask(task);
-        panPosition.setValue({
-          x: e.nativeEvent.pageX - 125,
-          y: e.nativeEvent.pageY - 40,
-        });
-        const col = findColumnUnderPoint(e.nativeEvent.pageX);
-        setHoveredColumnKey(col);
-      },
-      onPanResponderMove: (
-        e: GestureResponderEvent,
-        _gestureState: PanResponderGestureState
-      ) => {
-        panPosition.setValue({
-          x: e.nativeEvent.pageX - 125,
-          y: e.nativeEvent.pageY - 40,
-        });
-        const col = findColumnUnderPoint(e.nativeEvent.pageX);
-        setHoveredColumnKey(col);
-      },
-      onPanResponderRelease: (
-        e: GestureResponderEvent,
-        _gestureState: PanResponderGestureState
-      ) => {
-        const targetCol = findColumnUnderPoint(e.nativeEvent.pageX);
-        if (targetCol) {
-          handleDropTask(task, targetCol);
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: () => isDraggingRef.current,
+      onMoveShouldSetPanResponderCapture: () => isDraggingRef.current,
+      onPanResponderTerminationRequest: () => !isDraggingRef.current,
+      onPanResponderGrant: (e) => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
         }
-        setDraggingTask(null);
-        setHoveredColumnKey(null);
+
+        const startX = e.nativeEvent.pageX;
+        const startY = e.nativeEvent.pageY;
+
+        longPressTimer.current = setTimeout(() => {
+          isDraggingRef.current = true;
+          setIsDragging(true);
+          setDraggingTask(task);
+          Vibration.vibrate(40);
+
+          const cardX = startX - 130;
+          const cardY = startY - containerLayout.current.y - 40;
+          panPosition.setValue({ x: cardX, y: cardY });
+
+          const col = findColumnUnderPoint(startX);
+          setHoveredColumnKey(col);
+        }, 220);
+      },
+      onPanResponderMove: (e, gestureState) => {
+        if (!isDraggingRef.current) {
+          if (Math.abs(gestureState.dx) > 8 || Math.abs(gestureState.dy) > 8) {
+            if (longPressTimer.current) {
+              clearTimeout(longPressTimer.current);
+              longPressTimer.current = null;
+            }
+          }
+          return;
+        }
+
+        const cardX = e.nativeEvent.pageX - 130;
+        const cardY = e.nativeEvent.pageY - containerLayout.current.y - 40;
+        panPosition.setValue({ x: cardX, y: cardY });
+
+        const col = findColumnUnderPoint(e.nativeEvent.pageX);
+        setHoveredColumnKey(col);
+
+        // Auto-scroll horizontal board when near screen edges
+        if (e.nativeEvent.pageX > screenWidth - 70) {
+          boardScrollRef.current?.scrollTo({
+            x: boardScrollX.current + 14,
+            animated: false,
+          });
+        } else if (e.nativeEvent.pageX < 70) {
+          boardScrollRef.current?.scrollTo({
+            x: Math.max(0, boardScrollX.current - 14),
+            animated: false,
+          });
+        }
+      },
+      onPanResponderRelease: (e, gestureState) => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+
+        if (isDraggingRef.current) {
+          const targetCol = findColumnUnderPoint(e.nativeEvent.pageX);
+          if (targetCol) {
+            handleDropTask(task, targetCol);
+          }
+          isDraggingRef.current = false;
+          setIsDragging(false);
+          setDraggingTask(null);
+          setHoveredColumnKey(null);
+        } else {
+          // Tap: open task detail modal
+          if (Math.abs(gestureState.dx) < 6 && Math.abs(gestureState.dy) < 6) {
+            setSelectedTask(task);
+          }
+        }
       },
       onPanResponderTerminate: () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+        isDraggingRef.current = false;
+        setIsDragging(false);
         setDraggingTask(null);
         setHoveredColumnKey(null);
       },
     });
-  };
-
-  const handleColumnLayout = (key: string, e: LayoutChangeEvent) => {
-    const { x, width } = e.nativeEvent.layout;
-    columnLayouts.current[key] = { x, width };
   };
 
   const handleBoardScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -230,10 +303,13 @@ export const TaskKanbanScreen: React.FC = () => {
         ]}
       >
         <View style={styles.cardTopRow}>
-          <View style={styles.codeBadge}>
-            <Text style={styles.codeText}>
-              {task.task_code || `#TSK-${task.id}`}
-            </Text>
+          <View style={styles.codeRowLeft}>
+            <GripVertical size={13} color="#94A3B8" style={styles.gripIcon} />
+            <View style={styles.codeBadge}>
+              <Text style={styles.codeText}>
+                {task.task_code || `#TSK-${task.id}`}
+              </Text>
+            </View>
           </View>
           <View
             style={[
@@ -310,17 +386,24 @@ export const TaskKanbanScreen: React.FC = () => {
         </View>
       ) : (
         <View
+          ref={boardAreaRef}
           style={styles.boardArea}
-          onLayout={(e) => {
-            containerOffsetTop.current = e.nativeEvent.layout.y;
+          onLayout={() => {
+            boardAreaRef.current?.measure((_x: number, _y: number, _width: number, _height: number, pageX: number, pageY: number) => {
+              if (pageY !== undefined && !isNaN(pageY)) {
+                containerLayout.current = { x: pageX || 0, y: pageY };
+              }
+            });
           }}
         >
           <ScrollView
+            ref={boardScrollRef}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.boardContent}
             onScroll={handleBoardScroll}
             scrollEventThrottle={16}
+            scrollEnabled={!isDragging}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -332,7 +415,7 @@ export const TaskKanbanScreen: React.FC = () => {
           >
             {COLUMNS.map((col) => {
               const columnTasks = getTasksForColumn(col.key);
-              const isReceiving = hoveredColumnKey === col.key;
+              const isReceiving = hoveredColumnKey === col.key && isDragging;
               const totalHours = columnTasks.reduce(
                 (acc, t) => acc + (t.estimated_hours || 0),
                 0
@@ -341,7 +424,6 @@ export const TaskKanbanScreen: React.FC = () => {
               return (
                 <View
                   key={col.key}
-                  onLayout={(e) => handleColumnLayout(col.key, e)}
                   style={[
                     styles.columnWrapper,
                     isReceiving ? styles.columnReceiving : undefined,
@@ -386,15 +468,37 @@ export const TaskKanbanScreen: React.FC = () => {
                     </View>
                   </View>
 
+                  {/* Drop Target Banner when dragging over this column */}
+                  {isReceiving && (
+                    <View style={styles.dropTargetBanner}>
+                      <Text style={styles.dropTargetBannerText}>
+                        Drop task here ↵
+                      </Text>
+                    </View>
+                  )}
+
                   {/* Column Tasks */}
                   <ScrollView
                     style={styles.columnScroll}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={styles.columnScrollContent}
+                    scrollEnabled={!isDragging}
                   >
                     {columnTasks.length === 0 ? (
-                      <View style={styles.emptyColumnBox}>
-                        <Text style={styles.emptyColumnText}>Drop task here</Text>
+                      <View
+                        style={[
+                          styles.emptyColumnBox,
+                          isReceiving && styles.emptyColumnBoxReceiving,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.emptyColumnText,
+                            isReceiving && styles.emptyColumnTextReceiving,
+                          ]}
+                        >
+                          {isReceiving ? 'Release to drop task' : 'No tasks\nDrop task here'}
+                        </Text>
                       </View>
                     ) : (
                       columnTasks.map((task) => {
@@ -409,12 +513,7 @@ export const TaskKanbanScreen: React.FC = () => {
                               isThisDragging ? styles.taskCardDragging : undefined,
                             ]}
                           >
-                            <TouchableOpacity
-                              activeOpacity={0.8}
-                              onPress={() => setSelectedTask(task)}
-                            >
-                              {renderCardContent(task, false)}
-                            </TouchableOpacity>
+                            {renderCardContent(task, false)}
                           </View>
                         );
                       })
@@ -435,8 +534,8 @@ export const TaskKanbanScreen: React.FC = () => {
                   transform: [
                     { translateX: panPosition.x },
                     { translateY: panPosition.y },
-                    { rotate: '2deg' },
-                    { scale: 1.04 },
+                    { rotate: '2.5deg' },
+                    { scale: 1.05 },
                   ],
                 },
               ]}
@@ -455,7 +554,7 @@ export const TaskKanbanScreen: React.FC = () => {
         onRequestClose={() => setSelectedTask(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.detailSheet}>
+          <View style={[styles.detailSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
             <View style={styles.detailHeader}>
               <View style={styles.codeBadge}>
                 <Text style={styles.codeText}>
@@ -509,6 +608,52 @@ export const TaskKanbanScreen: React.FC = () => {
                     </Text>
                   </View>
                 ) : null}
+              </View>
+
+              {/* Quick Move Status section */}
+              <View style={styles.moveStatusSection}>
+                <Text style={styles.moveStatusHeader}>Move to Column:</Text>
+                <View style={styles.statusPillsWrap}>
+                  {COLUMNS.map((col) => {
+                    const isCurrent = (selectedTask?.status || 'todo').toLowerCase() === col.key;
+                    return (
+                      <TouchableOpacity
+                        key={col.key}
+                        activeOpacity={0.7}
+                        style={[
+                          styles.statusPillBtn,
+                          {
+                            borderColor: col.border,
+                            backgroundColor: isCurrent ? col.color : col.bg,
+                          },
+                        ]}
+                        onPress={async () => {
+                          if (!selectedTask || isCurrent) return;
+                          await handleDropTask(selectedTask, col.key);
+                          setSelectedTask((prev) => (prev ? { ...prev, status: col.key } : null));
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.statusDot,
+                            { backgroundColor: isCurrent ? '#FFFFFF' : col.color },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.statusPillBtnText,
+                            {
+                              color: isCurrent ? '#FFFFFF' : col.color,
+                              fontWeight: isCurrent ? '700' : '600',
+                            },
+                          ]}
+                        >
+                          {col.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
             </ScrollView>
 
@@ -820,6 +965,71 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  codeRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  gripIcon: {
+    opacity: 0.6,
+  },
+  dropTargetBanner: {
+    backgroundColor: '#EFF6FF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#BFDBFE',
+    paddingVertical: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropTargetBannerText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  emptyColumnBoxReceiving: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+  },
+  emptyColumnTextReceiving: {
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  moveStatusSection: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  moveStatusHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  statusPillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statusPillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusPillBtnText: {
+    fontSize: 12,
   },
   hitSlop8: {
     top: 8,

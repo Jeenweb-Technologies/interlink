@@ -34,6 +34,8 @@ import { StatusBadge } from '../../components/common/StatusBadge';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { usePermissionStore } from '../../store/permissionStore';
 import {
   fetchCompanies,
   createCompany,
@@ -65,6 +67,24 @@ const formatDate = (dateStr?: string): string => {
 
 export const CompanyMasterScreen: React.FC<Props> = ({ navigation }) => {
   const { activeCompanyId, switchCompany: storeSwitchCompany, user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadCompany =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('company_master', 'read');
+
+  if (!canReadCompany) {
+    return (
+      <NoPermissionView
+        moduleName="Company Master"
+        headerTitle="Company Master"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
+
   const [companies, setCompanies] = useState<CompanyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

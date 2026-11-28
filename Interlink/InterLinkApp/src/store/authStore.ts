@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loginUser, logoutUser, UserData, UserCompany } from '../api/authApi';
 import { getDeviceId } from '../utils/device';
+import { usePermissionStore } from './permissionStore';
 
 const USER_KEY = '@interlink_user';
 const TOKEN_KEY = '@interlink_token';
@@ -68,6 +69,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           activeCompany,
           isInitializing: false,
         });
+
+        // Fetch user permissions for mobile module access control
+        usePermissionStore.getState().fetchPermissions().catch(() => {});
         return;
       }
     } catch (err) {
@@ -121,6 +125,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
 
+      // Fetch user permissions for mobile module access control
+      usePermissionStore.getState().fetchPermissions().catch(() => {});
+
       return { success: true };
     } catch (err: any) {
       const message = err.message || 'An unexpected error occurred during login.';
@@ -130,25 +137,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    set({ isLoading: true });
+    // Non-blocking fire-and-forget server logout notification
+    logoutUser().catch((err) => console.log('Server logout note:', err));
+
     try {
-      await logoutUser().catch(() => {});
-    } finally {
       await Promise.all([
         AsyncStorage.removeItem(USER_KEY),
         AsyncStorage.removeItem(TOKEN_KEY),
         AsyncStorage.removeItem(ACTIVE_COMPANY_KEY),
+        usePermissionStore.getState().clearPermissions().catch(() => {}),
       ]);
-      set({
-        user: null,
-        token: null,
-        isAuthenticated: false,
-        isLoading: false,
-        activeCompanyId: null,
-        activeCompany: null,
-        error: null,
-      });
+    } catch (err) {
+      console.error('Error clearing local storage on logout:', err);
     }
+
+    set({
+      user: null,
+      token: null,
+      isAuthenticated: false,
+      isLoading: false,
+      activeCompanyId: null,
+      activeCompany: null,
+      error: null,
+    });
   },
 
   switchCompany: async (companyId: number) => {

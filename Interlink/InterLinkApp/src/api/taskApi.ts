@@ -141,9 +141,12 @@ export interface CreateTaskPayload {
 /**
  * Fetch task dashboard metrics including priority distribution, project durations, and team workload
  */
-export const fetchTaskDashboard = async (): Promise<ApiResponse<TaskDashboardData>> => {
+export const fetchTaskDashboard = async (
+  companyId?: number
+): Promise<ApiResponse<TaskDashboardData>> => {
   return apiRequest('/tasks/dashboard', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -151,7 +154,8 @@ export const fetchTaskDashboard = async (): Promise<ApiResponse<TaskDashboardDat
  * Fetch task list with optional filters
  */
 export const fetchTasks = async (
-  params?: Record<string, any>
+  params?: Record<string, any>,
+  companyId?: number
 ): Promise<ApiResponse<TaskItem[]>> => {
   let queryStr = '';
   if (params && Object.keys(params).length > 0) {
@@ -168,15 +172,19 @@ export const fetchTasks = async (
   }
   return apiRequest(`/tasks${queryStr}`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch task metadata (projects, users, labels, statuses, priorities)
  */
-export const fetchTaskMetadataApi = async (): Promise<ApiResponse<TaskMetadata>> => {
+export const fetchTaskMetadataApi = async (
+  companyId?: number
+): Promise<ApiResponse<TaskMetadata>> => {
   return apiRequest('/tasks/metadata', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -184,11 +192,13 @@ export const fetchTaskMetadataApi = async (): Promise<ApiResponse<TaskMetadata>>
  * Create a new task
  */
 export const createTaskApi = async (
-  data: CreateTaskPayload
+  data: CreateTaskPayload,
+  companyId?: number
 ): Promise<ApiResponse<{ id: number; task_code: string }>> => {
   return apiRequest('/tasks', {
     method: 'POST',
     body: data,
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
@@ -197,19 +207,25 @@ export const createTaskApi = async (
  */
 export const updateTaskApi = async (
   id: number,
-  data: Partial<TaskItem>
+  data: Partial<TaskItem>,
+  companyId?: number
 ): Promise<ApiResponse<void>> => {
   return apiRequest(`/tasks/${id}`, {
     method: 'PUT',
     body: data,
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Delete a task
  */
-export const deleteTaskApi = async (id: number): Promise<ApiResponse<void>> => {
+export const deleteTaskApi = async (
+  id: number,
+  companyId?: number
+): Promise<ApiResponse<void>> => {
   return apiRequest(`/tasks/${id}`, {
     method: 'DELETE',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };

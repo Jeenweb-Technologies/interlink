@@ -6,7 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuthStore } from './src/store/authStore';
 
-LogBox.ignoreAllLogs();
+// LogBox.ignoreAllLogs();
 
 function App(): React.JSX.Element {
   const initializeAuth = useAuthStore((state) => state.initializeAuth);

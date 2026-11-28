@@ -7,6 +7,7 @@ import {
   StatusBar,
   ViewStyle,
   TextStyle,
+  Platform,
 } from 'react-native';
 import { ArrowLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,7 +48,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   titleStyle,
 }) => {
   const insets = useSafeAreaInsets();
-  const topPadding = Math.max(insets.top, 16) + 8;
+  const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 0;
+  const topPadding = Math.max(insets.top, statusBarHeight, Platform.OS === 'ios' ? 44 : 28) + 10;
 
   return (
     <View

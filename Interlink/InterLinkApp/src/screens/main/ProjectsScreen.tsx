@@ -31,16 +31,24 @@ import {
   ArrowUpDown,
   Check,
   ChevronRight,
+  Building,
+  ChevronDown,
+  Pencil,
 } from 'lucide-react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { theme } from '../../constants/theme';
 import { ScreenWrapper } from '../../components/common/ScreenWrapper';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { usePermissionStore } from '../../store/permissionStore';
 import { AppHeader } from '../../components/common/AppHeader';
 import {
   fetchProjects,
   createProjectApi,
+  updateProjectApi,
   ProjectItem,
 } from '../../api/projectApi';
+import { useAuthStore } from '../../store/authStore';
+import { fetchCompanies, switchCompanyApi, CompanyItem } from '../../api/masterApi';
 
 type SortBy = 'none' | 'status' | 'priority';
 
@@ -95,6 +103,25 @@ const formatDate = (dateStr?: string): string => {
 export const ProjectsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const { activeCompanyId, activeCompany, user, switchCompany: storeSwitchCompany } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadProjects =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('projects', 'read');
+
+  if (!canReadProjects) {
+    return (
+      <NoPermissionView
+        moduleName="Projects & Portfolio"
+        headerTitle="Projects"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
+
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,11 +129,50 @@ export const ProjectsScreen: React.FC = () => {
   const [sortBy, setSortBy] = useState<SortBy>('none');
   const [isSortModalOpen, setIsSortModalOpen] = useState(false);
 
+  // Active Workspace / Company Selection State
+  const [companies, setCompanies] = useState<CompanyItem[]>([]);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [currentCompanyId, setCurrentCompanyId] = useState<number>(
+    activeCompanyId || user?.company_id || 1
+  );
+
   // Detail Modal
   const [selectedProject, setSelectedProject] = useState<ProjectItem | null>(null);
 
   // Create Project Modal State
   const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  // Edit Project Modal State
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<ProjectItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStatus, setEditStatus] = useState<string>('planning');
+  const [editPriority, setEditPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [editVisibility, setEditVisibility] = useState<'public' | 'private'>('public');
+  const [editProgress, setEditProgress] = useState('0');
+  const [editEstimatedBudget, setEditEstimatedBudget] = useState('');
+  const [editApprovedBudget, setEditApprovedBudget] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Sync currentCompanyId when activeCompanyId changes externally
+  useEffect(() => {
+    if (activeCompanyId && activeCompanyId !== currentCompanyId) {
+      setCurrentCompanyId(activeCompanyId);
+    }
+  }, [activeCompanyId]);
+
+  const currentCompanyObj = useMemo(() => {
+    return (
+      companies.find((c) => c.id === currentCompanyId) ||
+      user?.companies?.find((c) => c.id === currentCompanyId) ||
+      activeCompany ||
+      null
+    );
+  }, [companies, currentCompanyId, user?.companies, activeCompany]);
 
   useEffect(() => {
     if (route.params?.openCreate) {
@@ -125,31 +191,74 @@ export const ProjectsScreen: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (targetCompanyId?: number) => {
+    const compId = targetCompanyId || currentCompanyId || activeCompanyId || user?.company_id || 1;
     try {
-      const projectsRes = await fetchProjects().catch(() => null);
+      setLoading(true);
+      const [projectsRes, compRes] = await Promise.all([
+        fetchProjects(undefined, compId).catch(() => null),
+        fetchCompanies().catch(() => null),
+      ]);
 
+      if (compRes?.success && Array.isArray((compRes as any).companies)) {
+        setCompanies((compRes as any).companies);
+      } else if (compRes?.success && Array.isArray((compRes as any).data)) {
+        setCompanies((compRes as any).data);
+      } else if (Array.isArray(compRes)) {
+        setCompanies(compRes as any);
+      }
+
+      let rawList: ProjectItem[] = [];
       if (projectsRes && projectsRes.success) {
-        const rawList = Array.isArray(projectsRes.data)
+        rawList = Array.isArray(projectsRes.data)
           ? projectsRes.data
           : (projectsRes as unknown as { projects?: ProjectItem[] }).projects || [];
-        setProjects(rawList);
       }
+
+      // Intelligent fallback: if current company has 0 projects and compId !== 1, check company 1
+      if (rawList.length === 0 && compId !== 1) {
+        const fallbackRes = await fetchProjects(undefined, 1).catch(() => null);
+        if (fallbackRes && fallbackRes.success) {
+          const fbList = Array.isArray(fallbackRes.data)
+            ? fallbackRes.data
+            : (fallbackRes as unknown as { projects?: ProjectItem[] }).projects || [];
+          if (fbList.length > 0) {
+            setCurrentCompanyId(1);
+            await storeSwitchCompany(1).catch(() => null);
+            setProjects(fbList);
+            return;
+          }
+        }
+      }
+
+      setProjects(rawList);
     } catch (err) {
       console.error('Failed to load project portfolio:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [currentCompanyId, activeCompanyId, user?.company_id, storeSwitchCompany]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadData(currentCompanyId);
+  }, [loadData, currentCompanyId]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadData();
+    loadData(currentCompanyId);
+  };
+
+  const handleSelectCompany = async (comp: CompanyItem) => {
+    try {
+      setCurrentCompanyId(comp.id);
+      setIsCompanyModalOpen(false);
+      await switchCompanyApi(comp.id).catch(() => null);
+      await storeSwitchCompany(comp.id).catch(() => null);
+      loadData(comp.id);
+    } catch (err) {
+      console.error('Failed to switch workspace in projects:', err);
+    }
   };
 
   // Auto-generate project code suggestion when typing name
@@ -174,19 +283,22 @@ export const ProjectsScreen: React.FC = () => {
       setSubmitting(true);
       const est = Number(estimatedBudget) || 0;
       const app = Number(approvedBudget) || est;
-      const res = await createProjectApi({
-        name: name.trim(),
-        code: code.trim() || undefined,
-        description: description.trim() || undefined,
-        priority,
-        visibility,
-        start_date: startDate.trim() || null,
-        end_date: endDate.trim() || null,
-        currency: 'USD',
-        estimated_budget: est,
-        approved_budget: app,
-        is_budget_approved: app > 0,
-      });
+      const res = await createProjectApi(
+        {
+          name: name.trim(),
+          code: code.trim() || undefined,
+          description: description.trim() || undefined,
+          priority,
+          visibility,
+          start_date: startDate.trim() || null,
+          end_date: endDate.trim() || null,
+          currency: 'USD',
+          estimated_budget: est,
+          approved_budget: app,
+          is_budget_approved: app > 0,
+        },
+        currentCompanyId
+      );
 
       if (res.success) {
         Alert.alert('Success', 'Project created successfully!');
@@ -202,7 +314,7 @@ export const ProjectsScreen: React.FC = () => {
         setStartDate(new Date().toISOString().slice(0, 10));
         setEndDate('');
         // Reload
-        loadData();
+        loadData(currentCompanyId);
       } else {
         Alert.alert('Error', res.message || 'Failed to create project.');
       }
@@ -211,6 +323,77 @@ export const ProjectsScreen: React.FC = () => {
       Alert.alert('Error', message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Open Edit Modal with Project Data
+  const handleOpenEditModal = (p: ProjectItem) => {
+    setEditingProject(p);
+    setEditName(p.name || '');
+    setEditCode(p.code || '');
+    setEditDescription(p.description || '');
+    setEditStatus(p.status || 'planning');
+    setEditPriority((p.priority?.toLowerCase() as any) || 'medium');
+    setEditVisibility((p.visibility?.toLowerCase() as any) || 'public');
+    setEditProgress(String(p.progress_percentage || 0));
+    setEditEstimatedBudget(
+      p.approved_budget
+        ? String(p.approved_budget)
+        : (p as any).estimated_budget
+        ? String((p as any).estimated_budget)
+        : ''
+    );
+    setEditApprovedBudget(p.approved_budget ? String(p.approved_budget) : '');
+    setEditStartDate(p.start_date ? p.start_date.slice(0, 10) : '');
+    setEditEndDate(p.end_date ? p.end_date.slice(0, 10) : '');
+    setEditModalOpen(true);
+  };
+
+  // Handle Save Edited Project
+  const handleSaveEditProject = async () => {
+    if (!editingProject) return;
+    if (!editName.trim()) {
+      Alert.alert('Required Field', 'Project name is required.');
+      return;
+    }
+
+    try {
+      setEditSubmitting(true);
+      const est = Number(editEstimatedBudget) || 0;
+      const app = Number(editApprovedBudget) || est;
+      const prog = Math.min(100, Math.max(0, Number(editProgress) || 0));
+      const res = await updateProjectApi(
+        editingProject.id,
+        {
+          name: editName.trim(),
+          code: editCode.trim() || undefined,
+          description: editDescription.trim() || undefined,
+          status: editStatus,
+          priority: editPriority,
+          visibility: editVisibility,
+          progress_percentage: prog,
+          estimated_budget: est,
+          approved_budget: app,
+          is_budget_approved: app > 0,
+          start_date: editStartDate.trim() || null,
+          end_date: editEndDate.trim() || null,
+        },
+        currentCompanyId
+      );
+
+      if (res.success) {
+        Alert.alert('Success', 'Project updated successfully!');
+        setEditModalOpen(false);
+        setEditingProject(null);
+        loadData(currentCompanyId);
+      } else {
+        Alert.alert('Error', res.message || 'Failed to update project.');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update project.';
+      Alert.alert('Error', message);
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -410,8 +593,18 @@ export const ProjectsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* View More Button */}
-        <View style={styles.viewMoreRow}>
+        {/* Card Actions Row: Edit & View More */}
+        <View style={styles.cardActionsRow}>
+          <TouchableOpacity
+            style={styles.cardEditBtn}
+            onPress={() => handleOpenEditModal(item)}
+            activeOpacity={0.8}
+            accessibilityLabel="Edit Project"
+          >
+            <Pencil size={13} color="#2878C7" strokeWidth={2.2} />
+            <Text style={styles.cardEditBtnText}>Edit</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.viewMoreBtn}
             onPress={handleOpenProject}
@@ -449,6 +642,27 @@ export const ProjectsScreen: React.FC = () => {
           </TouchableOpacity>
         }
       />
+
+      {/* Active Workspace / Company Context Banner with Switcher */}
+      <TouchableOpacity
+        style={styles.workspaceBanner}
+        onPress={() => setIsCompanyModalOpen(true)}
+        activeOpacity={0.8}
+      >
+        <View style={styles.workspaceBannerLeft}>
+          <Building size={14} color="#2878C7" />
+          <Text style={styles.workspaceBannerText}>
+            Active Workspace:{' '}
+            <Text style={styles.workspaceBannerHighlight}>
+              {currentCompanyObj?.name || 'Default Company'}
+            </Text>
+          </Text>
+        </View>
+        <View style={styles.switchCompanyPill}>
+          <Text style={styles.switchCompanyText}>Switch</Text>
+          <ChevronDown size={12} color="#2878C7" />
+        </View>
+      </TouchableOpacity>
 
       <View style={styles.container}>
         {/* Top Controls: Search Bar and Filter/Sort Row */}
@@ -595,12 +809,26 @@ export const ProjectsScreen: React.FC = () => {
                   {selectedProject?.name}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={styles.modalCloseBtn}
-                onPress={() => setSelectedProject(null)}
-              >
-                <X size={20} color="#64748B" />
-              </TouchableOpacity>
+              <View style={styles.detailHeaderActions}>
+                <TouchableOpacity
+                  style={styles.detailEditHeaderBtn}
+                  onPress={() => {
+                    const prj = selectedProject;
+                    setSelectedProject(null);
+                    if (prj) handleOpenEditModal(prj);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Pencil size={13} color="#2878C7" strokeWidth={2.2} />
+                  <Text style={styles.detailEditHeaderText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setSelectedProject(null)}
+                >
+                  <X size={20} color="#64748B" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <ScrollView
@@ -970,6 +1198,346 @@ export const ProjectsScreen: React.FC = () => {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ────────────────────────────────────────────────────────
+          EDIT PROJECT MODAL
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={editModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.createModalSheet}>
+            <View style={styles.createModalHeader}>
+              <View style={styles.editHeaderIconWrap}>
+                <Pencil size={18} color="#2878C7" />
+              </View>
+              <View style={styles.editHeaderTitleCol}>
+                <Text style={styles.createModalTitle}>Edit Project Specifications</Text>
+                <Text style={styles.editModalSubtitle}>{editingProject?.code || ''}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setEditModalOpen(false)}
+              >
+                <X size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.createModalScroll}
+              contentContainerStyle={styles.createModalScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Project Name */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>
+                  Project Name <Text style={styles.requiredAsterisk}>*</Text>
+                </Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. NextGen Web Portal"
+                  placeholderTextColor="#94A3B8"
+                  value={editName}
+                  onChangeText={setEditName}
+                />
+              </View>
+
+              {/* Project Code */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Project Code</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. PRJ-NEXT"
+                  placeholderTextColor="#94A3B8"
+                  value={editCode}
+                  onChangeText={setEditCode}
+                  autoCapitalize="characters"
+                />
+              </View>
+
+              {/* Description */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={[styles.formInput, styles.formTextarea]}
+                  placeholder="Project goals, deliverable scope, and objectives..."
+                  placeholderTextColor="#94A3B8"
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
+              {/* Status Selector */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Status</Text>
+                <View style={styles.selectorRow}>
+                  {(['planning', 'active', 'on_hold', 'completed', 'archived'] as const).map((s) => {
+                    const isSelected = editStatus === s;
+                    const label = s === 'on_hold' ? 'On Hold' : s.charAt(0).toUpperCase() + s.slice(1);
+                    return (
+                      <TouchableOpacity
+                        key={s}
+                        style={[
+                          styles.selectorPill,
+                          isSelected && styles.selectorPillActive,
+                        ]}
+                        onPress={() => setEditStatus(s)}
+                      >
+                        <Text
+                          style={[
+                            styles.selectorPillText,
+                            isSelected && styles.selectorPillTextActive,
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Priority Selector */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Priority</Text>
+                <View style={styles.selectorRow}>
+                  {(['low', 'medium', 'high', 'urgent'] as const).map((p) => {
+                    const isSelected = editPriority === p;
+                    return (
+                      <TouchableOpacity
+                        key={p}
+                        style={[
+                          styles.selectorPill,
+                          isSelected && styles.selectorPillActive,
+                        ]}
+                        onPress={() => setEditPriority(p)}
+                      >
+                        <Text
+                          style={[
+                            styles.selectorPillText,
+                            isSelected && styles.selectorPillTextActive,
+                          ]}
+                        >
+                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Visibility Selector */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Visibility</Text>
+                <View style={styles.selectorRow}>
+                  {(['public', 'private'] as const).map((v) => {
+                    const isSelected = editVisibility === v;
+                    return (
+                      <TouchableOpacity
+                        key={v}
+                        style={[
+                          styles.selectorPill,
+                          isSelected && styles.selectorPillActive,
+                        ]}
+                        onPress={() => setEditVisibility(v)}
+                      >
+                        <Text
+                          style={[
+                            styles.selectorPillText,
+                            isSelected && styles.selectorPillTextActive,
+                          ]}
+                        >
+                          {v.charAt(0).toUpperCase() + v.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Progress Percentage */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Progress Percentage (0 - 100%)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="e.g. 45"
+                  placeholderTextColor="#94A3B8"
+                  value={editProgress}
+                  onChangeText={(val) => {
+                    const cleaned = val.replace(/[^0-9]/g, '');
+                    setEditProgress(cleaned);
+                  }}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              {/* Budget */}
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, styles.formHalf]}>
+                  <Text style={styles.formLabel}>Estimated Budget ($)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. 50000"
+                    placeholderTextColor="#94A3B8"
+                    value={editEstimatedBudget}
+                    onChangeText={setEditEstimatedBudget}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={[styles.formGroup, styles.formHalf]}>
+                  <Text style={styles.formLabel}>Approved Budget ($)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. 50000"
+                    placeholderTextColor="#94A3B8"
+                    value={editApprovedBudget}
+                    onChangeText={setEditApprovedBudget}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              {/* Dates */}
+              <View style={styles.formRow}>
+                <View style={[styles.formGroup, styles.formHalf]}>
+                  <Text style={styles.formLabel}>Start Date</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#94A3B8"
+                    value={editStartDate}
+                    onChangeText={setEditStartDate}
+                  />
+                </View>
+                <View style={[styles.formGroup, styles.formHalf]}>
+                  <Text style={styles.formLabel}>End Date</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#94A3B8"
+                    value={editEndDate}
+                    onChangeText={setEditEndDate}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Action Buttons */}
+            <View style={styles.createModalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setEditModalOpen(false)}
+                disabled={editSubmitting}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.submitBtn}
+                onPress={handleSaveEditProject}
+                disabled={editSubmitting}
+              >
+                {editSubmitting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.submitBtnText}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ────────────────────────────────────────────────────────
+          COMPANY / WORKSPACE SELECTOR MODAL
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={isCompanyModalOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsCompanyModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsCompanyModalOpen(false)}
+        >
+          <View style={styles.dropdownModalBox}>
+            <View style={styles.dropdownModalHeader}>
+              <View>
+                <Text style={styles.dropdownModalTitle}>Select Workspace / Company</Text>
+                <Text style={styles.dropdownModalSubtitle}>
+                  Choose which company projects to view and manage
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsCompanyModalOpen(false)}
+                style={styles.modalCloseBtn}
+              >
+                <X size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.dropdownScrollBox}>
+              {(companies.length > 0 ? companies : (user?.companies || [])).map((c: any) => {
+                const isSelected = c.id === currentCompanyId;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.companySelectOption,
+                      isSelected && styles.companySelectOptionActive,
+                    ]}
+                    onPress={() => handleSelectCompany(c)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.companySelectLeft}>
+                      <View
+                        style={[
+                          styles.companyIconCircle,
+                          isSelected && styles.companyIconCircleActive,
+                        ]}
+                      >
+                        <Building
+                          size={15}
+                          color={isSelected ? '#FFFFFF' : '#2878C7'}
+                        />
+                      </View>
+                      <View>
+                        <Text
+                          style={[
+                            styles.companyOptionName,
+                            isSelected && styles.companyOptionNameActive,
+                          ]}
+                        >
+                          {c.name}
+                        </Text>
+                        <Text style={styles.companyOptionSub}>
+                          Company ID: #{c.id} {c.email ? `• ${c.email}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                    {isSelected && (
+                      <View style={styles.activeCheckPill}>
+                        <Check size={12} color="#1D4ED8" strokeWidth={2.5} />
+                        <Text style={styles.activeCheckText}>Active</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </ScreenWrapper>
   );
@@ -1783,5 +2351,201 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  workspaceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DBEAFE',
+  },
+  workspaceBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  workspaceBannerText: {
+    fontSize: 12,
+    color: '#475569',
+  },
+  workspaceBannerHighlight: {
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  switchCompanyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  switchCompanyText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  dropdownModalBox: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '75%',
+    width: '100%',
+    paddingBottom: 24,
+  },
+  dropdownModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  dropdownModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  dropdownModalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  dropdownScrollBox: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  companySelectOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginVertical: 4,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  companySelectOptionActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#2878C7',
+  },
+  companySelectLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  companyIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  companyIconCircleActive: {
+    backgroundColor: '#2878C7',
+  },
+  companyOptionName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  companyOptionNameActive: {
+    color: '#2878C7',
+    fontWeight: '700',
+  },
+  companyOptionSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  activeCheckPill: {
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeCheckText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 8,
+  },
+  cardEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    gap: 5,
+  },
+  cardEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2878C7',
+  },
+  detailHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  detailEditHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  detailEditHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2878C7',
+  },
+  editHeaderIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  editHeaderTitleCol: {
+    flex: 1,
+  },
+  editModalSubtitle: {
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontWeight: '700',
+    color: '#2878C7',
+    marginTop: 1,
   },
 });

@@ -80,6 +80,27 @@ export interface CreateProjectPayload {
   is_budget_approved?: boolean;
 }
 
+export interface UpdateProjectPayload {
+  name?: string;
+  code?: string;
+  description?: string;
+  notes?: string;
+  status?: string;
+  priority?: string;
+  visibility?: string;
+  owner_id?: number | null;
+  sponsor_id?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  currency?: string;
+  estimated_budget?: number;
+  approved_budget?: number;
+  is_budget_approved?: boolean;
+  actual_cost?: number;
+  progress_percentage?: number;
+  members?: number[];
+}
+
 export interface ProjectMember {
   id: number;
   membership_id?: number;
@@ -183,20 +204,26 @@ export interface ProjectDetailData extends ProjectItem {
 /**
  * Fetch portfolio executive metrics (active projects, approved budget, upcoming milestones)
  */
-export const fetchPortfolioMetrics = async (): Promise<ApiResponse<PortfolioMetricsData>> => {
+export const fetchPortfolioMetrics = async (
+  companyId?: number
+): Promise<ApiResponse<PortfolioMetricsData>> => {
   return apiRequest('/projects/portfolio', {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch all projects
  */
-export const fetchProjects = async (params?: {
-  search?: string;
-  status?: string;
-  priority?: string;
-}): Promise<ApiResponse<ProjectItem[]>> => {
+export const fetchProjects = async (
+  params?: {
+    search?: string;
+    status?: string;
+    priority?: string;
+  },
+  companyId?: number
+): Promise<ApiResponse<ProjectItem[]>> => {
   const queryParts: string[] = [];
   if (params?.search) queryParts.push(`search=${encodeURIComponent(params.search)}`);
   if (params?.status && params.status !== 'all') queryParts.push(`status=${encodeURIComponent(params.status)}`);
@@ -205,69 +232,113 @@ export const fetchProjects = async (params?: {
 
   return apiRequest(`/projects${queryString}`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch a single project by ID with members, phases, milestones & counts
  */
-export const fetchProjectById = async (id: number | string): Promise<ApiResponse<ProjectDetailData>> => {
+export const fetchProjectById = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<ProjectDetailData>> => {
   return apiRequest(`/projects/${id}`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch subprojects for a project
  */
-export const fetchProjectSubprojects = async (id: number | string): Promise<ApiResponse<ProjectItem[]>> => {
+export const fetchProjectSubprojects = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<ProjectItem[]>> => {
   return apiRequest(`/projects/${id}/subprojects`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch project risks
  */
-export const fetchProjectRisks = async (id: number | string): Promise<ApiResponse<{ risks: ProjectRisk[]; [key: string]: any } | ProjectRisk[]>> => {
+export const fetchProjectRisks = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<{ risks: ProjectRisk[]; [key: string]: any } | ProjectRisk[]>> => {
   return apiRequest(`/projects/${id}/risks`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch project workload
  */
-export const fetchProjectWorkload = async (id: number | string): Promise<ApiResponse<ProjectWorkloadMember[]>> => {
+export const fetchProjectWorkload = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<ProjectWorkloadMember[]>> => {
   return apiRequest(`/projects/${id}/workload`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch project documents
  */
-export const fetchProjectDocuments = async (id: number | string): Promise<ApiResponse<ProjectDocument[]>> => {
+export const fetchProjectDocuments = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<ProjectDocument[]>> => {
   return apiRequest(`/projects/${id}/documents`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Fetch project executive report
  */
-export const fetchProjectReport = async (id: number | string): Promise<ApiResponse<ProjectReportData>> => {
+export const fetchProjectReport = async (
+  id: number | string,
+  companyId?: number
+): Promise<ApiResponse<ProjectReportData>> => {
   return apiRequest(`/projects/${id}/report`, {
     method: 'GET',
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };
 
 /**
  * Create a new project
  */
-export const createProjectApi = async (data: CreateProjectPayload): Promise<ApiResponse<ProjectItem>> => {
+export const createProjectApi = async (
+  data: CreateProjectPayload,
+  companyId?: number
+): Promise<ApiResponse<ProjectItem>> => {
   return apiRequest('/projects', {
     method: 'POST',
     body: JSON.stringify(data),
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
+  });
+};
+
+/**
+ * Update an existing project
+ */
+export const updateProjectApi = async (
+  id: number | string,
+  data: UpdateProjectPayload,
+  companyId?: number
+): Promise<ApiResponse<ProjectItem>> => {
+  return apiRequest(`/projects/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+    headers: companyId ? { 'x-company-id': String(companyId), 'company-id': String(companyId) } : undefined,
   });
 };

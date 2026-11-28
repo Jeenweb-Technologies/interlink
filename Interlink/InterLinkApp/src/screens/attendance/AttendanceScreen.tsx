@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,10 @@ import {
   Modal,
   Alert,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Clock,
   Calendar,
@@ -21,15 +23,27 @@ import {
   AlertCircle,
   Building,
   Home,
-  Navigation,
+  MapPin,
   FileEdit,
   ArrowRight,
   X,
   ChevronLeft,
   ChevronRight,
   Briefcase,
+  Search,
+  Check,
+  ShieldCheck,
+  RotateCcw,
+  Play,
+  Square,
+  Sparkles,
 } from 'lucide-react-native';
 import { AppHeader } from '../../components/common/AppHeader';
+import { ScreenWrapper } from '../../components/common/ScreenWrapper';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { useAuthStore } from '../../store/authStore';
+import { usePermissionStore } from '../../store/permissionStore';
+import { fetchDepartments, DepartmentItem } from '../../api/masterApi';
 import {
   getTodayAttendance,
   recordClockEvent,
@@ -37,37 +51,60 @@ import {
   getWorkSchedules,
   getTeamAttendanceBoard,
   requestAttendanceAdjustment,
+  getAttendanceAdjustments,
+  reviewAttendanceAdjustment,
   AttendanceTodayData,
   AttendanceHistoryData,
   WorkScheduleItem,
   TeamBoardMember,
+  AttendanceAdjustmentItem,
 } from '../../api/attendanceApi';
 import { theme } from '../../constants/theme';
 
+type PrimaryTab = 'today' | 'history' | 'adjustments' | 'team';
+
 export const AttendanceScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
+  const { hasPermission, isAdmin: isPermAdmin } = usePermissionStore();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super admin' || isPermAdmin;
+  const canRead = isAdmin || hasPermission('attendance', 'read');
 
-  const [activeTab, setActiveTab] = useState<'today' | 'history' | 'team'>('today');
+  if (!canRead) {
+    return (
+      <NoPermissionView
+        moduleName="Attendance & Shifts"
+        headerTitle="Attendance & Shifts"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
 
-  // Today Tab State
+  const [activeTab, setActiveTab] = useState<PrimaryTab>('today');
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ── Today Tab State ────────────────────────────────────────────────────────
   const [todayData, setTodayData] = useState<AttendanceTodayData | null>(null);
-  const [_loadingToday, setLoadingToday] = useState(true);
+  const [loadingToday, setLoadingToday] = useState(true);
   const [clocking, setClocking] = useState(false);
-  const [locationType, setLocationType] = useState<'OFFICE' | 'REMOTE' | 'FIELD'>('OFFICE');
+  const [locationType, setLocationType] = useState<'OFFICE' | 'REMOTE' | 'CLIENT_SITE'>('OFFICE');
   const [clockNotes, setClockNotes] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // History Tab State
+  // ── Monthly History State ──────────────────────────────────────────────────
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [historyData, setHistoryData] = useState<AttendanceHistoryData | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Team & Shifts Tab State
-  const [schedules, setSchedules] = useState<WorkScheduleItem[]>([]);
-  const [teamBoard, setTeamBoard] = useState<TeamBoardMember[]>([]);
-  const [_loadingTeam, setLoadingTeam] = useState(false);
+  // ── Adjustments State ──────────────────────────────────────────────────────
+  const [adjustmentsSubTab, setAdjustmentsSubTab] = useState<'my' | 'manager'>('my');
+  const [myAdjustments, setMyAdjustments] = useState<AttendanceAdjustmentItem[]>([]);
+  const [managerQueue, setManagerQueue] = useState<AttendanceAdjustmentItem[]>([]);
+  const [loadingAdjustments, setLoadingAdjustments] = useState(false);
+  const [queueStatusFilter, setQueueStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
 
-  // Regularization Modal State
+  // Request Adjustment Modal
   const [isAdjModalOpen, setIsAdjModalOpen] = useState(false);
   const [adjDate, setAdjDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [adjInTime, setAdjInTime] = useState('09:00');
@@ -75,68 +112,137 @@ export const AttendanceScreen: React.FC = () => {
   const [adjReason, setAdjReason] = useState('');
   const [submittingAdj, setSubmittingAdj] = useState(false);
 
-  // 1. Fetch Today Status
+  // Review Modal (Manager)
+  const [reviewModalItem, setReviewModalItem] = useState<AttendanceAdjustmentItem | null>(null);
+  const [reviewerComment, setReviewerComment] = useState('');
+  const [reviewingAction, setReviewingAction] = useState(false);
+
+  // ── Team & Shifts Tab State ────────────────────────────────────────────────
+  const [teamSubTab, setTeamSubTab] = useState<'board' | 'schedules'>('board');
+  const [schedules, setSchedules] = useState<WorkScheduleItem[]>([]);
+  const [teamBoard, setTeamBoard] = useState<TeamBoardMember[]>([]);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+  const [teamSearchQuery, setTeamSearchQuery] = useState('');
+  const [selectedDeptId, setSelectedDeptId] = useState<number | undefined>(undefined);
+  const [departments, setDepartments] = useState<DepartmentItem[]>([]);
+
+  // ── 1. Fetch Today Status ──────────────────────────────────────────────────
   const fetchToday = useCallback(async () => {
     try {
       setLoadingToday(true);
       const res = await getTodayAttendance();
-      if (res.success && res.data?.data) {
-        setTodayData(res.data.data);
+      if (res.success && res.data) {
+        setTodayData(res.data);
       }
     } catch {
-      // Ignore
+      // ignore
     } finally {
       setLoadingToday(false);
     }
   }, []);
 
-  // 2. Fetch Monthly History
+  // ── 2. Fetch Monthly History ───────────────────────────────────────────────
   const fetchHistory = useCallback(async (month: string) => {
     try {
       setLoadingHistory(true);
       const res = await getAttendanceHistory({ month });
-      if (res.success && res.data?.data) {
-        setHistoryData(res.data.data);
+      if (res.success && res.data) {
+        setHistoryData(res.data);
       }
     } catch {
-      // Ignore
+      // ignore
     } finally {
       setLoadingHistory(false);
     }
   }, []);
 
-  // 3. Fetch Team & Schedules
+  // ── 3. Fetch Adjustments ───────────────────────────────────────────────────
+  const fetchAdjustments = useCallback(async () => {
+    try {
+      setLoadingAdjustments(true);
+      const [selfRes, queueRes] = await Promise.all([
+        getAttendanceAdjustments({ queue: 'self' }).catch(() => null),
+        isAdmin
+          ? getAttendanceAdjustments({
+              queue: 'manager',
+              status: queueStatusFilter === 'ALL' ? undefined : queueStatusFilter,
+            }).catch(() => null)
+          : null,
+      ]);
+
+      if (selfRes?.success) {
+        const list = Array.isArray(selfRes.data)
+          ? selfRes.data
+          : (selfRes as any).adjustments || (selfRes.data as any)?.adjustments || [];
+        setMyAdjustments(list);
+      }
+
+      if (queueRes?.success) {
+        const list = Array.isArray(queueRes.data)
+          ? queueRes.data
+          : (queueRes as any).adjustments || (queueRes.data as any)?.adjustments || [];
+        setManagerQueue(list);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingAdjustments(false);
+    }
+  }, [isAdmin, queueStatusFilter]);
+
+  // ── 4. Fetch Team & Schedules ──────────────────────────────────────────────
   const fetchTeamAndSchedules = useCallback(async () => {
     try {
       setLoadingTeam(true);
       const [schedRes, teamRes] = await Promise.all([
         getWorkSchedules().catch(() => null),
-        getTeamAttendanceBoard().catch(() => null),
+        getTeamAttendanceBoard({ department_id: selectedDeptId }).catch(() => null),
       ]);
-      if (schedRes?.success && schedRes.data?.schedules) {
-        setSchedules(schedRes.data.schedules);
+
+      if (schedRes?.success) {
+        const list = (schedRes as any).schedules || schedRes.data?.schedules || (Array.isArray(schedRes.data) ? schedRes.data : []);
+        setSchedules(list);
       }
-      if (teamRes?.success && teamRes.data?.board) {
-        setTeamBoard(teamRes.data.board);
+      if (teamRes?.success) {
+        const list = (teamRes as any).board || teamRes.data?.board || (Array.isArray(teamRes.data) ? teamRes.data : []);
+        setTeamBoard(list);
       }
     } catch {
-      // Ignore
+      // ignore
     } finally {
       setLoadingTeam(false);
     }
-  }, []);
+  }, [selectedDeptId]);
 
+  // Initial Load & Tab Changes
   useEffect(() => {
     fetchToday();
+    fetchDepartments(false)
+      .then((depts) => {
+        if (Array.isArray(depts)) setDepartments(depts);
+      })
+      .catch(() => {});
   }, [fetchToday]);
 
   useEffect(() => {
     if (activeTab === 'history') {
       fetchHistory(selectedMonth);
+    } else if (activeTab === 'adjustments') {
+      fetchAdjustments();
     } else if (activeTab === 'team') {
       fetchTeamAndSchedules();
     }
-  }, [activeTab, selectedMonth, fetchHistory, fetchTeamAndSchedules]);
+  }, [activeTab, selectedMonth, fetchHistory, fetchAdjustments, fetchTeamAndSchedules]);
+
+  // Pull to refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (activeTab === 'today') await fetchToday();
+    else if (activeTab === 'history') await fetchHistory(selectedMonth);
+    else if (activeTab === 'adjustments') await fetchAdjustments();
+    else if (activeTab === 'team') await fetchTeamAndSchedules();
+    setRefreshing(false);
+  };
 
   // Live Timer for Clocked In session
   useEffect(() => {
@@ -164,8 +270,8 @@ export const AttendanceScreen: React.FC = () => {
       .padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Clock Event Action
-  const handleClockAction = async (eventType: 'clock_in' | 'clock_out' | 'break_start' | 'break_end') => {
+  // Clock Event Action (CLOCK_IN, BREAK_START, BREAK_END, CLOCK_OUT)
+  const handleClockAction = async (eventType: 'CLOCK_IN' | 'BREAK_START' | 'BREAK_END' | 'CLOCK_OUT') => {
     try {
       setClocking(true);
       const res = await recordClockEvent({
@@ -176,19 +282,19 @@ export const AttendanceScreen: React.FC = () => {
 
       if (res.success) {
         const labels: Record<string, string> = {
-          clock_in: 'Clocked In Successfully!',
-          clock_out: 'Clocked Out Successfully!',
-          break_start: 'Break Started',
-          break_end: 'Break Ended - Welcome Back',
+          CLOCK_IN: 'Clocked In Successfully!',
+          CLOCK_OUT: 'Clocked Out Successfully!',
+          BREAK_START: 'Break Started',
+          BREAK_END: 'Break Ended - Welcome Back',
         };
-        Alert.alert('Status Updated', labels[eventType] || 'Clock recorded.');
+        Alert.alert('Status Updated', labels[eventType] || 'Clock event recorded.');
         setClockNotes('');
         fetchToday();
       } else {
         Alert.alert('Notice', res.message || 'Clock action failed');
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to record clocking');
+      Alert.alert('Error', err?.message || 'Failed to record clock event');
     } finally {
       setClocking(false);
     }
@@ -197,7 +303,7 @@ export const AttendanceScreen: React.FC = () => {
   // Submit Regularization Request
   const handleSubmitAdjustment = async () => {
     if (!adjReason.trim()) {
-      Alert.alert('Required', 'Please provide a valid reason for regularization.');
+      Alert.alert('Required', 'Please provide a reason / justification for regularization.');
       return;
     }
 
@@ -211,17 +317,43 @@ export const AttendanceScreen: React.FC = () => {
       });
 
       if (res.success) {
-        Alert.alert('Success', 'Attendance regularization request submitted to your manager.');
+        Alert.alert('Submitted', 'Attendance adjustment request submitted successfully.');
         setIsAdjModalOpen(false);
         setAdjReason('');
+        if (activeTab === 'adjustments') fetchAdjustments();
         if (activeTab === 'history') fetchHistory(selectedMonth);
       } else {
         Alert.alert('Notice', res.message || 'Request submission failed');
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Submission failed');
+      Alert.alert('Error', err?.message || 'Submission failed');
     } finally {
       setSubmittingAdj(false);
+    }
+  };
+
+  // Review Adjustment Request (Manager Action)
+  const handleReviewAdjustment = async (status: 'APPROVED' | 'REJECTED') => {
+    if (!reviewModalItem) return;
+    try {
+      setReviewingAction(true);
+      const res = await reviewAttendanceAdjustment(reviewModalItem.id, {
+        status,
+        reviewer_comment: reviewerComment.trim() || undefined,
+      });
+
+      if (res.success) {
+        Alert.alert('Success', `Request has been ${status.toLowerCase()}!`);
+        setReviewModalItem(null);
+        setReviewerComment('');
+        fetchAdjustments();
+      } else {
+        Alert.alert('Error', res.message || 'Failed to review request');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to review request');
+    } finally {
+      setReviewingAction(false);
     }
   };
 
@@ -244,23 +376,39 @@ export const AttendanceScreen: React.FC = () => {
   const isClockedIn = todayData?.activeState === 'CLOCKED_IN';
   const isOnBreak = todayData?.activeState === 'ON_BREAK';
 
+  // Filtered Team Board
+  const filteredTeamMembers = useMemo(() => {
+    return teamBoard.filter((m) => {
+      const q = teamSearchQuery.toLowerCase();
+      const matchesSearch =
+        !q ||
+        (m.name && m.name.toLowerCase().includes(q)) ||
+        (m.email && m.email.toLowerCase().includes(q)) ||
+        (m.department_name && m.department_name.toLowerCase().includes(q));
+      return matchesSearch;
+    });
+  }, [teamBoard, teamSearchQuery]);
+
   return (
-    <View style={styles.screen}>
+    <ScreenWrapper dark={false} edges={['left', 'right']} statusBarStyle="light-content">
+      {/* Curved App Header */}
       <AppHeader
         title="Attendance & Shifts"
+        showBack={true}
         onBackPress={() => navigation.goBack()}
-        showBack
+        backgroundColor={theme.colors.primary}
+        curveRadius={65}
       />
 
-      {/* Primary Sub Tabs */}
+      {/* Primary Sub Tabs Header */}
       <View style={styles.tabsHeader}>
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'today' && styles.tabButtonActive]}
           onPress={() => setActiveTab('today')}
         >
-          <Clock size={14} color={activeTab === 'today' ? '#FFFFFF' : '#64748B'} />
+          <Clock size={13} color={activeTab === 'today' ? '#FFFFFF' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'today' && styles.tabTextActive]}>
-            Today Punch
+            Today
           </Text>
         </TouchableOpacity>
 
@@ -268,9 +416,19 @@ export const AttendanceScreen: React.FC = () => {
           style={[styles.tabButton, activeTab === 'history' && styles.tabButtonActive]}
           onPress={() => setActiveTab('history')}
         >
-          <Calendar size={14} color={activeTab === 'history' ? '#FFFFFF' : '#64748B'} />
+          <Calendar size={13} color={activeTab === 'history' ? '#FFFFFF' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>
-            History & Log
+            History
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'adjustments' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('adjustments')}
+        >
+          <FileEdit size={13} color={activeTab === 'adjustments' ? '#FFFFFF' : '#64748B'} />
+          <Text style={[styles.tabText, activeTab === 'adjustments' && styles.tabTextActive]}>
+            Requests
           </Text>
         </TouchableOpacity>
 
@@ -278,16 +436,28 @@ export const AttendanceScreen: React.FC = () => {
           style={[styles.tabButton, activeTab === 'team' && styles.tabButtonActive]}
           onPress={() => setActiveTab('team')}
         >
-          <Users size={14} color={activeTab === 'team' ? '#FFFFFF' : '#64748B'} />
+          <Users size={13} color={activeTab === 'team' ? '#FFFFFF' : '#64748B'} />
           <Text style={[styles.tabText, activeTab === 'team' && styles.tabTextActive]}>
             Team & Shifts
           </Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.mainScroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.mainScroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#17365D']}
+            tintColor="#17365D"
+          />
+        }
+      >
         {/* ========================================================================= */}
-        {/* 1. TODAY'S PUNCH TAB */}
+        {/* 1. TODAY'S PUNCH TAB                                                     */}
         {/* ========================================================================= */}
         {activeTab === 'today' && (
           <View style={styles.tabContentWrap}>
@@ -319,7 +489,7 @@ export const AttendanceScreen: React.FC = () => {
                     ]}
                   >
                     {isClockedIn
-                      ? 'CLOCKED IN & WORKING'
+                      ? 'CLOCKED IN & ACTIVE'
                       : isOnBreak
                       ? 'ON REFRESHMENT BREAK'
                       : 'CLOCKED OUT'}
@@ -338,12 +508,15 @@ export const AttendanceScreen: React.FC = () => {
               {/* Digital Timer Display */}
               <View style={styles.timerDisplay}>
                 <Text style={styles.timerNumbers}>
-                  {isClockedIn ? formatStopwatch(elapsedSeconds) : '00:00:00'}
+                  {isClockedIn
+                    ? formatStopwatch(elapsedSeconds)
+                    : formatStopwatch((todayData?.summary?.total_work_minutes || 0) * 60)}
                 </Text>
                 <Text style={styles.timerLabel}>Total Hours Logged Today</Text>
               </View>
 
               {/* Location Selector */}
+              <Text style={styles.miniLabel}>Work Location</Text>
               <View style={styles.locationSelectorRow}>
                 <TouchableOpacity
                   style={[
@@ -377,35 +550,44 @@ export const AttendanceScreen: React.FC = () => {
                       locationType === 'REMOTE' && styles.locationTextActive,
                     ]}
                   >
-                    Remote
+                    Remote (WFH)
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
                     styles.locationOption,
-                    locationType === 'FIELD' && styles.locationOptionActive,
+                    locationType === 'CLIENT_SITE' && styles.locationOptionActive,
                   ]}
-                  onPress={() => setLocationType('FIELD')}
+                  onPress={() => setLocationType('CLIENT_SITE')}
                 >
-                  <Navigation size={14} color={locationType === 'FIELD' ? '#FFFFFF' : '#475569'} />
+                  <MapPin size={14} color={locationType === 'CLIENT_SITE' ? '#FFFFFF' : '#475569'} />
                   <Text
                     style={[
                       styles.locationText,
-                      locationType === 'FIELD' && styles.locationTextActive,
+                      locationType === 'CLIENT_SITE' && styles.locationTextActive,
                     ]}
                   >
-                    Field
+                    Client Site
                   </Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Punch Note Input */}
+              <TextInput
+                style={styles.notesInput}
+                placeholder="Punch note (e.g. Arrived via shuttle, sprint review)"
+                placeholderTextColor="#94A3B8"
+                value={clockNotes}
+                onChangeText={setClockNotes}
+              />
 
               {/* Primary Clock Buttons */}
               <View style={styles.punchActionRow}>
                 {!isClockedIn && !isOnBreak ? (
                   <TouchableOpacity
                     style={[styles.clockPrimaryBtn, styles.clockInBtn, clocking && styles.btnDisabled]}
-                    onPress={() => handleClockAction('clock_in')}
+                    onPress={() => handleClockAction('CLOCK_IN')}
                     disabled={clocking}
                     activeOpacity={0.85}
                   >
@@ -413,50 +595,67 @@ export const AttendanceScreen: React.FC = () => {
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
                       <>
-                        <Clock size={18} color="#FFFFFF" />
-                        <Text style={styles.clockPrimaryText}>Clock In</Text>
+                        <Play size={18} color="#FFFFFF" />
+                        <Text style={styles.clockPrimaryText}>Clock In for Today</Text>
                       </>
                     )}
                   </TouchableOpacity>
+                ) : isOnBreak ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.clockPrimaryBtn, styles.clockInBtn, clocking && styles.btnDisabled]}
+                      onPress={() => handleClockAction('BREAK_END')}
+                      disabled={clocking}
+                      activeOpacity={0.85}
+                    >
+                      {clocking ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Play size={18} color="#FFFFFF" />
+                          <Text style={styles.clockPrimaryText}>End Break & Resume</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.clockPrimaryBtn, styles.clockOutBtn, clocking && styles.btnDisabled]}
+                      onPress={() => handleClockAction('CLOCK_OUT')}
+                      disabled={clocking}
+                      activeOpacity={0.85}
+                    >
+                      <Square size={16} color="#FFFFFF" />
+                      <Text style={styles.clockPrimaryText}>Clock Out</Text>
+                    </TouchableOpacity>
+                  </>
                 ) : (
-                  <TouchableOpacity
-                    style={[styles.clockPrimaryBtn, styles.clockOutBtn, clocking && styles.btnDisabled]}
-                    onPress={() => handleClockAction('clock_out')}
-                    disabled={clocking}
-                    activeOpacity={0.85}
-                  >
-                    {clocking ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <>
-                        <CheckCircle2 size={18} color="#FFFFFF" />
-                        <Text style={styles.clockPrimaryText}>Clock Out</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
+                  <>
+                    <TouchableOpacity
+                      style={[styles.clockPrimaryBtn, styles.breakBtn, clocking && styles.btnDisabled]}
+                      onPress={() => handleClockAction('BREAK_START')}
+                      disabled={clocking}
+                      activeOpacity={0.85}
+                    >
+                      {clocking ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Coffee size={18} color="#FFFFFF" />
+                          <Text style={styles.clockPrimaryText}>Take Break</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
 
-                {/* Break Controls */}
-                {isClockedIn && (
-                  <TouchableOpacity
-                    style={[styles.breakBtn, clocking && styles.btnDisabled]}
-                    onPress={() => handleClockAction('break_start')}
-                    disabled={clocking}
-                  >
-                    <Coffee size={16} color="#D97706" />
-                    <Text style={styles.breakBtnText}>Take Break</Text>
-                  </TouchableOpacity>
-                )}
-
-                {isOnBreak && (
-                  <TouchableOpacity
-                    style={[styles.breakResumeBtn, clocking && styles.btnDisabled]}
-                    onPress={() => handleClockAction('break_end')}
-                    disabled={clocking}
-                  >
-                    <Coffee size={16} color="#FFFFFF" />
-                    <Text style={styles.breakResumeText}>Resume Work</Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.clockPrimaryBtn, styles.clockOutBtn, clocking && styles.btnDisabled]}
+                      onPress={() => handleClockAction('CLOCK_OUT')}
+                      disabled={clocking}
+                      activeOpacity={0.85}
+                    >
+                      <Square size={16} color="#FFFFFF" />
+                      <Text style={styles.clockPrimaryText}>Clock Out</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
             </View>
@@ -466,8 +665,8 @@ export const AttendanceScreen: React.FC = () => {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>First Punch In</Text>
                 <Text style={styles.metricValue}>
-                  {todayData?.summary?.in_time
-                    ? new Date(todayData.summary.in_time).toLocaleTimeString([], {
+                  {todayData?.summary?.first_clock_in
+                    ? new Date(todayData.summary.first_clock_in).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
                       })
@@ -478,8 +677,8 @@ export const AttendanceScreen: React.FC = () => {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Last Punch Out</Text>
                 <Text style={styles.metricValue}>
-                  {todayData?.summary?.out_time
-                    ? new Date(todayData.summary.out_time).toLocaleTimeString([], {
+                  {todayData?.summary?.last_clock_out
+                    ? new Date(todayData.summary.last_clock_out).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
                       })
@@ -495,9 +694,16 @@ export const AttendanceScreen: React.FC = () => {
               </View>
 
               <View style={styles.metricCard}>
-                <Text style={styles.metricLabel}>Break Mins</Text>
-                <Text style={[styles.metricValue, styles.textAmber]}>
-                  {todayData?.summary?.total_break_minutes || 0}m
+                <Text style={styles.metricLabel}>Late Arrival</Text>
+                <Text
+                  style={[
+                    styles.metricValue,
+                    (todayData?.summary?.late_minutes || 0) > 0 ? styles.textAmber : styles.textGreen,
+                  ]}
+                >
+                  {(todayData?.summary?.late_minutes || 0) > 0
+                    ? `+${todayData?.summary?.late_minutes}m Late`
+                    : 'On Time'}
                 </Text>
               </View>
             </View>
@@ -506,29 +712,32 @@ export const AttendanceScreen: React.FC = () => {
             <View style={styles.shiftCard}>
               <View style={styles.shiftHeader}>
                 <Briefcase size={16} color="#17365D" />
-                <Text style={styles.shiftTitle}>Assigned Work Schedule</Text>
+                <Text style={styles.shiftTitle}>Assigned Shift Schedule</Text>
               </View>
               <View style={styles.shiftDetailsRow}>
                 <View style={styles.shiftCol}>
                   <Text style={styles.shiftSublabel}>Shift Name</Text>
-                  <Text style={styles.shiftValue}>{todayData?.shift?.name || 'General Standard'}</Text>
+                  <Text style={styles.shiftValue}>
+                    {todayData?.schedule?.name || 'Standard General Shift'}
+                  </Text>
                 </View>
                 <View style={styles.shiftCol}>
                   <Text style={styles.shiftSublabel}>Working Window</Text>
                   <Text style={styles.shiftValue}>
-                    {todayData?.shift?.start_time || '09:00'} - {todayData?.shift?.end_time || '18:00'}
+                    {todayData?.schedule?.start_time?.slice(0, 5) || '09:00'} -{' '}
+                    {todayData?.schedule?.end_time?.slice(0, 5) || '18:00'}
                   </Text>
                 </View>
                 <View style={styles.shiftCol}>
-                  <Text style={styles.shiftSublabel}>Grace Period</Text>
+                  <Text style={styles.shiftSublabel}>Grace Window</Text>
                   <Text style={styles.shiftValue}>
-                    {todayData?.shift?.grace_period_mins || 15} mins
+                    {todayData?.schedule?.grace_period_minutes ?? 15} mins
                   </Text>
                 </View>
               </View>
             </View>
 
-            {/* Request Regularization Action */}
+            {/* Request Regularization Action Banner */}
             <TouchableOpacity
               style={styles.requestAdjCard}
               onPress={() => setIsAdjModalOpen(true)}
@@ -545,20 +754,74 @@ export const AttendanceScreen: React.FC = () => {
               </View>
               <ArrowRight size={16} color="#94A3B8" />
             </TouchableOpacity>
+
+            {/* Today's Activity Log (Punch Events Timeline) */}
+            <View style={styles.timelineCard}>
+              <View style={styles.timelineHeader}>
+                <Clock size={16} color="#17365D" />
+                <Text style={styles.timelineTitle}>Today's Activity Log</Text>
+              </View>
+
+              {loadingToday ? (
+                <ActivityIndicator size="small" color="#17365D" style={{ marginVertical: 12 }} />
+              ) : !todayData?.events || todayData.events.length === 0 ? (
+                <Text style={styles.timelineEmptyText}>
+                  No clock events recorded for today yet. Use the Clock In button above.
+                </Text>
+              ) : (
+                <View style={styles.timelineList}>
+                  {todayData.events.map((ev, i) => (
+                    <View key={ev.id || i} style={styles.timelineRow}>
+                      <View
+                        style={[
+                          styles.timelineDot,
+                          ev.event_type === 'CLOCK_IN'
+                            ? styles.timelineDotGreen
+                            : ev.event_type === 'CLOCK_OUT'
+                            ? styles.timelineDotRed
+                            : styles.timelineDotAmber,
+                        ]}
+                      />
+                      <View style={styles.timelineBody}>
+                        <View style={styles.timelineMetaRow}>
+                          <Text style={styles.timelineEventName}>
+                            {ev.event_type.replace('_', ' ')}
+                          </Text>
+                          <Text style={styles.timelineTimeText}>
+                            {new Date(ev.event_time).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}
+                          </Text>
+                        </View>
+                        <View style={styles.timelineDetailsRow}>
+                          <Text style={styles.timelineLocationBadge}>
+                            {ev.location_type || 'OFFICE'}
+                          </Text>
+                          {Boolean(ev.notes) && (
+                            <Text style={styles.timelineNotesText} numberOfLines={1}>
+                              "{ev.notes}"
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
           </View>
         )}
 
         {/* ========================================================================= */}
-        {/* 2. MONTHLY HISTORY TAB */}
+        {/* 2. MONTHLY HISTORY TAB                                                   */}
         {/* ========================================================================= */}
         {activeTab === 'history' && (
           <View style={styles.tabContentWrap}>
             {/* Month Navigator */}
             <View style={styles.monthNavRow}>
-              <TouchableOpacity
-                style={styles.monthNavBtn}
-                onPress={() => changeMonth(-1)}
-              >
+              <TouchableOpacity style={styles.monthNavBtn} onPress={() => changeMonth(-1)}>
                 <ChevronLeft size={18} color="#17365D" />
               </TouchableOpacity>
               <Text style={styles.monthNavTitle}>
@@ -567,10 +830,7 @@ export const AttendanceScreen: React.FC = () => {
                   year: 'numeric',
                 })}
               </Text>
-              <TouchableOpacity
-                style={styles.monthNavBtn}
-                onPress={() => changeMonth(1)}
-              >
+              <TouchableOpacity style={styles.monthNavBtn} onPress={() => changeMonth(1)}>
                 <ChevronRight size={18} color="#17365D" />
               </TouchableOpacity>
             </View>
@@ -578,28 +838,28 @@ export const AttendanceScreen: React.FC = () => {
             {/* Monthly Stats Summary Row */}
             <View style={styles.historyStatsGrid}>
               <View style={styles.statBox}>
-                <Text style={styles.statNum}>{historyData?.stats?.present_days ?? 0}</Text>
+                <Text style={styles.statNum}>{historyData?.stats?.presentCount ?? 0}</Text>
                 <Text style={[styles.statLabel, styles.statGreen]}>Present</Text>
               </View>
 
               <View style={styles.statBox}>
-                <Text style={styles.statNum}>{historyData?.stats?.late_days ?? 0}</Text>
+                <Text style={styles.statNum}>{historyData?.stats?.lateCount ?? 0}</Text>
                 <Text style={[styles.statLabel, styles.statAmber]}>Late</Text>
               </View>
 
               <View style={styles.statBox}>
-                <Text style={styles.statNum}>{historyData?.stats?.half_days ?? 0}</Text>
+                <Text style={styles.statNum}>{historyData?.stats?.halfDayCount ?? 0}</Text>
                 <Text style={[styles.statLabel, styles.statSky]}>Half Day</Text>
               </View>
 
               <View style={styles.statBox}>
-                <Text style={styles.statNum}>{historyData?.stats?.absent_days ?? 0}</Text>
-                <Text style={[styles.statLabel, styles.statRed]}>Absent</Text>
+                <Text style={styles.statNum}>{historyData?.stats?.totalWorkHours ?? '0.0'}h</Text>
+                <Text style={[styles.statLabel, styles.statBlue]}>Total Hrs</Text>
               </View>
 
               <View style={styles.statBox}>
-                <Text style={styles.statNum}>{historyData?.stats?.total_work_hours ?? 0}h</Text>
-                <Text style={[styles.statLabel, styles.statBlue]}>Total Hrs</Text>
+                <Text style={styles.statNum}>{historyData?.stats?.averageDailyHours ?? '0.0'}h</Text>
+                <Text style={[styles.statLabel, styles.statIndigo]}>Avg/Day</Text>
               </View>
             </View>
 
@@ -618,14 +878,14 @@ export const AttendanceScreen: React.FC = () => {
                 </Text>
               </View>
             ) : (
-              historyData.records.map((r) => {
+              historyData.records.map((r, idx) => {
                 const isPresent = r.status === 'PRESENT';
                 const isLate = r.status === 'LATE';
                 const isHalfDay = r.status === 'HALF_DAY';
                 const isAbsent = r.status === 'ABSENT';
 
                 return (
-                  <View key={r.id || r.work_date} style={styles.historyRowCard}>
+                  <View key={r.id || r.work_date || idx} style={styles.historyRowCard}>
                     <View style={styles.historyDateCol}>
                       <Text style={styles.historyDayName}>
                         {new Date(r.work_date).toLocaleDateString([], { weekday: 'short' })}
@@ -638,16 +898,19 @@ export const AttendanceScreen: React.FC = () => {
                     <View style={styles.historyTimeCol}>
                       <View style={styles.historyPunchTimes}>
                         <Text style={styles.historyPunchText}>
-                          In: {r.clock_in ? r.clock_in.slice(0, 5) : '--:--'}
+                          In: {r.first_clock_in ? new Date(r.first_clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                         </Text>
                         <Text style={styles.historyPunchSeparator}>•</Text>
                         <Text style={styles.historyPunchText}>
-                          Out: {r.clock_out ? r.clock_out.slice(0, 5) : '--:--'}
+                          Out: {r.last_clock_out ? new Date(r.last_clock_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                         </Text>
                       </View>
                       <Text style={styles.historyDurationText}>
-                        Total: {Math.round((r.total_work_minutes || 0) / 60 * 10) / 10} hrs
+                        Duration: {Math.round(((r.total_work_minutes || 0) / 60) * 10) / 10} hrs • Break: {r.total_break_minutes || 0}m
                       </Text>
+                      {Boolean(r.is_regularized) && (
+                        <Text style={styles.regularizedTag}>✓ Regularized</Text>
+                      )}
                     </View>
 
                     <View
@@ -679,101 +942,406 @@ export const AttendanceScreen: React.FC = () => {
         )}
 
         {/* ========================================================================= */}
-        {/* 3. TEAM & SHIFTS TAB */}
+        {/* 3. ADJUSTMENTS / REGULARIZATION REQUESTS TAB                             */}
         {/* ========================================================================= */}
-        {activeTab === 'team' && (
+        {activeTab === 'adjustments' && (
           <View style={styles.tabContentWrap}>
-            {/* Work Schedules Section */}
-            <Text style={styles.sectionHeaderTitle}>Organization Shifts</Text>
-            {schedules.map((s) => (
-              <View key={s.id} style={styles.scheduleCard}>
-                <View style={styles.scheduleHeaderRow}>
-                  <Text style={styles.scheduleName}>{s.name}</Text>
-                  {s.is_default && (
-                    <View style={styles.defaultPill}>
-                      <Text style={styles.defaultPillText}>DEFAULT</Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.scheduleGrid}>
-                  <View style={styles.scheduleGridItem}>
-                    <Text style={styles.schedItemLabel}>Start Time</Text>
-                    <Text style={styles.schedItemVal}>{s.start_time}</Text>
-                  </View>
-                  <View style={styles.scheduleGridItem}>
-                    <Text style={styles.schedItemLabel}>End Time</Text>
-                    <Text style={styles.schedItemVal}>{s.end_time}</Text>
-                  </View>
-                  <View style={styles.scheduleGridItem}>
-                    <Text style={styles.schedItemLabel}>Grace Window</Text>
-                    <Text style={styles.schedItemVal}>{s.grace_period_minutes ?? 15}m</Text>
-                  </View>
-                  <View style={styles.scheduleGridItem}>
-                    <Text style={styles.schedItemLabel}>Full Day</Text>
-                    <Text style={styles.schedItemVal}>{s.full_day_hours ?? 8}h</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
+            {/* Header / SubTab Row */}
+            <View style={styles.subTabsRow}>
+              <TouchableOpacity
+                style={[styles.subTabPill, adjustmentsSubTab === 'my' && styles.subTabPillActive]}
+                onPress={() => setAdjustmentsSubTab('my')}
+              >
+                <Text
+                  style={[
+                    styles.subTabPillText,
+                    adjustmentsSubTab === 'my' && styles.subTabPillTextActive,
+                  ]}
+                >
+                  My Requests ({myAdjustments.length})
+                </Text>
+              </TouchableOpacity>
 
-            {/* Team Live Status Section */}
-            <Text style={[styles.sectionHeaderTitle, styles.mt16]}>
-              Team Live Status ({teamBoard.length})
-            </Text>
-            {teamBoard.map((member) => {
-              const isWorking = member.status === 'CLOCKED_IN';
-              const onBreak = member.status === 'ON_BREAK';
-
-              return (
-                <View key={member.id} style={styles.memberCard}>
-                  <View style={styles.memberAvatar}>
-                    <Text style={styles.memberAvatarText}>
-                      {member.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-
-                  <View style={styles.memberInfo}>
-                    <Text style={styles.memberName}>{member.name}</Text>
-                    <Text style={styles.memberDept}>
-                      {member.department_name || 'All Departments'}
-                    </Text>
-                  </View>
-
-                  <View
+              {isAdmin && (
+                <TouchableOpacity
+                  style={[
+                    styles.subTabPill,
+                    adjustmentsSubTab === 'manager' && styles.subTabPillActive,
+                  ]}
+                  onPress={() => setAdjustmentsSubTab('manager')}
+                >
+                  <Text
                     style={[
-                      styles.memberStatusPill,
-                      isWorking && styles.statusPillGreen,
-                      onBreak && styles.statusPillAmber,
-                      !isWorking && !onBreak && styles.statusPillGray,
+                      styles.subTabPillText,
+                      adjustmentsSubTab === 'manager' && styles.subTabPillTextActive,
                     ]}
+                  >
+                    Manager Queue ({managerQueue.length})
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Quick Action Button */}
+            {/* <TouchableOpacity
+              style={styles.newAdjBtn}
+              onPress={() => setIsAdjModalOpen(true)}
+              activeOpacity={0.8}
+            >
+              <FileEdit size={16} color="#FFFFFF" />
+              <Text style={styles.newAdjBtnText}>Submit New Regularization Requestff</Text>
+            </TouchableOpacity> */}
+
+            {/* Status Filter for Manager Queue */}
+            {adjustmentsSubTab === 'manager' && (
+              <View style={styles.statusFilterRow}>
+                {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((st) => (
+                  <TouchableOpacity
+                    key={st}
+                    style={[
+                      styles.filterChip,
+                      queueStatusFilter === st && styles.filterChipActive,
+                    ]}
+                    onPress={() => setQueueStatusFilter(st)}
                   >
                     <Text
                       style={[
-                        styles.memberStatusText,
-                        isWorking && styles.statusTextGreen,
-                        onBreak && styles.statusTextAmber,
-                        !isWorking && !onBreak && styles.statusTextGray,
+                        styles.filterChipText,
+                        queueStatusFilter === st && styles.filterChipTextActive,
                       ]}
                     >
-                      {member.status.replace('_', ' ')}
+                      {st}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Content List */}
+            {loadingAdjustments ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={styles.loadingText}>Loading requests...</Text>
+              </View>
+            ) : (adjustmentsSubTab === 'my' ? myAdjustments : managerQueue).length === 0 ? (
+              <View style={styles.emptyCard}>
+                <FileEdit size={32} color="#94A3B8" />
+                <Text style={styles.emptyTitle}>No Adjustment Requests</Text>
+                <Text style={styles.emptySubtitle}>
+                  {adjustmentsSubTab === 'my'
+                    ? "You haven't submitted any regularization requests yet."
+                    : 'No pending adjustment requests in your manager queue.'}
+                </Text>
+              </View>
+            ) : (
+              (adjustmentsSubTab === 'my' ? myAdjustments : managerQueue).map((req) => {
+                const isPending = req.status === 'PENDING';
+                const isApproved = req.status === 'APPROVED';
+                const isRejected = req.status === 'REJECTED';
+
+                return (
+                  <View key={req.id} style={styles.adjCard}>
+                    <View style={styles.adjCardHeader}>
+                      <View>
+                        {adjustmentsSubTab === 'manager' && Boolean(req.user_name) && (
+                          <Text style={styles.adjEmployeeName}>
+                            {req.user_name} ({req.department_name || 'Staff'})
+                          </Text>
+                        )}
+                        <Text style={styles.adjWorkDate}>
+                          Date: {new Date(req.work_date).toLocaleDateString([], {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.adjStatusBadge,
+                          isPending && styles.adjStatusPending,
+                          isApproved && styles.adjStatusApproved,
+                          isRejected && styles.adjStatusRejected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.adjStatusBadgeText,
+                            isPending && styles.adjTextPending,
+                            isApproved && styles.adjTextApproved,
+                            isRejected && styles.adjTextRejected,
+                          ]}
+                        >
+                          {req.status}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.adjHoursRow}>
+                      <Text style={styles.adjHoursLabel}>Requested In/Out:</Text>
+                      <Text style={styles.adjHoursValue}>
+                        {req.requested_clock_in?.slice(0, 5)} — {req.requested_clock_out?.slice(0, 5)}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.adjReasonText}>"{req.reason}"</Text>
+
+                    {Boolean(req.reviewer_comment) && (
+                      <View style={styles.reviewerCommentBox}>
+                        <Text style={styles.reviewerCommentLabel}>Manager Comment:</Text>
+                        <Text style={styles.reviewerCommentText}>{req.reviewer_comment}</Text>
+                      </View>
+                    )}
+
+                    {adjustmentsSubTab === 'manager' && isPending && (
+                      <TouchableOpacity
+                        style={styles.reviewBtn}
+                        onPress={() => {
+                          setReviewModalItem(req);
+                          setReviewerComment('');
+                        }}
+                      >
+                        <ShieldCheck size={14} color="#FFFFFF" />
+                        <Text style={styles.reviewBtnText}>Review & Decision</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
+        {/* ========================================================================= */}
+        {/* 4. TEAM PRESENCE & SHIFTS TAB                                            */}
+        {/* ========================================================================= */}
+        {activeTab === 'team' && (
+          <View style={styles.tabContentWrap}>
+            {/* SubTab Switcher: Team Presence vs Organization Schedules */}
+            <View style={styles.subTabsRow}>
+              <TouchableOpacity
+                style={[styles.subTabPill, teamSubTab === 'board' && styles.subTabPillActive]}
+                onPress={() => setTeamSubTab('board')}
+              >
+                <Text
+                  style={[
+                    styles.subTabPillText,
+                    teamSubTab === 'board' && styles.subTabPillTextActive,
+                  ]}
+                >
+                  Live Presence ({teamBoard.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.subTabPill, teamSubTab === 'schedules' && styles.subTabPillActive]}
+                onPress={() => setTeamSubTab('schedules')}
+              >
+                <Text
+                  style={[
+                    styles.subTabPillText,
+                    teamSubTab === 'schedules' && styles.subTabPillTextActive,
+                  ]}
+                >
+                  Work Shifts ({schedules.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {teamSubTab === 'board' && (
+              <>
+                {/* Search Bar */}
+                <View style={styles.searchContainer}>
+                  <Search size={16} color="#94A3B8" />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search colleague by name or department..."
+                    placeholderTextColor="#94A3B8"
+                    value={teamSearchQuery}
+                    onChangeText={setTeamSearchQuery}
+                  />
+                  {teamSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setTeamSearchQuery('')}>
+                      <X size={15} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Department Filter Pills */}
+                {departments.length > 0 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.deptFilterScroll}
+                  >
+                    <TouchableOpacity
+                      style={[
+                        styles.deptPill,
+                        selectedDeptId === undefined && styles.deptPillActive,
+                      ]}
+                      onPress={() => setSelectedDeptId(undefined)}
+                    >
+                      <Text
+                        style={[
+                          styles.deptPillText,
+                          selectedDeptId === undefined && styles.deptPillTextActive,
+                        ]}
+                      >
+                        All
+                      </Text>
+                    </TouchableOpacity>
+                    {departments.map((d) => {
+                      const isSel = selectedDeptId === d.id;
+                      return (
+                        <TouchableOpacity
+                          key={d.id}
+                          style={[styles.deptPill, isSel && styles.deptPillActive]}
+                          onPress={() => setSelectedDeptId(d.id)}
+                        >
+                          <Text style={[styles.deptPillText, isSel && styles.deptPillTextActive]}>
+                            {d.department_name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+
+                {/* Team Presence Members Grid */}
+                {loadingTeam ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.loadingText}>Loading presence board...</Text>
+                  </View>
+                ) : filteredTeamMembers.length === 0 ? (
+                  <View style={styles.emptyCard}>
+                    <Users size={32} color="#94A3B8" />
+                    <Text style={styles.emptyTitle}>No Members Found</Text>
+                    <Text style={styles.emptySubtitle}>
+                      No active colleagues match your search criteria.
                     </Text>
                   </View>
-                </View>
-              );
-            })}
+                ) : (
+                  filteredTeamMembers.map((member) => {
+                    const isWorking = member.liveStatus === 'CLOCKED_IN';
+                    const onBreak = member.liveStatus === 'ON_BREAK';
+                    const isOut = member.liveStatus === 'CLOCKED_OUT';
+
+                    return (
+                      <View key={member.user_id} style={styles.memberCard}>
+                        <View style={styles.memberAvatar}>
+                          <Text style={styles.memberAvatarText}>
+                            {(member.name || 'U').charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+
+                        <View style={styles.memberInfo}>
+                          <Text style={styles.memberName}>{member.name}</Text>
+                          <Text style={styles.memberDept}>
+                            {member.department_name || 'Staff'} • {member.totalWorkHours}h today
+                          </Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.memberStatusPill,
+                            isWorking && styles.statusPillGreen,
+                            onBreak && styles.statusPillAmber,
+                            isOut && styles.statusPillGray,
+                            !isWorking && !onBreak && !isOut && styles.statusPillRed,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.memberStatusText,
+                              isWorking && styles.statusTextGreen,
+                              onBreak && styles.statusTextAmber,
+                              isOut && styles.statusTextGray,
+                              !isWorking && !onBreak && !isOut && styles.statusTextRed,
+                            ]}
+                          >
+                            {member.liveStatus.replace('_', ' ')}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </>
+            )}
+
+            {teamSubTab === 'schedules' && (
+              <>
+                <Text style={styles.sectionHeaderTitle}>Company Shift Schedules</Text>
+                {loadingTeam ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                  </View>
+                ) : schedules.length === 0 ? (
+                  <View style={styles.emptyCard}>
+                    <Briefcase size={32} color="#94A3B8" />
+                    <Text style={styles.emptyTitle}>No Schedules Configured</Text>
+                  </View>
+                ) : (
+                  schedules.map((s) => (
+                    <View key={s.id} style={styles.scheduleCard}>
+                      <View style={styles.scheduleHeaderRow}>
+                        <Text style={styles.scheduleName}>{s.name}</Text>
+                        {Boolean(s.is_default) && (
+                          <View style={styles.defaultPill}>
+                            <Text style={styles.defaultPillText}>DEFAULT SHIFT</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.scheduleGrid}>
+                        <View style={styles.scheduleGridItem}>
+                          <Text style={styles.schedItemLabel}>Start Time</Text>
+                          <Text style={styles.schedItemVal}>{s.start_time?.slice(0, 5)}</Text>
+                        </View>
+                        <View style={styles.scheduleGridItem}>
+                          <Text style={styles.schedItemLabel}>End Time</Text>
+                          <Text style={styles.schedItemVal}>{s.end_time?.slice(0, 5)}</Text>
+                        </View>
+                        <View style={styles.scheduleGridItem}>
+                          <Text style={styles.schedItemLabel}>Grace Period</Text>
+                          <Text style={styles.schedItemVal}>{s.grace_period_minutes ?? 15}m</Text>
+                        </View>
+                        <View style={styles.scheduleGridItem}>
+                          <Text style={styles.schedItemLabel}>Break Allowed</Text>
+                          <Text style={styles.schedItemVal}>{s.break_duration_minutes ?? 60}m</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </>
+            )}
           </View>
         )}
       </ScrollView>
 
-      {/* Regularization / Adjustment Modal */}
+      {/* ────────────────────────────────────────────────────────
+          MODAL 1: REQUEST ATTENDANCE REGULARIZATION
+      ──────────────────────────────────────────────────────── */}
       <Modal
         visible={isAdjModalOpen}
         transparent
         animationType="slide"
         onRequestClose={() => setIsAdjModalOpen(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsAdjModalOpen(false)}
+        >
+          <View
+            style={[
+              styles.modalCard,
+              { paddingBottom: Math.max(insets.bottom, 24) + 16 },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Request Regularization</Text>
@@ -786,19 +1354,19 @@ export const AttendanceScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalBody}>
-              <Text style={styles.inputLabel}>Work Date (YYYY-MM-DD)</Text>
+            <ScrollView style={styles.modalBodyScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.inputLabel}>Work Date (YYYY-MM-DD) *</Text>
               <TextInput
                 style={styles.textInput}
                 value={adjDate}
                 onChangeText={setAdjDate}
-                placeholder="2026-11-25"
+                placeholder="2026-11-27"
                 placeholderTextColor="#94A3B8"
               />
 
               <View style={styles.inputRow}>
                 <View style={styles.inputCol}>
-                  <Text style={styles.inputLabel}>Requested In Time</Text>
+                  <Text style={styles.inputLabel}>Requested In Time *</Text>
                   <TextInput
                     style={styles.textInput}
                     value={adjInTime}
@@ -808,7 +1376,7 @@ export const AttendanceScreen: React.FC = () => {
                   />
                 </View>
                 <View style={styles.inputCol}>
-                  <Text style={styles.inputLabel}>Requested Out Time</Text>
+                  <Text style={styles.inputLabel}>Requested Out Time *</Text>
                   <TextInput
                     style={styles.textInput}
                     value={adjOutTime}
@@ -819,19 +1387,17 @@ export const AttendanceScreen: React.FC = () => {
                 </View>
               </View>
 
-              <Text style={styles.inputLabel}>
-                Reason for Adjustment <Text style={styles.requiredAsterisk}>*</Text>
-              </Text>
+              <Text style={styles.inputLabel}>Reason / Justification *</Text>
               <TextInput
                 style={[styles.textInput, styles.textArea]}
                 value={adjReason}
                 onChangeText={setAdjReason}
-                placeholder="Forgot to swipe / on-site client visit..."
+                placeholder="e.g. Biometric scanner issue, client site visit, power outage..."
                 placeholderTextColor="#94A3B8"
                 multiline
                 numberOfLines={3}
               />
-            </View>
+            </ScrollView>
 
             <View style={styles.modalFooter}>
               <TouchableOpacity
@@ -854,22 +1420,105 @@ export const AttendanceScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
       </Modal>
-    </View>
+
+      {/* ────────────────────────────────────────────────────────
+          MODAL 2: REVIEW REGULARIZATION REQUEST (MANAGER)
+      ──────────────────────────────────────────────────────── */}
+      <Modal
+        visible={Boolean(reviewModalItem)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReviewModalItem(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setReviewModalItem(null)}
+        >
+          <View
+            style={[
+              styles.modalCard,
+              { paddingBottom: Math.max(insets.bottom, 24) + 16 },
+            ]}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Review Attendance Request</Text>
+                <Text style={styles.modalSubtitle}>
+                  {reviewModalItem?.user_name} ({reviewModalItem?.department_name || 'Staff'})
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setReviewModalItem(null)}>
+                <X size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {reviewModalItem && (
+              <View style={styles.modalBody}>
+                <View style={styles.reviewMetaBox}>
+                  <Text style={styles.reviewMetaRow}>
+                    <Text style={styles.boldLabel}>Date: </Text>
+                    {new Date(reviewModalItem.work_date).toLocaleDateString()}
+                  </Text>
+                  <Text style={styles.reviewMetaRow}>
+                    <Text style={styles.boldLabel}>Requested In/Out: </Text>
+                    {reviewModalItem.requested_clock_in?.slice(0, 5)} —{' '}
+                    {reviewModalItem.requested_clock_out?.slice(0, 5)}
+                  </Text>
+                  <Text style={styles.reviewMetaRow}>
+                    <Text style={styles.boldLabel}>Reason: </Text>"{reviewModalItem.reason}"
+                  </Text>
+                </View>
+
+                <Text style={styles.inputLabel}>Reviewer Comment (Optional)</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textAreaSmall]}
+                  placeholder="e.g. Approved per email confirmation"
+                  placeholderTextColor="#94A3B8"
+                  value={reviewerComment}
+                  onChangeText={setReviewerComment}
+                  multiline
+                />
+
+                <View style={styles.reviewActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.rejectBtn, reviewingAction && styles.btnDisabled]}
+                    onPress={() => handleReviewAdjustment('REJECTED')}
+                    disabled={reviewingAction}
+                  >
+                    <Text style={styles.rejectBtnText}>Reject</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.approveBtn, reviewingAction && styles.btnDisabled]}
+                    onPress={() => handleReviewAdjustment('APPROVED')}
+                    disabled={reviewingAction}
+                  >
+                    {reviewingAction ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.approveBtnText}>Approve Request</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
   tabsHeader: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
-    marginTop: -24,
+    marginTop: 10,
     borderRadius: 16,
     padding: 4,
     borderWidth: 1,
@@ -893,18 +1542,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 10,
     borderRadius: 12,
-    gap: 6,
+    gap: 4,
   },
   tabButtonActive: {
     backgroundColor: '#17365D',
   },
   tabText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: theme.typography.weights.semibold,
     color: '#64748B',
   },
   tabTextActive: {
     color: '#FFFFFF',
+    fontWeight: '700',
   },
   mainScroll: {
     flex: 1,
@@ -922,7 +1572,7 @@ const styles = StyleSheet.create({
   punchHeroCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 20,
+    padding: 18,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     alignItems: 'center',
@@ -932,7 +1582,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   statusPill: {
     flexDirection: 'row',
@@ -954,13 +1604,13 @@ const styles = StyleSheet.create({
   },
   statusPillGray: {
     backgroundColor: '#F1F5F9',
-    borderColor: '#CBD5E1',
+    borderColor: '#E2E8F0',
     borderWidth: 1,
   },
   statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   statusDotGreen: {
     backgroundColor: '#10B981',
@@ -973,7 +1623,8 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     fontSize: 10,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
   statusTextGreen: {
     color: '#047857',
@@ -982,63 +1633,92 @@ const styles = StyleSheet.create({
     color: '#B45309',
   },
   statusTextGray: {
-    color: '#64748B',
+    color: '#475569',
   },
   todayDateText: {
     fontSize: 12,
+    fontWeight: '600',
     color: '#64748B',
-    fontWeight: theme.typography.weights.medium,
   },
+
+  /* Timer Display */
   timerDisplay: {
     alignItems: 'center',
-    marginVertical: 12,
+    marginVertical: 8,
   },
   timerNumbers: {
-    fontSize: 38,
-    fontWeight: theme.typography.weights.bold,
+    fontSize: 34,
+    fontWeight: '900',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     color: '#0F172A',
-    fontVariant: ['tabular-nums'],
     letterSpacing: 1,
   },
   timerLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
-    marginTop: 4,
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+
+  /* Location Selector */
+  miniLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    marginBottom: 6,
   },
   locationSelectorRow: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 12,
-    padding: 4,
-    gap: 6,
+    gap: 8,
     width: '100%',
-    marginVertical: 12,
+    marginBottom: 10,
   },
   locationOption: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 8,
-    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
   },
   locationOptionActive: {
     backgroundColor: '#17365D',
+    borderColor: '#17365D',
   },
   locationText: {
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: '600',
     color: '#475569',
-    fontWeight: theme.typography.weights.semibold,
   },
   locationTextActive: {
     color: '#FFFFFF',
+    fontWeight: '700',
   },
+  notesInput: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: '#0F172A',
+    marginBottom: 14,
+  },
+
+  /* Clock Buttons */
   punchActionRow: {
     flexDirection: 'row',
-    width: '100%',
     gap: 10,
-    marginTop: 6,
+    width: '100%',
   },
   clockPrimaryBtn: {
     flex: 1,
@@ -1055,42 +1735,13 @@ const styles = StyleSheet.create({
   clockOutBtn: {
     backgroundColor: '#DC2626',
   },
+  breakBtn: {
+    backgroundColor: '#D97706',
+  },
   clockPrimaryText: {
     color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: theme.typography.weights.bold,
-  },
-  breakBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#FFFBEB',
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    gap: 6,
-  },
-  breakBtnText: {
-    color: '#B45309',
-    fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
-  },
-  breakResumeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#D97706',
-    gap: 6,
-  },
-  breakResumeText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
+    fontSize: 14,
+    fontWeight: '700',
   },
   btnDisabled: {
     opacity: 0.6,
@@ -1099,27 +1750,28 @@ const styles = StyleSheet.create({
   /* Metrics Grid */
   metricsGrid: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 10,
   },
   metricCard: {
     flex: 1,
-    minWidth: '45%',
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    padding: 14,
+    padding: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    alignItems: 'center',
   },
   metricLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#64748B',
-    marginBottom: 4,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   metricValue: {
-    fontSize: 16,
-    fontWeight: theme.typography.weights.bold,
+    fontSize: 14,
+    fontWeight: '800',
     color: '#0F172A',
+    marginTop: 4,
   },
   textBlue: {
     color: '#2563EB',
@@ -1127,12 +1779,15 @@ const styles = StyleSheet.create({
   textAmber: {
     color: '#D97706',
   },
+  textGreen: {
+    color: '#059669',
+  },
 
   /* Shift Card */
   shiftCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
@@ -1140,16 +1795,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   shiftTitle: {
     fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '700',
     color: '#0F172A',
   },
   shiftDetailsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
   },
   shiftCol: {
     flex: 1,
@@ -1157,40 +1815,132 @@ const styles = StyleSheet.create({
   shiftSublabel: {
     fontSize: 10,
     color: '#64748B',
-    textTransform: 'uppercase',
   },
   shiftValue: {
     fontSize: 12,
-    fontWeight: theme.typography.weights.semibold,
-    color: '#1E293B',
+    fontWeight: '700',
+    color: '#0F172A',
     marginTop: 2,
   },
 
-  /* Request Regularization Action */
+  /* Request Banner */
   requestAdjCard: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 14,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
   },
   requestAdjLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
   },
   requestAdjTitle: {
     fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
-    color: '#0F172A',
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
   requestAdjSubtitle: {
     fontSize: 11,
+    color: '#3B82F6',
+    marginTop: 1,
+  },
+
+  /* Timeline Activity Card */
+  timelineCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  timelineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  timelineTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  timelineEmptyText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginVertical: 14,
+  },
+  timelineList: {
+    gap: 12,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  timelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 4,
+  },
+  timelineDotGreen: {
+    backgroundColor: '#10B981',
+  },
+  timelineDotRed: {
+    backgroundColor: '#EF4444',
+  },
+  timelineDotAmber: {
+    backgroundColor: '#F59E0B',
+  },
+  timelineBody: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+  },
+  timelineMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timelineEventName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  timelineTimeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  timelineDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  timelineLocationBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#2563EB',
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  timelineNotesText: {
+    fontSize: 11,
     color: '#64748B',
-    marginTop: 2,
+    fontStyle: 'italic',
+    flex: 1,
   },
 
   /* Month Navigator */
@@ -1200,63 +1950,74 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    padding: 10,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   monthNavBtn: {
-    padding: 6,
+    padding: 8,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
   },
   monthNavTitle: {
     fontSize: 14,
-    fontWeight: theme.typography.weights.bold,
-    color: '#17365D',
+    fontWeight: '700',
+    color: '#0F172A',
   },
 
   /* History Stats Grid */
   historyStatsGrid: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    justifyContent: 'space-around',
+    gap: 8,
   },
   statBox: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 8,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   statNum: {
-    fontSize: 16,
-    fontWeight: theme.typography.weights.bold,
+    fontSize: 15,
+    fontWeight: '800',
     color: '#0F172A',
   },
   statLabel: {
     fontSize: 10,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '700',
     marginTop: 2,
   },
-  statGreen: { color: '#10B981' },
-  statAmber: { color: '#F59E0B' },
-  statSky: { color: '#0284C7' },
-  statRed: { color: '#EF4444' },
-  statBlue: { color: '#2563EB' },
+  statGreen: {
+    color: '#059669',
+  },
+  statAmber: {
+    color: '#D97706',
+  },
+  statSky: {
+    color: '#0284C7',
+  },
+  statBlue: {
+    color: '#2563EB',
+  },
+  statIndigo: {
+    color: '#4F46E5',
+  },
 
   /* History Row Card */
   historyRowCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   historyDateCol: {
-    alignItems: 'center',
     width: 44,
+    alignItems: 'center',
     paddingRight: 10,
     borderRightWidth: 1,
     borderRightColor: '#F1F5F9',
@@ -1264,11 +2025,12 @@ const styles = StyleSheet.create({
   historyDayName: {
     fontSize: 10,
     color: '#64748B',
+    fontWeight: '600',
     textTransform: 'uppercase',
   },
   historyDateNum: {
-    fontSize: 16,
-    fontWeight: theme.typography.weights.bold,
+    fontSize: 18,
+    fontWeight: '800',
     color: '#0F172A',
   },
   historyTimeCol: {
@@ -1282,130 +2044,304 @@ const styles = StyleSheet.create({
   },
   historyPunchText: {
     fontSize: 12,
-    fontWeight: theme.typography.weights.semibold,
+    fontWeight: '700',
     color: '#1E293B',
   },
   historyPunchSeparator: {
-    color: '#CBD5E1',
+    color: '#94A3B8',
   },
   historyDurationText: {
     fontSize: 11,
     color: '#64748B',
     marginTop: 2,
   },
+  regularizedTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#059669',
+    marginTop: 2,
+  },
   historyStatusPill: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   historyStatusText: {
     fontSize: 10,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '800',
   },
   statusPillSky: {
     backgroundColor: '#F0F9FF',
     borderColor: '#BAE6FD',
     borderWidth: 1,
   },
+  statusTextSky: {
+    color: '#0369A1',
+  },
   statusPillRed: {
     backgroundColor: '#FEF2F2',
     borderColor: '#FECACA',
     borderWidth: 1,
   },
-  statusTextSky: {
-    color: '#0284C7',
-  },
   statusTextRed: {
-    color: '#DC2626',
+    color: '#B91C1C',
   },
 
-  /* Team & Shifts */
-  sectionHeaderTitle: {
-    fontSize: 14,
-    fontWeight: theme.typography.weights.bold,
-    color: '#0F172A',
-    marginBottom: 4,
+  /* SubTabs Row */
+  subTabsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
   },
-  mt16: {
-    marginTop: 16,
+  subTabPill: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
   },
-  scheduleCard: {
+  subTabPillActive: {
+    backgroundColor: '#17365D',
+  },
+  subTabPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  subTabPillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  newAdjBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#17365D',
+    borderRadius: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  newAdjBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  /* Status Filter Chips */
+  statusFilterRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterChipActive: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#2563EB',
+  },
+  filterChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  filterChipTextActive: {
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+
+  /* Adjustment Card */
+  adjCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+  },
+  adjCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 8,
   },
-  scheduleHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  scheduleName: {
-    fontSize: 14,
-    fontWeight: theme.typography.weights.bold,
+  adjEmployeeName: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#0F172A',
   },
-  defaultPill: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+  adjWorkDate: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  adjStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 6,
   },
-  defaultPillText: {
-    fontSize: 9,
-    fontWeight: theme.typography.weights.bold,
-    color: '#4338CA',
+  adjStatusPending: {
+    backgroundColor: '#FEF3C7',
   },
-  scheduleGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  adjStatusApproved: {
+    backgroundColor: '#D1FAE5',
   },
-  scheduleGridItem: {
-    flex: 1,
+  adjStatusRejected: {
+    backgroundColor: '#FEE2E2',
   },
-  schedItemLabel: {
+  adjStatusBadgeText: {
     fontSize: 10,
-    color: '#64748B',
+    fontWeight: '800',
   },
-  schedItemVal: {
-    fontSize: 12,
-    fontWeight: theme.typography.weights.bold,
-    color: '#1E293B',
-    marginTop: 2,
+  adjTextPending: {
+    color: '#92400E',
   },
-  memberCard: {
+  adjTextApproved: {
+    color: '#065F46',
+  },
+  adjTextRejected: {
+    color: '#991B1B',
+  },
+  adjHoursRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  adjHoursLabel: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  adjHoursValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  adjReasonText: {
+    fontSize: 12,
+    color: '#334155',
+    fontStyle: 'italic',
+    backgroundColor: '#F8FAFC',
+    padding: 8,
+    borderRadius: 8,
+  },
+  reviewerCommentBox: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 8,
+  },
+  reviewerCommentLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  reviewerCommentText: {
+    fontSize: 11,
+    color: '#15803D',
+    marginTop: 2,
+  },
+  reviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    borderRadius: 10,
+    paddingVertical: 8,
+    gap: 6,
+    marginTop: 10,
+  },
+  reviewBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  /* Search & Dept Filters */
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#0F172A',
+    padding: 0,
+  },
+  deptFilterScroll: {
+    gap: 6,
+    paddingVertical: 2,
+  },
+  deptPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  deptPillActive: {
+    backgroundColor: '#17365D',
+    borderColor: '#17365D',
+  },
+  deptPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  deptPillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  /* Member Card */
+  memberCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     padding: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   memberAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2563EB',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   memberAvatarText: {
     fontSize: 14,
-    fontWeight: theme.typography.weights.bold,
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#2563EB',
   },
   memberInfo: {
     flex: 1,
   },
   memberName: {
     fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '700',
     color: '#0F172A',
   },
   memberDept: {
@@ -1416,49 +2352,74 @@ const styles = StyleSheet.create({
   memberStatusPill: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 6,
   },
   memberStatusText: {
     fontSize: 10,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '800',
   },
 
-  /* Empty & Loading */
-  loadingContainer: {
-    paddingVertical: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+  /* Schedule Cards */
+  sectionHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 4,
   },
-  loadingText: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 8,
-  },
-  emptyCard: {
+  scheduleCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
-  emptyTitle: {
-    fontSize: 15,
-    fontWeight: theme.typography.weights.bold,
-    color: '#0F172A',
-    marginTop: 8,
+  scheduleHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  emptySubtitle: {
-    fontSize: 12,
+  scheduleName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  defaultPill: {
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  defaultPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#1D4ED8',
+  },
+  scheduleGrid: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 8,
+  },
+  scheduleGridItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  schedItemLabel: {
+    fontSize: 10,
     color: '#64748B',
-    textAlign: 'center',
-    marginTop: 4,
+  },
+  schedItemVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 2,
   },
 
-  /* Modal */
+  /* Modals */
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'flex-end',
   },
   modalCard: {
@@ -1466,88 +2427,173 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingTop: 18,
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F1F5F9',
-    paddingBottom: 12,
+    marginBottom: 14,
   },
   modalTitle: {
     fontSize: 16,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '700',
     color: '#0F172A',
   },
   modalSubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#64748B',
-    marginTop: 2,
+    marginTop: 1,
   },
   modalBody: {
-    paddingVertical: 14,
+    gap: 12,
+  },
+  modalBodyScroll: {
+    maxHeight: 380,
   },
   inputLabel: {
     fontSize: 11,
-    fontWeight: theme.typography.weights.bold,
-    color: '#334155',
-    marginBottom: 6,
-    marginTop: 8,
-    textTransform: 'uppercase',
-  },
-  requiredAsterisk: {
-    color: '#EF4444',
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 4,
+    marginTop: 6,
   },
   textInput: {
     backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 12,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
     color: '#0F172A',
   },
   textArea: {
-    height: 70,
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  textAreaSmall: {
+    height: 60,
     textAlignVertical: 'top',
   },
   inputRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   inputCol: {
     flex: 1,
   },
   modalFooter: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingTop: 12,
     gap: 10,
+    marginTop: 16,
   },
   modalCancelBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
   },
   modalCancelText: {
     fontSize: 13,
+    fontWeight: '600',
     color: '#64748B',
-    fontWeight: theme.typography.weights.semibold,
   },
   modalSubmitBtn: {
-    backgroundColor: '#2563EB',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    flex: 2,
+    paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: '#17365D',
+    alignItems: 'center',
   },
   modalSubmitText: {
     fontSize: 13,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: '700',
     color: '#FFFFFF',
+  },
+
+  /* Review Modal Details */
+  reviewMetaBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+    gap: 6,
+  },
+  reviewMetaRow: {
+    fontSize: 12,
+    color: '#334155',
+  },
+  boldLabel: {
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  reviewActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  rejectBtn: {
+    flex: 1,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  rejectBtnText: {
+    color: '#B91C1C',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  approveBtn: {
+    flex: 1,
+    backgroundColor: '#059669',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  approveBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  /* Loading & Empty */
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  emptyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  emptySubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: 240,
   },
 });

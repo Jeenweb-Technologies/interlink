@@ -38,6 +38,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { pick, types, isErrorWithCode, errorCodes } from '@react-native-documents/picker';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { usePermissionStore } from '../../store/permissionStore';
 import { theme } from '../../constants/theme';
 import {
   fetchNotes,
@@ -150,8 +152,25 @@ interface LocalPendingAttachment {
 }
 
 export const NotesScratchpadScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const { user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadNotes =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('notes', 'read');
+
+  if (!canReadNotes) {
+    return (
+      <NoPermissionView
+        moduleName="Notes & Scratchpad"
+        headerTitle="Notes"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
 
   const [activeTab, setActiveTab] = useState<NoteScope>('my_notes');
   const [notes, setNotes] = useState<NoteItem[]>([]);

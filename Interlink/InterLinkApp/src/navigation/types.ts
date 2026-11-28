@@ -1,6 +1,7 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
 
 export type AuthStackParamList = {
+  Landing: undefined;
   Login: undefined;
   DeviceRegistration: {
     username: string;
@@ -49,4 +50,6 @@ export type RootStackParamList = {
   MeetingsScreen: undefined;
   AttendanceScreen: undefined;
   TimesheetsScreen: undefined;
+  CalendarScreen?: { openCreateEvent?: boolean; initialDate?: string };
+  ReminderCenterScreen?: { openCreate?: boolean };
 };

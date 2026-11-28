@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, StatusBar } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuthStore } from '../store/authStore';
 import { AuthNavigator } from './AuthNavigator';
@@ -19,6 +19,8 @@ import { AddMenuScreen } from '../screens/main/AddMenuScreen';
 import { MeetingsScreen } from '../screens/meetings/MeetingsScreen';
 import { AttendanceScreen } from '../screens/attendance/AttendanceScreen';
 import { TimesheetsScreen } from '../screens/timesheets/TimesheetsScreen';
+import { CalendarScreen } from '../screens/calendar/CalendarScreen';
+import { ReminderCenterScreen } from '../screens/reminders/ReminderCenterScreen';
 import { RootStackParamList } from './types';
 import { InterlinkLogo } from '../components/common/InterlinkLogo';
 import { theme } from '../constants/theme';
@@ -27,16 +29,26 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isInitializing } = useAuthStore();
+  const [splashVisible, setSplashVisible] = useState(true);
 
-  if (isInitializing) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSplashVisible(false);
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (isInitializing || splashVisible) {
     return (
       <View style={styles.splashContainer}>
+        <StatusBar barStyle="light-content" />
         <InterlinkLogo size="xl" light subtitle="WORKSPACE PORTAL" />
         <ActivityIndicator
           size="large"
           color={theme.colors.sky}
           style={styles.splashSpinner}
         />
+        <Text style={styles.splashVersion}>Interlink Mobile v1.0.0</Text>
       </View>
     );
   }
@@ -125,6 +137,16 @@ export const RootNavigator: React.FC = () => {
             options={{ animation: 'slide_from_right' }}
           />
           <Stack.Screen
+            name="CalendarScreen"
+            component={CalendarScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="ReminderCenterScreen"
+            component={ReminderCenterScreen}
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
             name="AddMenuScreen"
             component={AddMenuScreen}
             options={{
@@ -146,5 +168,13 @@ const styles = StyleSheet.create({
   },
   splashSpinner: {
     marginTop: theme.spacing.xl,
+  },
+  splashVersion: {
+    position: 'absolute',
+    bottom: 36,
+    fontSize: 12,
+    color: theme.colors.textWhiteMuted,
+    fontWeight: '500',
+    letterSpacing: 0.5,
   },
 });

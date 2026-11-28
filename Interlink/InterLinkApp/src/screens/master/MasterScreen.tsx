@@ -18,7 +18,9 @@ import { theme } from '../../constants/theme';
 import { ScreenWrapper } from '../../components/common/ScreenWrapper';
 import { Card } from '../../components/common/Card';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
 import { MasterStackParamList } from '../../navigation/types';
+import { usePermissionStore } from '../../store/permissionStore';
 
 type MasterScreenNavigationProp = NativeStackNavigationProp<MasterStackParamList, 'MasterHome'>;
 
@@ -27,6 +29,8 @@ interface MasterScreenProps {
 }
 
 export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
+  const { hasPermission, isAdmin } = usePermissionStore();
+
   const masterModules = [
     {
       id: 'user_master',
@@ -46,15 +50,7 @@ export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
       iconBg: 'rgba(2, 132, 199, 0.1)',
       route: 'CompanyMaster' as const,
     },
-    {
-      id: 'usertype_master',
-      title: 'UserType Master',
-      description: 'Configure role archetypes and granular CRUD permissions (Read, Write, Update, Delete).',
-      icon: Shield,
-      iconColor: '#7C3AED',
-      iconBg: 'rgba(124, 58, 237, 0.1)',
-      route: 'UserTypeMaster' as const,
-    },
+    
     {
       id: 'department_master',
       title: 'Department Master',
@@ -64,7 +60,7 @@ export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
       iconBg: 'rgba(13, 148, 136, 0.1)',
       route: 'DepartmentMaster' as const,
     },
-    {
+      {
       id: 'chat_settings_master',
       title: 'Chat Settings Master',
       description: 'Configure corporate chat governance, messaging policies, role permissions, and department scopes.',
@@ -73,6 +69,16 @@ export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
       iconBg: 'rgba(37, 99, 235, 0.1)',
       route: 'ChatSettingsMaster' as const,
     },
+    {
+      id: 'usertype_master',
+      title: 'UserType Master',
+      description: 'Configure role archetypes and granular CRUD permissions (Read, Write, Update, Delete).',
+      icon: Shield,
+      iconColor: '#7C3AED',
+      iconBg: 'rgba(124, 58, 237, 0.1)',
+      route: 'UserTypeMaster' as const,
+    },
+  
   ];
 
   const handleBack = () => {
@@ -83,6 +89,23 @@ export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
       navigation.getParent()?.navigate('HomeTab');
     }
   };
+
+  // Filter master modules based on permissions
+  const allowedMasterModules = masterModules.filter((item) => {
+    if (isAdmin) return true;
+    const permKey = item.id === 'usertype_master' ? 'user_type' : item.id;
+    return hasPermission(permKey, 'read');
+  });
+
+  if (allowedMasterModules.length === 0) {
+    return (
+      <NoPermissionView
+        moduleName="Master Modules"
+        headerTitle="Master"
+        onBackPress={handleBack}
+      />
+    );
+  }
 
   return (
     <ScreenWrapper
@@ -102,9 +125,9 @@ export const MasterScreen: React.FC<MasterScreenProps> = ({ navigation }) => {
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
       >
-        {/* 3 Master Cards */}
+        {/* Master Cards */}
         <View style={styles.cardsContainer}>
-          {masterModules.map((item) => {
+          {allowedMasterModules.map((item) => {
             const IconComponent = item.icon;
             return (
               <TouchableOpacity

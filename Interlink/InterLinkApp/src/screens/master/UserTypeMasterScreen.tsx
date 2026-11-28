@@ -23,6 +23,11 @@ import {
   Check,
   CheckSquare,
   Square,
+  Building2,
+  Users,
+  FolderKanban,
+  Clock,
+  Sparkles,
 } from 'lucide-react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { theme } from '../../constants/theme';
@@ -32,6 +37,9 @@ import { StatusBadge } from '../../components/common/StatusBadge';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { useAuthStore } from '../../store/authStore';
+import { usePermissionStore } from '../../store/permissionStore';
 import {
   fetchUserTypes,
   createUserType,
@@ -44,18 +52,78 @@ import { MasterStackParamList } from '../../navigation/types';
 
 type Props = NativeStackScreenProps<MasterStackParamList, 'UserTypeMaster'>;
 
-export interface MasterConfig {
+export interface MasterItem {
   key: string;
   label: string;
-  hasUpdateDelete: boolean;
+  isApprovalRow?: boolean;
+  isReportRow?: boolean;
 }
 
-export const PERMISSION_MASTERS: MasterConfig[] = [
-  { key: 'user_type', label: 'User Type Master', hasUpdateDelete: true },
-  { key: 'user_master', label: 'User Master', hasUpdateDelete: true },
-  { key: 'device_approval', label: 'Device Approval', hasUpdateDelete: false },
-  { key: 'activity_report', label: 'Activity Report', hasUpdateDelete: true },
+export interface PermissionSection {
+  title: string;
+  icon: string;
+  masters: MasterItem[];
+}
+
+export const PERMISSION_SECTIONS: PermissionSection[] = [
+  {
+    title: 'Organization & System Masters',
+    icon: 'building',
+    masters: [
+      { key: 'company_master', label: 'Company Master' },
+      { key: 'department_master', label: 'Department Master' },
+      { key: 'chat_settings_master', label: 'Chat Settings Master' },
+    ],
+  },
+  {
+    title: 'User & Access Management',
+    icon: 'users',
+    masters: [
+      { key: 'user_type', label: 'User Type Master' },
+      { key: 'user_master', label: 'User Master' },
+      { key: 'device_approval', label: 'Device Approval', isApprovalRow: true },
+      { key: 'activity_report', label: 'Activity Report', isReportRow: true },
+    ],
+  },
+  {
+    title: 'Workspace & Collaboration',
+    icon: 'workspace',
+    masters: [
+      { key: 'projects', label: 'Projects & Portfolio' },
+      { key: 'tasks', label: 'Task Management' },
+      { key: 'notes', label: 'Notes & Scratchpad' },
+      { key: 'chat', label: 'Chat & Communication' },
+      { key: 'meetings', label: 'Meetings & Whiteboard' },
+    ],
+  },
+  {
+    title: 'Operations & HR',
+    icon: 'clock',
+    masters: [
+      { key: 'attendance', label: 'Attendance & Shifts' },
+      { key: 'timesheets', label: 'Timesheets' },
+    ],
+  },
 ];
+
+export const ALL_MASTERS: MasterItem[] = PERMISSION_SECTIONS.flatMap((s) => s.masters);
+export const PERMISSION_MASTERS = ALL_MASTERS;
+
+export type PermKey = 'canRead' | 'canWrite' | 'canUpdate' | 'canDelete';
+
+export const isApprovalRow = (key: string): boolean => key.endsWith('_approval');
+export const isReportRow = (key: string): boolean => key === 'activity_report';
+
+export const getApplicablePerms = (key: string): PermKey[] => {
+  if (isApprovalRow(key)) return ['canRead', 'canWrite'];
+  if (isReportRow(key)) return ['canRead'];
+  return ['canRead', 'canWrite', 'canUpdate', 'canDelete'];
+};
+
+export const TOTAL_APPLICABLE_PERMS = ALL_MASTERS.reduce(
+  (sum, m) => sum + getApplicablePerms(m.key).length,
+  0
+); // 51 total
 
 export interface NormalizedPerm {
   masterName: string;
@@ -66,7 +134,7 @@ export interface NormalizedPerm {
 }
 
 const defaultPerms = (): NormalizedPerm[] =>
-  PERMISSION_MASTERS.map((m) => ({
+  ALL_MASTERS.map((m) => ({
     masterName: m.key,
     canRead: false,
     canWrite: false,
@@ -77,16 +145,17 @@ const defaultPerms = (): NormalizedPerm[] =>
 const normalizePerms = (apiPerms?: UserTypePermission[]): NormalizedPerm[] => {
   if (!apiPerms || apiPerms.length === 0) return defaultPerms();
 
-  return PERMISSION_MASTERS.map((m) => {
+  return ALL_MASTERS.map((m) => {
     const found = apiPerms.find(
       (p) => (p.masterName || p.master_name) === m.key
     );
+    const applicable = getApplicablePerms(m.key);
     return {
       masterName: m.key,
       canRead: Boolean(found?.canRead ?? found?.can_read),
-      canWrite: Boolean(found?.canWrite ?? found?.can_write),
-      canUpdate: m.hasUpdateDelete ? Boolean(found?.canUpdate ?? found?.can_update) : false,
-      canDelete: m.hasUpdateDelete ? Boolean(found?.canDelete ?? found?.can_delete) : false,
+      canWrite: applicable.includes('canWrite') ? Boolean(found?.canWrite ?? found?.can_write) : false,
+      canUpdate: applicable.includes('canUpdate') ? Boolean(found?.canUpdate ?? found?.can_update) : false,
+      canDelete: applicable.includes('canDelete') ? Boolean(found?.canDelete ?? found?.can_delete) : false,
     };
   });
 };
@@ -102,6 +171,24 @@ const formatDate = (dateStr?: string): string => {
 };
 
 export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
+  const { user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadUserType =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('user_type', 'read');
+
+  if (!canReadUserType) {
+    return (
+      <NoPermissionView
+        moduleName="UserType Master"
+        headerTitle="UserType Master"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
   const [userTypes, setUserTypes] = useState<UserTypeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,10 +245,9 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
     setIsModalOpen(true);
   };
 
-  const toggleModalPerm = (
-    masterKey: string,
-    permKey: 'canRead' | 'canWrite' | 'canUpdate' | 'canDelete'
-  ) => {
+  // Toggle single permission for a master
+  const toggleModalPerm = (masterKey: string, permKey: PermKey) => {
+    if (!getApplicablePerms(masterKey).includes(permKey)) return;
     setFormPerms((prev) =>
       prev.map((p) =>
         p.masterName === masterKey ? { ...p, [permKey]: !p[permKey] } : p
@@ -169,44 +255,109 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
+  // Toggle entire row (all applicable perms for one master)
   const toggleMasterRow = (masterKey: string) => {
-    const config = PERMISSION_MASTERS.find((m) => m.key === masterKey);
+    const applicable = getApplicablePerms(masterKey);
     const row = formPerms.find((p) => p.masterName === masterKey);
     if (!row) return;
 
-    const allChecked = config?.hasUpdateDelete
-      ? row.canRead && row.canWrite && row.canUpdate && row.canDelete
-      : row.canRead && row.canWrite;
+    const allChecked = applicable.every((perm) => row[perm]);
+    setFormPerms((prev) =>
+      prev.map((p) => {
+        if (p.masterName !== masterKey) return p;
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !allChecked;
+        });
+        return next;
+      })
+    );
+  };
+
+  // Toggle entire section (all masters under this section)
+  const toggleSection = (section: PermissionSection) => {
+    const sectionKeys = section.masters.map((m) => m.key);
+    const allSectionChecked = section.masters.every((m) => {
+      const row = formPerms.find((p) => p.masterName === m.key);
+      const applicable = getApplicablePerms(m.key);
+      return row && applicable.every((perm) => row[perm]);
+    });
 
     setFormPerms((prev) =>
-      prev.map((p) =>
-        p.masterName === masterKey
-          ? {
-              ...p,
-              canRead: !allChecked,
-              canWrite: !allChecked,
-              canUpdate: config?.hasUpdateDelete ? !allChecked : false,
-              canDelete: config?.hasUpdateDelete ? !allChecked : false,
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (!sectionKeys.includes(p.masterName)) return p;
+        const applicable = getApplicablePerms(p.masterName);
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = !allSectionChecked;
+        });
+        return next;
+      })
     );
   };
 
+  // Toggle entire column across all applicable masters
+  const toggleColumnPerm = (permKey: PermKey) => {
+    const applicableRows = formPerms.filter((p) =>
+      getApplicablePerms(p.masterName).includes(permKey)
+    );
+    const allChecked =
+      applicableRows.length > 0 && applicableRows.every((p) => p[permKey]);
+
+    setFormPerms((prev) =>
+      prev.map((p) => {
+        if (!getApplicablePerms(p.masterName).includes(permKey)) return p;
+        return { ...p, [permKey]: !allChecked };
+      })
+    );
+  };
+
+  // Select all applicable permissions across all 14 masters
   const selectAllPerms = () => {
-    setFormPerms(
-      PERMISSION_MASTERS.map((m) => ({
-        masterName: m.key,
-        canRead: true,
-        canWrite: true,
-        canUpdate: m.hasUpdateDelete,
-        canDelete: m.hasUpdateDelete,
-      }))
+    setFormPerms((prev) =>
+      prev.map((p) => {
+        const applicable = getApplicablePerms(p.masterName);
+        const next = { ...p };
+        applicable.forEach((perm) => {
+          next[perm] = true;
+        });
+        return next;
+      })
     );
   };
 
+  // Clear all permissions
   const clearAllPerms = () => {
     setFormPerms(defaultPerms());
+  };
+
+  // Inspection helpers
+  const isRowAll = (masterKey: string): boolean => {
+    const applicable = getApplicablePerms(masterKey);
+    const row = formPerms.find((p) => p.masterName === masterKey);
+    return row ? applicable.every((perm) => row[perm]) : false;
+  };
+
+  const isSectionAll = (section: PermissionSection): boolean => {
+    return section.masters.every((m) => isRowAll(m.key));
+  };
+
+  const isColAll = (permKey: PermKey): boolean => {
+    const applicableRows = formPerms.filter((p) =>
+      getApplicablePerms(p.masterName).includes(permKey)
+    );
+    return applicableRows.length > 0 && applicableRows.every((p) => p[permKey]);
+  };
+
+  const isAllAll = (): boolean =>
+    ALL_MASTERS.every((m) => isRowAll(m.key));
+
+  const getColCheckedCount = (permKey: PermKey): { checked: number; total: number } => {
+    const applicableRows = formPerms.filter((p) =>
+      getApplicablePerms(p.masterName).includes(permKey)
+    );
+    const checked = applicableRows.filter((p) => p[permKey]).length;
+    return { checked, total: applicableRows.length };
   };
 
   const handleFormSubmit = async () => {
@@ -224,7 +375,7 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
         });
 
         if (res.success) {
-          Alert.alert('Success', 'User type created successfully!');
+          Alert.alert('Success', `User type '${typeName.trim()}' created successfully!`);
           setIsModalOpen(false);
           await loadUserTypes();
         } else {
@@ -287,6 +438,11 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
       ut.added_by_name?.toLowerCase().includes(q)
     );
   });
+
+  const readCount = getColCheckedCount('canRead');
+  const writeCount = getColCheckedCount('canWrite');
+  const updateCount = getColCheckedCount('canUpdate');
+  const deleteCount = getColCheckedCount('canDelete');
 
   return (
     <ScreenWrapper
@@ -351,14 +507,17 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
               const perms = normalizePerms(item.permissions);
               const grantedCount = perms.reduce((total, p) => {
                 const isApproval = p.masterName === 'device_approval';
+                const isReport = p.masterName === 'activity_report';
                 return (
                   total +
                   (p.canRead ? 1 : 0) +
-                  (p.canWrite ? 1 : 0) +
-                  (!isApproval && p.canUpdate ? 1 : 0) +
-                  (!isApproval && p.canDelete ? 1 : 0)
+                  (!isReport && p.canWrite ? 1 : 0) +
+                  (!isApproval && !isReport && p.canUpdate ? 1 : 0) +
+                  (!isApproval && !isReport && p.canDelete ? 1 : 0)
                 );
               }, 0);
+
+              const isFullAccess = grantedCount === TOTAL_APPLICABLE_PERMS;
 
               return (
                 <Card variant="light" dark={false} style={styles.roleCard}>
@@ -388,11 +547,20 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
                       </View>
                     </View>
 
-                    {/* Top Right: Status / RBAC Badge */}
-                    <StatusBadge
-                      label={`${grantedCount}/14 Allowed`}
-                      status="warning"
-                    />
+                    {/* Top Right: Status / RBAC Badge matching frontend */}
+                    {isFullAccess ? (
+                      <View style={styles.fullAccessBadge}>
+                        <Check size={11} color="#059669" strokeWidth={2.5} />
+                        <Text style={styles.fullAccessText}>Full Access (14)</Text>
+                      </View>
+                    ) : grantedCount === 0 ? (
+                      <StatusBadge label="No Access" status="neutral" />
+                    ) : (
+                      <StatusBadge
+                        label={`${grantedCount}/${TOTAL_APPLICABLE_PERMS} Perms`}
+                        status="warning"
+                      />
+                    )}
                   </View>
 
                   {/* Added by / Description information */}
@@ -406,99 +574,134 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
                     <Text style={styles.description}>{item.description}</Text>
                   ) : null}
 
-                  {/* Inner Surface: Permission Matrix with Dark Active & Light Deactive Colors */}
+                  {/* Inner Surface: Permission Matrix grouped by Section */}
                   <View style={styles.innerSurface}>
                     <View style={styles.permHeaderRow}>
                       <Text style={styles.permHeaderTitle}>Module Permissions</Text>
-                      {/* <Text style={styles.permCounter}>{grantedCount}/14 Allowed</Text> */}
+                      <Text style={styles.permCounter}>
+                        {grantedCount} Granted
+                      </Text>
                     </View>
 
                     <View style={styles.permList}>
-                      {PERMISSION_MASTERS.map((m) => {
-                        const p = perms.find((x) => x.masterName === m.key);
-                        const canR = Boolean(p?.canRead);
-                        const canW = Boolean(p?.canWrite);
-                        const canU = Boolean(p?.canUpdate);
-                        const canD = Boolean(p?.canDelete);
-
+                      {PERMISSION_SECTIONS.map((section, sIdx) => {
+                        const sectionMasters = section.masters;
                         return (
-                          <View key={m.key} style={styles.permItemRow}>
-                            <Text style={styles.moduleName} numberOfLines={1}>
-                              {m.label}
-                            </Text>
+                          <View key={`list-sec-${sIdx}`} style={styles.listSectionBox}>
+                            <View style={styles.listSectionHeader}>
+                              <Text style={styles.listSectionTitle}>
+                                {section.title}
+                              </Text>
+                            </View>
 
-                            <View style={styles.crudChipsRow}>
-                              {/* Read: Blue if granted, Light deactivated if denied */}
-                              <View
-                                style={[
-                                  styles.crudChip,
-                                  canR ? styles.chipActiveRead : styles.chipInactiveLight,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.crudChipText,
-                                    canR ? styles.chipTextRead : styles.chipTextLight,
-                                  ]}
-                                >
-                                  Read
-                                </Text>
-                              </View>
+                            <View style={styles.listSectionMasters}>
+                              {sectionMasters.map((m) => {
+                                const p = perms.find((x) => x.masterName === m.key);
+                                const applicable = getApplicablePerms(m.key);
+                                const canR = Boolean(p?.canRead);
+                                const canW = applicable.includes('canWrite') && Boolean(p?.canWrite);
+                                const canU = applicable.includes('canUpdate') && Boolean(p?.canUpdate);
+                                const canD = applicable.includes('canDelete') && Boolean(p?.canDelete);
 
-                              {/* Write / Approval: Green if granted, Light deactivated if denied */}
-                              <View
-                                style={[
-                                  styles.crudChip,
-                                  canW ? styles.chipActiveWrite : styles.chipInactiveLight,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.crudChipText,
-                                    canW ? styles.chipTextWrite : styles.chipTextLight,
-                                  ]}
-                                >
-                                  {m.key === 'device_approval' ? 'Approve' : 'Write'}
-                                </Text>
-                              </View>
+                                return (
+                                  <View key={m.key} style={styles.permItemRow}>
+                                    <View style={styles.moduleNameWrap}>
+                                      <View style={styles.bulletDot} />
+                                      <Text style={styles.moduleName} numberOfLines={1}>
+                                        {m.label}
+                                      </Text>
+                                    </View>
 
-                              {/* Update: Yellow / Amber if granted, Light deactivated if denied */}
-                              {m.hasUpdateDelete ? (
-                                <View
-                                  style={[
-                                    styles.crudChip,
-                                    canU ? styles.chipActiveUpdate : styles.chipInactiveLight,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.crudChipText,
-                                      canU ? styles.chipTextUpdate : styles.chipTextLight,
-                                    ]}
-                                  >
-                                    Update
-                                  </Text>
-                                </View>
-                              ) : null}
+                                    <View style={styles.crudChipsRow}>
+                                      {/* Read */}
+                                      <View
+                                        style={[
+                                          styles.crudChip,
+                                          canR ? styles.chipActiveRead : styles.chipInactiveLight,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.crudChipText,
+                                            canR ? styles.chipTextRead : styles.chipTextLight,
+                                          ]}
+                                        >
+                                          Read
+                                        </Text>
+                                      </View>
 
-                              {/* Delete: Red if granted, Light deactivated if denied */}
-                              {m.hasUpdateDelete ? (
-                                <View
-                                  style={[
-                                    styles.crudChip,
-                                    canD ? styles.chipActiveDelete : styles.chipInactiveLight,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.crudChipText,
-                                      canD ? styles.chipTextDelete : styles.chipTextLight,
-                                    ]}
-                                  >
-                                    Delete
-                                  </Text>
-                                </View>
-                              ) : null}
+                                      {/* Write / Approval */}
+                                      {applicable.includes('canWrite') ? (
+                                        <View
+                                          style={[
+                                            styles.crudChip,
+                                            canW ? styles.chipActiveWrite : styles.chipInactiveLight,
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.crudChipText,
+                                              canW ? styles.chipTextWrite : styles.chipTextLight,
+                                            ]}
+                                          >
+                                            {m.key === 'device_approval' ? 'Approval' : 'Write'}
+                                          </Text>
+                                        </View>
+                                      ) : (
+                                        <View style={[styles.crudChip, styles.chipDisabled]}>
+                                          <Text style={styles.chipTextDisabled}>—</Text>
+                                        </View>
+                                      )}
+
+                                      {/* Update */}
+                                      {applicable.includes('canUpdate') ? (
+                                        <View
+                                          style={[
+                                            styles.crudChip,
+                                            canU ? styles.chipActiveUpdate : styles.chipInactiveLight,
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.crudChipText,
+                                              canU ? styles.chipTextUpdate : styles.chipTextLight,
+                                            ]}
+                                          >
+                                            Update
+                                          </Text>
+                                        </View>
+                                      ) : (
+                                        <View style={[styles.crudChip, styles.chipDisabled]}>
+                                          <Text style={styles.chipTextDisabled}>—</Text>
+                                        </View>
+                                      )}
+
+                                      {/* Delete */}
+                                      {applicable.includes('canDelete') ? (
+                                        <View
+                                          style={[
+                                            styles.crudChip,
+                                            canD ? styles.chipActiveDelete : styles.chipInactiveLight,
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.crudChipText,
+                                              canD ? styles.chipTextDelete : styles.chipTextLight,
+                                            ]}
+                                          >
+                                            Delete
+                                          </Text>
+                                        </View>
+                                      ) : (
+                                        <View style={[styles.crudChip, styles.chipDisabled]}>
+                                          <Text style={styles.chipTextDisabled}>—</Text>
+                                        </View>
+                                      )}
+                                    </View>
+                                  </View>
+                                );
+                              })}
                             </View>
                           </View>
                         );
@@ -506,7 +709,7 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
                     </View>
                   </View>
 
-                  {/* Bottom Footer: Edit Button Icon + Delete Button Icon */}
+                  {/* Bottom Footer: Edit & Delete Action Buttons */}
                   <View style={styles.cardFooter}>
                     <View style={styles.flexOne} />
                     <View style={styles.cardActionsRow}>
@@ -538,7 +741,9 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
         )}
       </View>
 
-      {/* Create / Edit User Type Modal */}
+      {/* =========================================================================
+          Create / Edit User Type Modal with Categorized Sections & Column Toggles
+         ========================================================================= */}
       <Modal
         visible={isModalOpen}
         animationType="slide"
@@ -550,6 +755,7 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.modalOverlay}
         >
           <View style={styles.modalCard}>
+            {/* Modal Header */}
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleBlock}>
                 <Text style={styles.modalTitle}>
@@ -557,8 +763,8 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
                 </Text>
                 <Text style={styles.modalSubtitle}>
                   {modalMode === 'create'
-                    ? 'Configure role archetype and module permissions'
-                    : 'Update role archetype and module permissions'}
+                    ? 'Define user group name and configure module permissions'
+                    : 'Update user group name and configure module permissions'}
                 </Text>
               </View>
               <TouchableOpacity
@@ -578,7 +784,7 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
               {/* Type Name Input */}
               <View style={styles.formGroup}>
                 <Text style={styles.formLabel}>
-                  User Type Name <Text style={styles.requiredStar}>*</Text>
+                  USER TYPE NAME <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <Input
                   placeholder="e.g. Supervisor, Technician, Manager"
@@ -589,161 +795,437 @@ export const UserTypeMasterScreen: React.FC<Props> = ({ navigation }) => {
                 />
               </View>
 
-              {/* Permissions Header & Bulk Actions */}
+              {/* Module Permissions Matrix Header */}
               <View style={styles.permMatrixHeader}>
-                <Text style={styles.formLabel}>Module Permissions Matrix</Text>
-                <View style={styles.bulkActionsRow}>
+                <View style={styles.matrixTitleBlock}>
+                  <Text style={styles.matrixTitle}>Module Permissions Matrix</Text>
+                  <Text style={styles.matrixSubtitle}>
+                    Set read, write, update and delete access across all 14 modules
+                  </Text>
+                </View>
+
+                {/* Global Select All / Clear All */}
+                <TouchableOpacity
+                  style={[styles.toggleAllBtn, isAllAll() && styles.toggleAllBtnActive]}
+                  onPress={isAllAll() ? clearAllPerms : selectAllPerms}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toggleAllBtnText, isAllAll() && styles.toggleAllBtnTextActive]}>
+                    {isAllAll() ? '✓ Deselect All' : 'Select All'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Quick Column Bulk Toggles Bar (Read, Write/Appr, Update, Delete) */}
+              <View style={styles.columnBarContainer}>
+                <Text style={styles.columnBarTitle}>COLUMN QUICK TOGGLE (APPLY TO ALL):</Text>
+                <View style={styles.columnBarRow}>
+                  {/* Read Column */}
                   <TouchableOpacity
-                    style={styles.bulkBtn}
-                    onPress={selectAllPerms}
+                    style={[
+                      styles.colToggleChip,
+                      styles.colToggleRead,
+                      isColAll('canRead') && styles.colToggleActiveRead,
+                    ]}
+                    onPress={() => toggleColumnPerm('canRead')}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.bulkBtnText}>Select All</Text>
+                    <View
+                      style={[
+                        styles.colCheckbox,
+                        isColAll('canRead') && styles.colCheckboxActiveRead,
+                      ]}
+                    >
+                      {isColAll('canRead') && (
+                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.colToggleText,
+                        styles.colToggleTextRead,
+                        isColAll('canRead') && styles.colToggleTextActiveLight,
+                      ]}
+                    >
+                      Read ({readCount.checked}/{readCount.total})
+                    </Text>
                   </TouchableOpacity>
-                  <Text style={styles.bulkDivider}>•</Text>
+
+                  {/* Write Column */}
                   <TouchableOpacity
-                    style={styles.bulkBtn}
-                    onPress={clearAllPerms}
+                    style={[
+                      styles.colToggleChip,
+                      styles.colToggleWrite,
+                      isColAll('canWrite') && styles.colToggleActiveWrite,
+                    ]}
+                    onPress={() => toggleColumnPerm('canWrite')}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.bulkBtnText}>Clear All</Text>
+                    <View
+                      style={[
+                        styles.colCheckbox,
+                        isColAll('canWrite') && styles.colCheckboxActiveWrite,
+                      ]}
+                    >
+                      {isColAll('canWrite') && (
+                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.colToggleText,
+                        styles.colToggleTextWrite,
+                        isColAll('canWrite') && styles.colToggleTextActiveLight,
+                      ]}
+                    >
+                      Write ({writeCount.checked}/{writeCount.total})
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Update Column */}
+                  <TouchableOpacity
+                    style={[
+                      styles.colToggleChip,
+                      styles.colToggleUpdate,
+                      isColAll('canUpdate') && styles.colToggleActiveUpdate,
+                    ]}
+                    onPress={() => toggleColumnPerm('canUpdate')}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.colCheckbox,
+                        isColAll('canUpdate') && styles.colCheckboxActiveUpdate,
+                      ]}
+                    >
+                      {isColAll('canUpdate') && (
+                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.colToggleText,
+                        styles.colToggleTextUpdate,
+                        isColAll('canUpdate') && styles.colToggleTextActiveLight,
+                      ]}
+                    >
+                      Update ({updateCount.checked}/{updateCount.total})
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Delete Column */}
+                  <TouchableOpacity
+                    style={[
+                      styles.colToggleChip,
+                      styles.colToggleDelete,
+                      isColAll('canDelete') && styles.colToggleActiveDelete,
+                    ]}
+                    onPress={() => toggleColumnPerm('canDelete')}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={[
+                        styles.colCheckbox,
+                        isColAll('canDelete') && styles.colCheckboxActiveDelete,
+                      ]}
+                    >
+                      {isColAll('canDelete') && (
+                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.colToggleText,
+                        styles.colToggleTextDelete,
+                        isColAll('canDelete') && styles.colToggleTextActiveLight,
+                      ]}
+                    >
+                      Delete ({deleteCount.checked}/{deleteCount.total})
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Module-by-Module Permission Checkers */}
-              <View style={styles.modalPermsList}>
-                {PERMISSION_MASTERS.map((m) => {
-                  const row = formPerms.find((p) => p.masterName === m.key);
-                  const isAll = m.hasUpdateDelete
-                    ? Boolean(row?.canRead && row?.canWrite && row?.canUpdate && row?.canDelete)
-                    : Boolean(row?.canRead && row?.canWrite);
+              {/* Categorized Sections List */}
+              <View style={styles.modalSectionsContainer}>
+                {PERMISSION_SECTIONS.map((section, sIdx) => {
+                  const sectionAll = isSectionAll(section);
 
                   return (
-                    <View key={m.key} style={styles.modalPermModuleCard}>
-                      <View style={styles.moduleCardHeader}>
-                        <Text style={styles.modalModuleName}>{m.label}</Text>
+                    <View key={`sec-${sIdx}`} style={styles.modalSectionCard}>
+                      {/* Section Header Banner */}
+                      <View style={styles.modalSectionBanner}>
+                        <View style={styles.sectionTitleRow}>
+                          <View style={styles.sectionIconBadge}>
+                            {section.icon === 'building' ? (
+                              <Building2 size={13} color="#0056CF" />
+                            ) : section.icon === 'users' ? (
+                              <Users size={13} color="#0056CF" />
+                            ) : section.icon === 'workspace' ? (
+                              <FolderKanban size={13} color="#0056CF" />
+                            ) : (
+                              <Clock size={13} color="#0056CF" />
+                            )}
+                          </View>
+                          <Text style={styles.modalSectionTitle}>
+                            {section.title}
+                          </Text>
+                        </View>
+
+                        {/* Section All Toggle Button */}
                         <TouchableOpacity
-                          style={styles.toggleRowBtn}
-                          onPress={() => toggleMasterRow(m.key)}
+                          style={[
+                            styles.sectionToggleBtn,
+                            sectionAll && styles.sectionToggleBtnActive,
+                          ]}
+                          onPress={() => toggleSection(section)}
                           activeOpacity={0.7}
                         >
-                          {isAll ? (
-                            <CheckSquare size={16} color={theme.colors.primary} />
+                          {sectionAll ? (
+                            <CheckSquare size={13} color="#0056CF" />
                           ) : (
-                            <Square size={16} color={theme.colors.textMuted} />
+                            <Square size={13} color="#94A3B8" />
                           )}
-                          <Text style={styles.toggleRowText}>All</Text>
+                          <Text
+                            style={[
+                              styles.sectionToggleBtnText,
+                              sectionAll && styles.sectionToggleBtnTextActive,
+                            ]}
+                          >
+                            {sectionAll ? '✓ All' : 'Section All'}
+                          </Text>
                         </TouchableOpacity>
                       </View>
 
-                      {/* Permission toggle buttons */}
-                      <View style={styles.permTogglesRow}>
-                        {/* Read */}
-                        <TouchableOpacity
-                          style={[
-                            styles.permToggleBtn,
-                            row?.canRead && styles.permToggleBtnActiveRead,
-                          ]}
-                          onPress={() => toggleModalPerm(m.key, 'canRead')}
-                          activeOpacity={0.7}
-                        >
-                          {row?.canRead ? (
-                            <Check size={12} color="#FFFFFF" strokeWidth={2.4} />
-                          ) : null}
-                          <Text
-                            style={[
-                              styles.permToggleText,
-                              row?.canRead && styles.permToggleTextActive,
-                            ]}
-                          >
-                            Read
-                          </Text>
-                        </TouchableOpacity>
+                      {/* Masters in this Section */}
+                      <View style={styles.modalSectionBody}>
+                        {section.masters.map((m) => {
+                          const row = formPerms.find((p) => p.masterName === m.key);
+                          const applicable = getApplicablePerms(m.key);
+                          const rowAll = isRowAll(m.key);
 
-                        {/* Write / Approval */}
-                        <TouchableOpacity
-                          style={[
-                            styles.permToggleBtn,
-                            row?.canWrite && styles.permToggleBtnActiveWrite,
-                          ]}
-                          onPress={() => toggleModalPerm(m.key, 'canWrite')}
-                          activeOpacity={0.7}
-                        >
-                          {row?.canWrite ? (
-                            <Check size={12} color="#FFFFFF" strokeWidth={2.4} />
-                          ) : null}
-                          <Text
-                            style={[
-                              styles.permToggleText,
-                              row?.canWrite && styles.permToggleTextActive,
-                            ]}
-                          >
-                            {m.key === 'device_approval' ? 'Approval' : 'Write'}
-                          </Text>
-                        </TouchableOpacity>
+                          return (
+                            <View key={m.key} style={styles.moduleRowCard}>
+                              {/* Master Title & Row Toggle */}
+                              <View style={styles.moduleRowHeader}>
+                                <View style={styles.moduleTitleBlock}>
+                                  <View style={styles.moduleDot} />
+                                  <Text style={styles.moduleRowTitle}>{m.label}</Text>
+                                </View>
 
-                        {/* Update */}
-                        {m.hasUpdateDelete ? (
-                          <TouchableOpacity
-                            style={[
-                              styles.permToggleBtn,
-                              row?.canUpdate && styles.permToggleBtnActiveUpdate,
-                            ]}
-                            onPress={() => toggleModalPerm(m.key, 'canUpdate')}
-                            activeOpacity={0.7}
-                          >
-                            {row?.canUpdate ? (
-                              <Check size={12} color="#FFFFFF" strokeWidth={2.4} />
-                            ) : null}
-                            <Text
-                              style={[
-                                styles.permToggleText,
-                                row?.canUpdate && styles.permToggleTextActive,
-                              ]}
-                            >
-                              Update
-                            </Text>
-                          </TouchableOpacity>
-                        ) : null}
+                                <TouchableOpacity
+                                  style={[
+                                    styles.rowAllToggleBtn,
+                                    rowAll && styles.rowAllToggleBtnActive,
+                                  ]}
+                                  onPress={() => toggleMasterRow(m.key)}
+                                  activeOpacity={0.7}
+                                >
+                                  {rowAll ? (
+                                    <CheckSquare size={13} color="#0056CF" />
+                                  ) : (
+                                    <Square size={13} color="#94A3B8" />
+                                  )}
+                                  <Text
+                                    style={[
+                                      styles.rowAllToggleText,
+                                      rowAll && styles.rowAllToggleTextActive,
+                                    ]}
+                                  >
+                                    {rowAll ? '✓ All' : 'All'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
 
-                        {/* Delete */}
-                        {m.hasUpdateDelete ? (
-                          <TouchableOpacity
-                            style={[
-                              styles.permToggleBtn,
-                              row?.canDelete && styles.permToggleBtnActiveDelete,
-                            ]}
-                            onPress={() => toggleModalPerm(m.key, 'canDelete')}
-                            activeOpacity={0.7}
-                          >
-                            {row?.canDelete ? (
-                              <Check size={12} color="#FFFFFF" strokeWidth={2.4} />
-                            ) : null}
-                            <Text
-                              style={[
-                                styles.permToggleText,
-                                row?.canDelete && styles.permToggleTextActive,
-                              ]}
-                            >
-                              Delete
-                            </Text>
-                          </TouchableOpacity>
-                        ) : null}
+                              {/* Permission Toggle Buttons for this master */}
+                              <View style={styles.permButtonsGrid}>
+                                {/* 1. READ */}
+                                <TouchableOpacity
+                                  style={[
+                                    styles.permBtn,
+                                    row?.canRead && styles.permBtnActiveRead,
+                                  ]}
+                                  onPress={() => toggleModalPerm(m.key, 'canRead')}
+                                  activeOpacity={0.7}
+                                >
+                                  <View
+                                    style={[
+                                      styles.permBtnCheckCircle,
+                                      row?.canRead && styles.permBtnCheckCircleActiveRead,
+                                    ]}
+                                  >
+                                    {row?.canRead && (
+                                      <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                                    )}
+                                  </View>
+                                  <Text
+                                    style={[
+                                      styles.permBtnLabel,
+                                      row?.canRead && styles.permBtnLabelActiveRead,
+                                    ]}
+                                  >
+                                    Read
+                                  </Text>
+                                </TouchableOpacity>
+
+                                {/* 2. WRITE / APPROVAL */}
+                                {applicable.includes('canWrite') ? (
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.permBtn,
+                                      row?.canWrite && styles.permBtnActiveWrite,
+                                    ]}
+                                    onPress={() => toggleModalPerm(m.key, 'canWrite')}
+                                    activeOpacity={0.7}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.permBtnCheckCircle,
+                                        row?.canWrite && styles.permBtnCheckCircleActiveWrite,
+                                      ]}
+                                    >
+                                      {row?.canWrite && (
+                                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                                      )}
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.permBtnLabel,
+                                        row?.canWrite && styles.permBtnLabelActiveWrite,
+                                      ]}
+                                    >
+                                      {m.key === 'device_approval' ? 'Approval' : 'Write'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ) : (
+                                  <View style={[styles.permBtn, styles.permBtnDisabled]}>
+                                    <Text style={styles.permBtnDisabledText}>—</Text>
+                                  </View>
+                                )}
+
+                                {/* 3. UPDATE */}
+                                {applicable.includes('canUpdate') ? (
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.permBtn,
+                                      row?.canUpdate && styles.permBtnActiveUpdate,
+                                    ]}
+                                    onPress={() => toggleModalPerm(m.key, 'canUpdate')}
+                                    activeOpacity={0.7}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.permBtnCheckCircle,
+                                        row?.canUpdate && styles.permBtnCheckCircleActiveUpdate,
+                                      ]}
+                                    >
+                                      {row?.canUpdate && (
+                                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                                      )}
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.permBtnLabel,
+                                        row?.canUpdate && styles.permBtnLabelActiveUpdate,
+                                      ]}
+                                    >
+                                      Update
+                                    </Text>
+                                  </TouchableOpacity>
+                                ) : (
+                                  <View style={[styles.permBtn, styles.permBtnDisabled]}>
+                                    <Text style={styles.permBtnDisabledText}>—</Text>
+                                  </View>
+                                )}
+
+                                {/* 4. DELETE */}
+                                {applicable.includes('canDelete') ? (
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.permBtn,
+                                      row?.canDelete && styles.permBtnActiveDelete,
+                                    ]}
+                                    onPress={() => toggleModalPerm(m.key, 'canDelete')}
+                                    activeOpacity={0.7}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.permBtnCheckCircle,
+                                        row?.canDelete && styles.permBtnCheckCircleActiveDelete,
+                                      ]}
+                                    >
+                                      {row?.canDelete && (
+                                        <Check size={10} color="#FFFFFF" strokeWidth={2.5} />
+                                      )}
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.permBtnLabel,
+                                        row?.canDelete && styles.permBtnLabelActiveDelete,
+                                      ]}
+                                    >
+                                      Delete
+                                    </Text>
+                                  </TouchableOpacity>
+                                ) : (
+                                  <View style={[styles.permBtn, styles.permBtnDisabled]}>
+                                    <Text style={styles.permBtnDisabledText}>—</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                          );
+                        })}
                       </View>
                     </View>
                   );
                 })}
               </View>
 
+              {/* Legend matching frontend */}
+              <View style={styles.legendCard}>
+                <Text style={styles.legendTitle}>PERMISSION COLOR LEGEND:</Text>
+                <View style={styles.legendItemsRow}>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#0056CF' }]} />
+                    <Text style={styles.legendText}>Read (Blue)</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#15803D' }]} />
+                    <Text style={styles.legendText}>Write / Approval (Green)</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#D97706' }]} />
+                    <Text style={styles.legendText}>Update (Amber)</Text>
+                  </View>
+                  <View style={styles.legendItem}>
+                    <View style={[styles.legendDot, { backgroundColor: '#E11D48' }]} />
+                    <Text style={styles.legendText}>Delete (Rose)</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Modal Action Buttons */}
               <View style={styles.modalActions}>
-              
                 <Button
-                  title={modalMode === 'create' ? 'Create User Type' : 'Save Changes'}
+                  title="Cancel"
+                  variant="outline"
+                  onPress={() => setIsModalOpen(false)}
+                  style={styles.modalCancelBtn}
+                  disabled={saving}
+                />
+                <Button
+                  title={
+                    saving
+                      ? 'Saving...'
+                      : modalMode === 'create'
+                        ? 'Create User Type'
+                        : 'Save Changes'
+                  }
                   variant="primary"
-                  loading={saving}
                   onPress={handleFormSubmit}
                   style={styles.modalSubmitBtn}
+                  disabled={saving}
                 />
               </View>
             </ScrollView>
@@ -758,24 +1240,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingTop: 14,
   },
   headerAddBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   searchContainer: {
     marginBottom: 12,
   },
   listContent: {
-    gap: 12,
-    paddingBottom: theme.spacing.xxxl,
+    paddingBottom: 28,
+    gap: 14,
   },
   centerBox: {
     flex: 1,
@@ -865,6 +1345,22 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: theme.colors.textMuted,
   },
+  fullAccessBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  fullAccessText: {
+    fontSize: 10.5,
+    fontWeight: theme.typography.weights.heavy,
+    color: '#059669',
+  },
   addedByText: {
     fontSize: 11,
     color: theme.colors.textSecondary,
@@ -910,7 +1406,23 @@ const styles = StyleSheet.create({
     color: theme.colors.accent,
   },
   permList: {
-    gap: 6,
+    gap: 10,
+  },
+  listSectionBox: {
+    gap: 4,
+  },
+  listSectionHeader: {
+    paddingVertical: 3,
+  },
+  listSectionTitle: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.heavy,
+    color: '#0056CF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  listSectionMasters: {
+    gap: 5,
   },
   permItemRow: {
     flexDirection: 'row',
@@ -923,12 +1435,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
+  moduleNameWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+    gap: 6,
+  },
+  bulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0056CF',
+  },
   moduleName: {
     fontSize: 11,
     fontWeight: theme.typography.weights.bold,
     color: theme.colors.textPrimary,
     flex: 1,
-    marginRight: 8,
   },
   crudChipsRow: {
     flexDirection: 'row',
@@ -940,9 +1464,10 @@ const styles = StyleSheet.create({
     paddingVertical: 2.5,
     borderRadius: 5,
     borderWidth: 1,
+    minWidth: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  // Permission color styles matching frontend PERM_COLORS
-  // 1. Read (Blue)
   chipActiveRead: {
     backgroundColor: '#F0F7FF',
     borderColor: '#BCDBFF',
@@ -950,8 +1475,6 @@ const styles = StyleSheet.create({
   chipTextRead: {
     color: '#0056CF',
   },
-
-  // 2. Write / Approval (Green)
   chipActiveWrite: {
     backgroundColor: '#F0FDF4',
     borderColor: '#BBF7D0',
@@ -959,8 +1482,6 @@ const styles = StyleSheet.create({
   chipTextWrite: {
     color: '#15803D',
   },
-
-  // 3. Update (Yellow / Amber)
   chipActiveUpdate: {
     backgroundColor: '#FFFBEB',
     borderColor: '#FDE68A',
@@ -968,8 +1489,6 @@ const styles = StyleSheet.create({
   chipTextUpdate: {
     color: '#B45309',
   },
-
-  // 4. Delete (Red)
   chipActiveDelete: {
     backgroundColor: '#FFF1F2',
     borderColor: '#FECDD3',
@@ -977,11 +1496,18 @@ const styles = StyleSheet.create({
   chipTextDelete: {
     color: '#BE123C',
   },
-
-  // Inactive / Deactivated (Light Gray)
   chipInactiveLight: {
     backgroundColor: '#F8FAFC',
     borderColor: '#E2E8F0',
+  },
+  chipDisabled: {
+    backgroundColor: '#F1F5F9',
+    borderColor: 'transparent',
+  },
+  chipTextDisabled: {
+    fontSize: 10,
+    color: '#CBD5E1',
+    fontWeight: '700',
   },
   crudChipText: {
     fontSize: 9.5,
@@ -1019,6 +1545,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF1F2',
     borderColor: '#FECDD3',
   },
+
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
@@ -1030,7 +1558,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingTop: 20,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    maxHeight: '90%',
+    maxHeight: '92%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1066,118 +1594,434 @@ const styles = StyleSheet.create({
   modalScroll: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 20,
-    gap: 14,
+    paddingBottom: 24,
+    gap: 16,
   },
   formGroup: {
     gap: 6,
   },
   formLabel: {
     fontSize: 12,
-    fontWeight: theme.typography.weights.bold,
+    fontWeight: theme.typography.weights.heavy,
     color: theme.colors.textPrimary,
+    letterSpacing: 0.4,
   },
   requiredStar: {
     color: '#DC2626',
   },
+
+  // Permissions Matrix Header
   permMatrixHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 6,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF2F7',
   },
-  bulkActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  matrixTitleBlock: {
+    flex: 1,
+    marginRight: 8,
   },
-  bulkBtn: {
-    paddingVertical: 2,
+  matrixTitle: {
+    fontSize: 13,
+    fontWeight: theme.typography.weights.heavy,
+    color: theme.colors.textPrimary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  bulkBtnText: {
-    fontSize: 11,
-    fontWeight: theme.typography.weights.bold,
-    color: theme.colors.accent,
-  },
-  bulkDivider: {
+  matrixSubtitle: {
     fontSize: 11,
     color: theme.colors.textMuted,
+    marginTop: 1,
   },
-  modalPermsList: {
-    gap: 10,
+  toggleAllBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#0056CF',
+    backgroundColor: '#F0F7FF',
   },
-  modalPermModuleCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EDF2F7',
-    padding: 10,
+  toggleAllBtnActive: {
+    backgroundColor: '#0056CF',
+    borderColor: '#0056CF',
   },
-  moduleCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  modalModuleName: {
-    fontSize: 12,
-    fontWeight: theme.typography.weights.bold,
-    color: theme.colors.textPrimary,
-  },
-  toggleRowBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  toggleRowText: {
+  toggleAllBtnText: {
     fontSize: 11,
-    fontWeight: theme.typography.weights.semibold,
-    color: theme.colors.textSecondary,
+    fontWeight: theme.typography.weights.bold,
+    color: '#0056CF',
   },
-  permTogglesRow: {
+  toggleAllBtnTextActive: {
+    color: '#FFFFFF',
+  },
+
+  // Column Bar
+  columnBarContainer: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    padding: 8,
+    gap: 6,
+  },
+  columnBarTitle: {
+    fontSize: 9.5,
+    fontWeight: theme.typography.weights.heavy,
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  columnBarRow: {
     flexDirection: 'row',
     gap: 6,
     flexWrap: 'wrap',
   },
-  permToggleBtn: {
+  colToggleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: '22%',
+    justifyContent: 'center',
+  },
+  colCheckbox: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  colToggleRead: {
+    backgroundColor: '#F0F7FF',
+    borderColor: '#BCDBFF',
+  },
+  colToggleActiveRead: {
+    backgroundColor: '#0056CF',
+    borderColor: '#0056CF',
+  },
+  colCheckboxActiveRead: {
+    backgroundColor: '#0056CF',
+    borderColor: '#0056CF',
+  },
+  colToggleTextRead: {
+    color: '#0056CF',
+  },
+  colToggleWrite: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  colToggleActiveWrite: {
+    backgroundColor: '#15803D',
+    borderColor: '#15803D',
+  },
+  colCheckboxActiveWrite: {
+    backgroundColor: '#15803D',
+    borderColor: '#15803D',
+  },
+  colToggleTextWrite: {
+    color: '#15803D',
+  },
+  colToggleUpdate: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  colToggleActiveUpdate: {
+    backgroundColor: '#D97706',
+    borderColor: '#D97706',
+  },
+  colCheckboxActiveUpdate: {
+    backgroundColor: '#D97706',
+    borderColor: '#D97706',
+  },
+  colToggleTextUpdate: {
+    color: '#B45309',
+  },
+  colToggleDelete: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#FECDD3',
+  },
+  colToggleActiveDelete: {
+    backgroundColor: '#E11D48',
+    borderColor: '#E11D48',
+  },
+  colCheckboxActiveDelete: {
+    backgroundColor: '#E11D48',
+    borderColor: '#E11D48',
+  },
+  colToggleTextDelete: {
+    color: '#BE123C',
+  },
+  colToggleText: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.heavy,
+  },
+  colToggleTextActiveLight: {
+    color: '#FFFFFF',
+  },
+
+  // Modal Section Cards
+  modalSectionsContainer: {
+    gap: 14,
+  },
+  modalSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    ...theme.shadows.sm,
+  },
+  modalSectionBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  sectionIconBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: '#E0EEFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSectionTitle: {
+    fontSize: 11.5,
+    fontWeight: theme.typography.weights.heavy,
+    color: '#0056CF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionToggleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  sectionToggleBtnActive: {
+    backgroundColor: '#F0F7FF',
+    borderColor: '#0056CF',
+  },
+  sectionToggleBtnText: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.bold,
+    color: '#64748B',
+  },
+  sectionToggleBtnTextActive: {
+    color: '#0056CF',
+  },
+  modalSectionBody: {
+    padding: 10,
+    gap: 10,
+  },
+
+  // Individual Module Row Card in Modal
+  moduleRowCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#EDF2F7',
+    padding: 10,
+    gap: 8,
+  },
+  moduleRowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  moduleTitleBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  moduleDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0056CF',
+  },
+  moduleRowTitle: {
+    fontSize: 12,
+    fontWeight: theme.typography.weights.bold,
+    color: theme.colors.textPrimary,
+  },
+  rowAllToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  rowAllToggleBtnActive: {
+    backgroundColor: '#F0F7FF',
+    borderColor: '#0056CF',
+  },
+  rowAllToggleText: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.semibold,
+    color: '#64748B',
+  },
+  rowAllToggleTextActive: {
+    color: '#0056CF',
+  },
+
+  // Permission Buttons 4-Grid
+  permButtonsGrid: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  permBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 7,
+    paddingHorizontal: 4,
     borderRadius: 7,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#CBD5E1',
   },
-  permToggleBtnActiveRead: {
-    backgroundColor: '#0056CF',
-    borderColor: '#0056CF',
+  permBtnCheckCircle: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  permToggleBtnActiveWrite: {
-    backgroundColor: '#15803D',
-    borderColor: '#15803D',
-  },
-  permToggleBtnActiveUpdate: {
-    backgroundColor: '#D97706',
-    borderColor: '#D97706',
-  },
-  permToggleBtnActiveDelete: {
-    backgroundColor: '#E11D48',
-    borderColor: '#E11D48',
-  },
-  permToggleText: {
-    fontSize: 11,
+  permBtnLabel: {
+    fontSize: 10.5,
     fontWeight: theme.typography.weights.bold,
     color: '#64748B',
   },
-  permToggleTextActive: {
-    color: '#FFFFFF',
+  // Read active
+  permBtnActiveRead: {
+    backgroundColor: '#F0F7FF',
+    borderColor: '#0056CF',
   },
+  permBtnCheckCircleActiveRead: {
+    backgroundColor: '#0056CF',
+    borderColor: '#0056CF',
+  },
+  permBtnLabelActiveRead: {
+    color: '#0056CF',
+  },
+  // Write active
+  permBtnActiveWrite: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#15803D',
+  },
+  permBtnCheckCircleActiveWrite: {
+    backgroundColor: '#15803D',
+    borderColor: '#15803D',
+  },
+  permBtnLabelActiveWrite: {
+    color: '#15803D',
+  },
+  // Update active
+  permBtnActiveUpdate: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#D97706',
+  },
+  permBtnCheckCircleActiveUpdate: {
+    backgroundColor: '#D97706',
+    borderColor: '#D97706',
+  },
+  permBtnLabelActiveUpdate: {
+    color: '#B45309',
+  },
+  // Delete active
+  permBtnActiveDelete: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#E11D48',
+  },
+  permBtnCheckCircleActiveDelete: {
+    backgroundColor: '#E11D48',
+    borderColor: '#E11D48',
+  },
+  permBtnLabelActiveDelete: {
+    color: '#BE123C',
+  },
+  // Disabled
+  permBtnDisabled: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+  },
+  permBtnDisabledText: {
+    fontSize: 12,
+    color: '#CBD5E1',
+    fontWeight: '700',
+  },
+
+  // Legend
+  legendCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 10,
+    gap: 6,
+  },
+  legendTitle: {
+    fontSize: 10,
+    fontWeight: theme.typography.weights.heavy,
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  legendItemsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+  },
+  legendText: {
+    fontSize: 10.5,
+    fontWeight: theme.typography.weights.semibold,
+    color: '#475569',
+  },
+
+  // Actions
   modalActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 10,
+    marginTop: 6,
   },
   modalCancelBtn: {
     flex: 1,

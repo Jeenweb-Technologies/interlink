@@ -21,6 +21,7 @@ interface ScreenWrapperProps {
   showAmbientGlows?: boolean;
   edges?: readonly Edge[];
   statusBarStyle?: StatusBarStyle;
+  disableKeyboardAvoiding?: boolean;
 }
 
 export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
@@ -32,6 +33,7 @@ export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
   showAmbientGlows = true,
   edges = ['top', 'right', 'bottom', 'left'],
   statusBarStyle,
+  disableKeyboardAvoiding = false,
 }) => {
   const content = (
     <>
@@ -67,12 +69,16 @@ export const ScreenWrapper: React.FC<ScreenWrapperProps> = ({
     <View style={[styles.container, dark ? styles.darkBg : styles.lightBg, style]}>
       <StatusBar barStyle={resolvedStatusBarStyle} />
       <SafeAreaView style={styles.safeArea} edges={edges}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardView}
-        >
-          {content}
-        </KeyboardAvoidingView>
+        {disableKeyboardAvoiding ? (
+          content
+        ) : (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.keyboardView}
+          >
+            {content}
+          </KeyboardAvoidingView>
+        )}
       </SafeAreaView>
     </View>
   );

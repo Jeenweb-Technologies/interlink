@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View, TouchableOpacity, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
@@ -71,12 +72,28 @@ const renderProfileIcon = ({ color, size, focused }: { color: string; size: numb
 );
 
 export const MainTabNavigator: React.FC = () => {
+  const insets = useSafeAreaInsets();
+  // Safe bottom inset to ensure the bottom tab bar and gesture bar/buttons never overlap
+  const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 14 : 8);
+
+  const dynamicTabBarStyle = useMemo(
+    () => [
+      styles.tabBar,
+      {
+        height: 60 + safeBottom,
+        paddingBottom: safeBottom,
+      },
+    ],
+    [safeBottom]
+  );
+
   return (
     <Tab.Navigator
       initialRouteName="HomeTab"
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarHideOnKeyboard: true,
+        tabBarStyle: dynamicTabBarStyle,
         tabBarItemStyle: styles.tabBarItem,
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.textMuted,
@@ -98,6 +115,7 @@ export const MainTabNavigator: React.FC = () => {
         options={{
           tabBarLabel: 'Chat',
           tabBarIcon: renderChatIcon,
+          tabBarHideOnKeyboard: true,
         }}
       />
 
@@ -146,8 +164,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    height: 64,
-    paddingBottom: 8,
     paddingTop: 6,
     overflow: 'visible',
     ...theme.shadows.md,

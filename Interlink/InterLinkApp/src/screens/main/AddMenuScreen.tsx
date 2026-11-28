@@ -18,10 +18,14 @@ import {
   Video,
   Clock,
   Calendar,
+  CalendarDays,
+  Bell,
 } from 'lucide-react-native';
 import { ScreenWrapper } from '../../components/common/ScreenWrapper';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
 import { theme } from '../../constants/theme';
+import { usePermissionStore } from '../../store/permissionStore';
 
 interface ActionItem {
   id: string;
@@ -37,6 +41,8 @@ interface ActionItem {
 }
 
 const ACTION_ITEMS: ActionItem[] = [
+
+  
   {
     id: 'projects',
     title: 'Project & Portfolio',
@@ -73,6 +79,7 @@ const ACTION_ITEMS: ActionItem[] = [
     badgeBg: '#FEF3C7',
     badgeColor: '#92400E',
   },
+    
   {
     id: 'meetings',
     title: 'Meeting & Whiteboard',
@@ -84,6 +91,30 @@ const ACTION_ITEMS: ActionItem[] = [
     iconBg: '#F5F3FF',
     badgeBg: '#EDE9FE',
     badgeColor: '#5B21B6',
+  },
+  {
+    id: 'calendar',
+    title: 'Calendar & Schedule',
+    subtitle: 'Unified workspace calendar, schedule events, and meetings',
+    badge: 'SCHEDULE',
+    screenName: 'CalendarScreen',
+    icon: CalendarDays,
+    iconColor: '#6366F1',
+    iconBg: '#EEF2FF',
+    badgeBg: '#E0E7FF',
+    badgeColor: '#4338CA',
+  },
+  {
+    id: 'reminders',
+    title: 'Reminder Center',
+    subtitle: 'Centralized alerting, snooze workflows, and escalation rules',
+    badge: 'ALERTS',
+    screenName: 'ReminderCenterScreen',
+    icon: Bell,
+    iconColor: '#F43F5E',
+    iconBg: '#FFF1F2',
+    badgeBg: '#FFE4E6',
+    badgeColor: '#BE123C',
   },
   {
     id: 'attendance',
@@ -113,6 +144,7 @@ const ACTION_ITEMS: ActionItem[] = [
 
 export const AddMenuScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const { hasPermission, isAdmin } = usePermissionStore();
 
   const handleBackToHome = () => {
     navigation.navigate('Main', { screen: 'HomeTab' });
@@ -132,9 +164,34 @@ export const AddMenuScreen: React.FC = () => {
     return () => subscription.remove();
   }, [navigation]);
 
-  const handleNavigate = (screenName: string) => {
-    navigation.navigate(screenName);
+  // Filter modules based on user permissions
+  const allowedActionItems = ACTION_ITEMS.filter((item) => {
+    if (isAdmin) return true;
+    if (item.id === 'calendar' || item.id === 'reminders') return true;
+    return hasPermission(item.id, 'read');
+  });
+
+  const handleNavigate = (item: ActionItem) => {
+    if (
+      !isAdmin &&
+      item.id !== 'calendar' &&
+      item.id !== 'reminders' &&
+      !hasPermission(item.id, 'read')
+    ) {
+      return;
+    }
+    navigation.navigate(item.screenName);
   };
+
+  if (allowedActionItems.length === 0) {
+    return (
+      <NoPermissionView
+        moduleName="Quick Actions"
+        headerTitle="Quick Actions"
+        onBackPress={handleBackToHome}
+      />
+    );
+  }
 
   return (
     <ScreenWrapper
@@ -155,23 +212,9 @@ export const AddMenuScreen: React.FC = () => {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Welcome Intro Banner */}
-        <View style={styles.introCard}>
-          <View style={styles.introHeader}>
-            <View style={styles.sparkleIconWrap}>
-              <Sparkles size={16} color="#2563EB" strokeWidth={2.4} />
-            </View>
-            <Text style={styles.introBadgeText}>SHORTCUTS & MODULES</Text>
-          </View>
-          <Text style={styles.introTitle}>Where would you like to go?</Text>
-          <Text style={styles.introSubtitle}>
-            Jump straight into any workspace management module or collaboration tool.
-          </Text>
-        </View>
-
         {/* Action List Cards */}
         <View style={styles.actionsList}>
-          {ACTION_ITEMS.map((item) => {
+          {allowedActionItems.map((item) => {
             const IconComponent = item.icon;
 
             return (
@@ -179,7 +222,7 @@ export const AddMenuScreen: React.FC = () => {
                 key={item.id}
                 style={styles.actionCard}
                 activeOpacity={0.75}
-                onPress={() => handleNavigate(item.screenName)}
+                onPress={() => handleNavigate(item)}
               >
                 {/* Left Icon */}
                 <View style={[styles.iconWrap, { backgroundColor: item.iconBg }]}>

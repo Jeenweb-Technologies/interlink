@@ -38,6 +38,8 @@ import {
   Radio,
 } from 'lucide-react-native';
 import { AppHeader } from '../../components/common/AppHeader';
+import { NoPermissionView } from '../../components/common/NoPermissionView';
+import { usePermissionStore } from '../../store/permissionStore';
 import {
   getMeetings,
   createInstantMeeting,
@@ -63,6 +65,23 @@ const STROKE_WIDTHS = [2, 4, 8];
 export const MeetingsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { user } = useAuthStore();
+  const { hasPermission, isAdmin } = usePermissionStore();
+
+  const canReadMeetings =
+    isAdmin ||
+    user?.role === 'admin' ||
+    user?.role === 'super admin' ||
+    hasPermission('meetings', 'read');
+
+  if (!canReadMeetings) {
+    return (
+      <NoPermissionView
+        moduleName="Meetings & Whiteboard"
+        headerTitle="Meetings"
+        onBackPress={() => navigation.goBack()}
+      />
+    );
+  }
 
   const [meetings, setMeetings] = useState<MeetingItem[]>([]);
   const [loading, setLoading] = useState(true);
