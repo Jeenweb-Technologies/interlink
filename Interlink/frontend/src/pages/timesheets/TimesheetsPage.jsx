@@ -13,6 +13,40 @@ import {
 import { getProjects } from "../../api/projectApi";
 import { getTasks } from "../../api/taskApi";
 
+// ── Local Date Helpers (TimeZone Safe) ─────────────────────────────────────────
+const getTodayDateStr = () => {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const formatDateStr = (dateInput) => {
+    if (!dateInput) return "";
+    if (typeof dateInput === "string") {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) return dateInput;
+        if (dateInput.includes("T")) {
+            const d = new Date(dateInput);
+            if (!isNaN(d.getTime())) {
+                const pad = (n) => String(n).padStart(2, "0");
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            }
+        }
+        return dateInput.slice(0, 10);
+    }
+    const d = new Date(dateInput);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const formatDisplayDate = (dateStr, options = { weekday: "short", month: "short", day: "numeric" }) => {
+    const ymd = formatDateStr(dateStr);
+    if (!ymd) return "";
+    const [y, m, d] = ymd.split("-").map(Number);
+    if (!y || !m || !d) return dateStr;
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString([], options);
+};
+
 export default function TimesheetsPage() {
     const user = useMemo(() => JSON.parse(localStorage.getItem("user") || "{}"), []);
     const isAdmin = user.role === "admin" || user.role === "super admin";
@@ -21,7 +55,7 @@ export default function TimesheetsPage() {
     const [activeTab, setActiveTab] = useState("weekly");
 
     // Week selector state (date string in that week)
-    const [currentWeekDate, setCurrentWeekDate] = useState(() => new Date().toISOString().slice(0, 10));
+    const [currentWeekDate, setCurrentWeekDate] = useState(getTodayDateStr);
     const [timesheetData, setTimesheetData] = useState(null);
     const [loadingTimesheet, setLoadingTimesheet] = useState(true);
 
@@ -35,7 +69,7 @@ export default function TimesheetsPage() {
     const [entryForm, setEntryForm] = useState({
         project_id: "",
         task_id: "",
-        work_date: new Date().toISOString().slice(0, 10),
+        work_date: getTodayDateStr(),
         duration_hours: 1,
         duration_minutes: 0,
         description: "",
@@ -84,9 +118,13 @@ export default function TimesheetsPage() {
                 getProjects().catch(() => null),
                 getTasks().catch(() => null)
             ]);
-            if (projRes?.data?.success) setProjects(projRes.data.projects || []);
-            if (taskRes?.data?.success) setTasks(taskRes.data.tasks || []);
-        } catch (_) {}
+            const projList = projRes?.data?.data || projRes?.data?.projects || (Array.isArray(projRes?.data) ? projRes.data : []);
+            const taskList = taskRes?.data?.data || taskRes?.data?.tasks || (Array.isArray(taskRes?.data) ? taskRes.data : []);
+            setProjects(Array.isArray(projList) ? projList : []);
+            setTasks(Array.isArray(taskList) ? taskList : []);
+        } catch (err) {
+            console.error("Error loading projects and tasks:", err);
+        }
     }, []);
 
     // ── Load Approvals Queue ──────────────────────────────────────────────────
@@ -131,33 +169,43 @@ export default function TimesheetsPage() {
 
     // ── Week Shift Navigation Helper ──────────────────────────────────────────
     const shiftWeek = (direction) => {
-        const d = new Date(currentWeekDate);
-        d.setDate(d.getDate() + (direction * 7));
-        setCurrentWeekDate(d.toISOString().slice(0, 10));
+        const ymd = formatDateStr(currentWeekDate) || getTodayDateStr();
+        const [y, m, d] = ymd.split("-").map(Number);
+        const nextDate = new Date(y, m - 1, d + (direction * 7));
+        const pad = (n) => String(n).padStart(2, "0");
+        setCurrentWeekDate(`${nextDate.getFullYear()}-${pad(nextDate.getMonth() + 1)}-${pad(nextDate.getDate())}`);
     };
 
     // ── Week Days Array ───────────────────────────────────────────────────────
     const weekDays = useMemo(() => {
         if (!timesheetData?.timesheet?.period_start_date) return [];
-        const start = new Date(timesheetData.timesheet.period_start_date);
+        const dateStr = formatDateStr(timesheetData.timesheet.period_start_date);
+        const [year, month, day] = dateStr.split("-").map(Number);
+        if (!year || !month || !day) return [];
+
+        const todayStr = getTodayDateStr();
+
         return Array.from({ length: 7 }, (_, i) => {
-            const day = new Date(start);
-            day.setDate(start.getDate() + i);
-            const ymd = day.toISOString().slice(0, 10);
+            const current = new Date(year, month - 1, day + i);
+            const pad = (n) => String(n).padStart(2, "0");
+            const ymd = `${current.getFullYear()}-${pad(current.getMonth() + 1)}-${pad(current.getDate())}`;
             return {
                 date: ymd,
-                dayName: day.toLocaleDateString([], { weekday: 'short' }),
-                dayNumber: day.getDate(),
-                isToday: ymd === new Date().toISOString().slice(0, 10)
+                dayName: current.toLocaleDateString([], { weekday: 'short' }),
+                dayNumber: current.getDate(),
+                isToday: ymd === todayStr
             };
         });
     }, [timesheetData]);
 
     // Filter tasks based on selected project in form
     const availableTasksForProject = useMemo(() => {
-        if (!entryForm.project_id) return tasks;
-        return tasks.filter(t => String(t.project_id) === String(entryForm.project_id));
-    }, [tasks, entryForm.project_id]);
+        if (!entryForm.project_id) return [];
+        return tasks.filter(t => 
+            (t.project_id && String(t.project_id) === String(entryForm.project_id)) ||
+            (entryForm.task_id && String(t.id) === String(entryForm.task_id))
+        );
+    }, [tasks, entryForm.project_id, entryForm.task_id]);
 
     // ── Open Add / Edit Entry Modal ───────────────────────────────────────────
     const handleOpenEntryModal = (entry = null, defaultDate = null) => {
@@ -165,9 +213,9 @@ export default function TimesheetsPage() {
             setEditingEntryId(entry.id);
             const totalMins = Number(entry.duration_minutes || 60);
             setEntryForm({
-                project_id: entry.project_id || "",
-                task_id: entry.task_id || "",
-                work_date: entry.work_date?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+                project_id: entry.project_id ? String(entry.project_id) : "",
+                task_id: entry.task_id ? String(entry.task_id) : "",
+                work_date: formatDateStr(entry.work_date) || getTodayDateStr(),
                 duration_hours: Math.floor(totalMins / 60),
                 duration_minutes: totalMins % 60,
                 description: entry.description || "",
@@ -177,9 +225,9 @@ export default function TimesheetsPage() {
         } else {
             setEditingEntryId(null);
             setEntryForm({
-                project_id: projects[0]?.id || "",
+                project_id: projects.length === 1 ? String(projects[0].id) : "",
                 task_id: "",
-                work_date: defaultDate || new Date().toISOString().slice(0, 10),
+                work_date: defaultDate || getTodayDateStr(),
                 duration_hours: 1,
                 duration_minutes: 0,
                 description: "",
@@ -197,6 +245,10 @@ export default function TimesheetsPage() {
             toast.error("Please select a project.");
             return;
         }
+        if (!timesheetData?.timesheet?.id) {
+            toast.error("Timesheet data is not loaded yet.");
+            return;
+        }
         const totalMinutes = (Number(entryForm.duration_hours) * 60) + Number(entryForm.duration_minutes);
         if (totalMinutes <= 0) {
             toast.error("Please enter a duration greater than 0 minutes.");
@@ -208,8 +260,8 @@ export default function TimesheetsPage() {
             await saveTimeEntry({
                 id: editingEntryId || undefined,
                 timesheet_id: timesheetData.timesheet.id,
-                project_id: entryForm.project_id,
-                task_id: entryForm.task_id || null,
+                project_id: Number(entryForm.project_id),
+                task_id: entryForm.task_id ? Number(entryForm.task_id) : null,
                 work_date: entryForm.work_date,
                 duration_minutes: totalMinutes,
                 description: entryForm.description.trim(),
@@ -377,7 +429,7 @@ export default function TimesheetsPage() {
                                     </span>
                                     <h3 className="font-bold text-sm text-slate-900">
                                         {timesheetData?.timesheet?.period_start_date
-                                            ? `${new Date(timesheetData.timesheet.period_start_date).toLocaleDateString([], { month: 'short', day: 'numeric' })} — ${new Date(timesheetData.timesheet.period_end_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                            ? `${formatDisplayDate(timesheetData.timesheet.period_start_date, { month: 'short', day: 'numeric' })} — ${formatDisplayDate(timesheetData.timesheet.period_end_date, { month: 'short', day: 'numeric', year: 'numeric' })}`
                                             : "Loading..."}
                                     </h3>
                                 </div>
@@ -389,7 +441,7 @@ export default function TimesheetsPage() {
                                     <i className="fa-solid fa-chevron-right text-xs"></i>
                                 </button>
                                 <button
-                                    onClick={() => setCurrentWeekDate(new Date().toISOString().slice(0, 10))}
+                                    onClick={() => setCurrentWeekDate(getTodayDateStr())}
                                     className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-50 text-[#0056cf] hover:bg-blue-100 cursor-pointer"
                                 >
                                     This Week
@@ -451,7 +503,7 @@ export default function TimesheetsPage() {
                         {/* 7-Day Matrix Calendar Cards */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                             {weekDays.map(day => {
-                                const dayEntries = (timesheetData?.entries || []).filter(e => e.work_date?.slice(0, 10) === day.date);
+                                const dayEntries = (timesheetData?.entries || []).filter(e => formatDateStr(e.work_date) === day.date);
                                 const dayMins = dayEntries.reduce((acc, e) => acc + Number(e.duration_minutes || 0), 0);
                                 const dayHours = (dayMins / 60.0).toFixed(1);
 
@@ -557,7 +609,7 @@ export default function TimesheetsPage() {
                                             {timesheetData.entries.map((entry) => (
                                                 <tr key={entry.id} className="hover:bg-slate-50/60">
                                                     <td className="px-5 py-3.5 font-bold text-slate-900 whitespace-nowrap">
-                                                        {new Date(entry.work_date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                                                        {formatDisplayDate(entry.work_date)}
                                                     </td>
                                                     <td className="px-4 py-3.5">
                                                         <span className="font-bold text-slate-900 block">{entry.project_title}</span>
@@ -664,7 +716,7 @@ export default function TimesheetsPage() {
                                                     <span className="block text-[10px] text-slate-400 font-normal">{ts.department_name || "General"}</span>
                                                 </td>
                                                 <td className="px-4 py-3.5 text-slate-700 whitespace-nowrap">
-                                                    {new Date(ts.period_start_date).toLocaleDateString([], { month: 'short', day: 'numeric' })} — {new Date(ts.period_end_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                    {formatDisplayDate(ts.period_start_date, { month: 'short', day: 'numeric' })} — {formatDisplayDate(ts.period_end_date, { month: 'short', day: 'numeric', year: 'numeric' })}
                                                 </td>
                                                 <td className="px-4 py-3.5 font-mono font-bold text-slate-900">
                                                     {ts.total_hours} hrs
@@ -742,7 +794,9 @@ export default function TimesheetsPage() {
                                     >
                                         <option value="">All Projects</option>
                                         {projects.map(p => (
-                                            <option key={p.id} value={p.id}>{p.title}</option>
+                                            <option key={p.id} value={p.id}>
+                                                {p.code ? `[${p.code}] ${p.name || p.title}` : (p.name || p.title || `Project #${p.id}`)}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
@@ -813,7 +867,7 @@ export default function TimesheetsPage() {
                                             {reportData.entries.map((r) => (
                                                 <tr key={r.id} className="hover:bg-slate-50/70">
                                                     <td className="px-4 py-3 whitespace-nowrap text-slate-700">
-                                                        {new Date(r.work_date).toLocaleDateString()}
+                                                        {formatDisplayDate(r.work_date, { month: 'short', day: 'numeric', year: 'numeric' })}
                                                     </td>
                                                     <td className="px-4 py-3 font-bold text-slate-900">
                                                         {r.user_name}
@@ -872,12 +926,14 @@ export default function TimesheetsPage() {
                                     <select
                                         required
                                         value={entryForm.project_id}
-                                        onChange={(e) => setEntryForm({ ...entryForm, project_id: e.target.value, task_id: "" })}
+                                        onChange={(e) => setEntryForm(prev => ({ ...prev, project_id: e.target.value, task_id: "" }))}
                                         className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#2878C7] font-semibold"
                                     >
                                         <option value="">Select Project</option>
                                         {projects.map(p => (
-                                            <option key={p.id} value={p.id}>{p.title}</option>
+                                            <option key={p.id} value={p.id}>
+                                                {p.code ? `[${p.code}] ${p.name || p.title}` : (p.name || p.title || `Project #${p.id}`)}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
@@ -885,13 +941,24 @@ export default function TimesheetsPage() {
                                     <label className="block font-bold text-slate-700 mb-1">Linked Task</label>
                                     <select
                                         value={entryForm.task_id}
-                                        onChange={(e) => setEntryForm({ ...entryForm, task_id: e.target.value })}
-                                        className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#2878C7]"
+                                        onChange={(e) => setEntryForm(prev => ({ ...prev, task_id: e.target.value }))}
+                                        disabled={!entryForm.project_id}
+                                        className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#2878C7] disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                                     >
-                                        <option value="">General / No specific task</option>
-                                        {availableTasksForProject.map(t => (
-                                            <option key={t.id} value={t.id}>{t.title}</option>
-                                        ))}
+                                        {!entryForm.project_id ? (
+                                            <option value="">Select a project first</option>
+                                        ) : availableTasksForProject.length === 0 ? (
+                                            <option value="">General / No specific task (no tasks in project)</option>
+                                        ) : (
+                                            <>
+                                                <option value="">General / No specific task</option>
+                                                {availableTasksForProject.map(t => (
+                                                    <option key={t.id} value={t.id}>
+                                                        {t.task_code ? `[${t.task_code}] ${t.title}` : t.title}
+                                                    </option>
+                                                ))}
+                                            </>
+                                        )}
                                     </select>
                                 </div>
                             </div>

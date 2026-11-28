@@ -12,6 +12,49 @@ import {
 } from "../../api/reminderApi";
 import ReminderPreferencesModal from "../../components/reminders/ReminderPreferencesModal";
 
+// Local date string helper: YYYY-MM-DD in user's browser timezone
+const getTodayDateStr = () => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
+
+// Default time helper: upcoming hour rounded up, e.g. 11:00
+const getDefaultTimeStr = () => {
+    const d = new Date();
+    d.setHours(d.getHours() + 1);
+    const h = String(d.getHours()).padStart(2, "0");
+    return `${h}:00`;
+};
+
+// Safe date parser supporting "YYYY-MM-DD HH:MM:SS", ISO strings, and Date objects
+const parseDateSafe = (dateVal) => {
+    if (!dateVal) return null;
+    if (dateVal instanceof Date) return isNaN(dateVal.getTime()) ? null : dateVal;
+    if (typeof dateVal === "string") {
+        const normalized = dateVal.trim().replace(" ", "T");
+        const parsed = new Date(normalized);
+        if (!isNaN(parsed.getTime())) return parsed;
+    }
+    const fallback = new Date(dateVal);
+    return isNaN(fallback.getTime()) ? null : fallback;
+};
+
+// Format reminder date/time cleanly for display
+const formatReminderDateTime = (dateVal) => {
+    const d = parseDateSafe(dateVal);
+    if (!d) return "--";
+    return d.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        year: d.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+};
+
 export default function ReminderCenterPage() {
     const user = useMemo(() => {
         try {
@@ -40,10 +83,16 @@ export default function ReminderCenterPage() {
     const [newTitle, setNewTitle] = useState("");
     const [newDescription, setNewDescription] = useState("");
     const [newSourceType, setNewSourceType] = useState("personal");
-    const [newTriggerDate, setNewTriggerDate] = useState(new Date().toISOString().slice(0, 10));
-    const [newTriggerTime, setNewTriggerTime] = useState("10:00");
+    const [newTriggerDate, setNewTriggerDate] = useState(getTodayDateStr());
+    const [newTriggerTime, setNewTriggerTime] = useState(getDefaultTimeStr());
     const [newEscalationEnabled, setNewEscalationEnabled] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+
+    const handleOpenCreateModal = () => {
+        setNewTriggerDate(getTodayDateStr());
+        setNewTriggerTime(getDefaultTimeStr());
+        setIsCreateModalOpen(true);
+    };
 
     // Fetch metrics
     const fetchMetrics = useCallback(async () => {
@@ -85,6 +134,25 @@ export default function ReminderCenterPage() {
         fetchRemindersList();
     }, [fetchRemindersList]);
 
+    // Live auto-refresh: update metrics & list on background reminder updates or every 15s
+    useEffect(() => {
+        const handleReminderUpdated = () => {
+            fetchMetrics();
+            fetchRemindersList();
+        };
+
+        window.addEventListener("reminder_updated", handleReminderUpdated);
+        const interval = setInterval(() => {
+            fetchMetrics();
+            fetchRemindersList();
+        }, 15000);
+
+        return () => {
+            window.removeEventListener("reminder_updated", handleReminderUpdated);
+            clearInterval(interval);
+        };
+    }, [fetchMetrics, fetchRemindersList]);
+
     // Fast action handlers
     const handleComplete = async (id) => {
         try {
@@ -99,9 +167,7 @@ export default function ReminderCenterPage() {
 
     const handleSnooze = async (id, minutes) => {
         try {
-            const now = new Date();
-            const snoozeUntil = new Date(now.getTime() + minutes * 60 * 1000).toISOString();
-            await snoozeReminder(id, { snoozeUntil });
+            await snoozeReminder(id, { minutes });
             toast.success(`Snoozed for ${minutes >= 60 ? `${minutes / 60} hour(s)` : `${minutes} mins`}`);
             fetchRemindersList();
             fetchMetrics();
@@ -208,7 +274,7 @@ export default function ReminderCenterPage() {
                     </button>
 
                     <button
-                        onClick={() => setIsCreateModalOpen(true)}
+                        onClick={handleOpenCreateModal}
                         className="px-4 py-2 rounded-xl bg-[#17365D] hover:bg-[#102642] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-2 cursor-pointer"
                     >
                         <i className="fa-solid fa-plus text-xs"></i>
@@ -331,7 +397,7 @@ export default function ReminderCenterPage() {
                         <p className="text-sm font-bold text-slate-700">No reminders found.</p>
                         <p className="text-xs text-slate-400">You are all caught up! Click below to create a new reminder.</p>
                         <button
-                            onClick={() => setIsCreateModalOpen(true)}
+                            onClick={handleOpenCreateModal}
                             className="px-4 py-2 bg-[#17365D] hover:bg-[#102642] text-white text-xs font-bold rounded-xl shadow-xs cursor-pointer"
                         >
                             Set Reminder
@@ -340,9 +406,11 @@ export default function ReminderCenterPage() {
                 ) : (
                     <div className="divide-y divide-slate-100 overflow-y-auto">
                         {filteredReminders.map((rem) => {
-                            const isOverdue = rem.status === 'pending' && new Date(rem.trigger_at) < new Date();
                             const isSnoozed = rem.status === 'snoozed';
                             const isCompleted = rem.status === 'completed';
+                            const effectiveTriggerTime = isSnoozed && rem.snooze_until ? rem.snooze_until : rem.trigger_at;
+                            const parsedEffective = parseDateSafe(effectiveTriggerTime);
+                            const isOverdue = rem.status === 'pending' && parsedEffective && parsedEffective < new Date();
 
                             return (
                                 <div
@@ -393,7 +461,16 @@ export default function ReminderCenterPage() {
                                             <div className="flex items-center gap-3 text-[11px] text-slate-400 font-medium">
                                                 <span>
                                                     <i className="fa-regular fa-clock mr-1"></i>
-                                                    {new Date(rem.trigger_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                                    {isSnoozed && rem.snooze_until ? (
+                                                        <span>
+                                                            Snoozed until{" "}
+                                                            <span className="font-semibold text-amber-700">
+                                                                {formatReminderDateTime(rem.snooze_until)}
+                                                            </span>
+                                                        </span>
+                                                    ) : (
+                                                        <span>{formatReminderDateTime(rem.trigger_at)}</span>
+                                                    )}
                                                 </span>
                                                 {rem.escalated_to_user_name && (
                                                     <span className="text-rose-600 font-bold">

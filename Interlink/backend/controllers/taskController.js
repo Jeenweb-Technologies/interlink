@@ -242,7 +242,7 @@ exports.getTasks = async (req, res) => {
         const [tasks] = await db.execute(query, params);
 
         if (tasks.length === 0) {
-            return res.status(200).json({ success: true, data: [] });
+            return res.status(200).json({ success: true, data: [], tasks: [] });
         }
 
         const taskIds = tasks.map(t => t.id);
@@ -307,7 +307,7 @@ exports.getTasks = async (req, res) => {
             };
         });
 
-        res.status(200).json({ success: true, data: enrichedTasks });
+        res.status(200).json({ success: true, data: enrichedTasks, tasks: enrichedTasks });
     } catch (error) {
         console.error("getTasks error:", error);
         res.status(500).json({ success: false, message: "Error loading tasks", error: error.message });

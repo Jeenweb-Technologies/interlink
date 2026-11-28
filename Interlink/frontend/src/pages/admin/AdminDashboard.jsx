@@ -194,7 +194,7 @@ export default function AdminDashboard() {
             userTypeId: u.user_type_id ? String(u.user_type_id) : "",
             role: u.role || "user",
             active: !!u.active,
-            deviceVerificationRequired: typeof u.device_verification_required === "boolean" ? u.device_verification_required : true,
+            deviceVerificationRequired: !(u.device_verification_required === 0 || u.device_verification_required === false || u.device_verification_required === "0" || u.device_verification_required === "false"),
             password: "",
             companyIds: assignedCompIds
         });

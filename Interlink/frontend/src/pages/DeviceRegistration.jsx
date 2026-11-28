@@ -44,7 +44,10 @@ export default function DeviceRegistration() {
                 deviceId
             });
             
-            if (response.data.success || response.data.status === "PENDING_APPROVAL") {
+            if (response.data.status === "APPROVED") {
+                toast.success(response.data.message || "This device is already approved! You can log in.");
+                navigate("/");
+            } else if (response.data.success || response.data.status === "PENDING_APPROVAL") {
                 navigate("/pending-approval");
             } else {
                 toast.error("Failed to submit device for approval");

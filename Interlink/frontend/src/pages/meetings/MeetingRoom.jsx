@@ -14,6 +14,66 @@ import MeetingChatDrawer from "../../components/meetings/MeetingChatDrawer";
 import MeetingNotesDrawer from "../../components/meetings/MeetingNotesDrawer";
 import RecordingConsentModal from "../../components/meetings/RecordingConsentModal";
 
+function RemoteParticipantAudio({ stream, onAutoplayBlocked }) {
+    const audioRef = useRef(null);
+
+    useEffect(() => {
+        const audioEl = audioRef.current;
+        if (!audioEl || !stream) return;
+
+        if (audioEl.srcObject !== stream) {
+            audioEl.srcObject = stream;
+        }
+
+        const tryPlay = () => {
+            if (audioEl) {
+                audioEl.play().then(() => {
+                    if (onAutoplayBlocked) onAutoplayBlocked(false);
+                }).catch((err) => {
+                    console.warn("[RemoteAudio] Autoplay pending user interaction:", err.message);
+                    if (onAutoplayBlocked) onAutoplayBlocked(true);
+                });
+            }
+        };
+
+        tryPlay();
+
+        const onAddTrack = () => tryPlay();
+        stream.addEventListener("addtrack", onAddTrack);
+
+        stream.getAudioTracks().forEach((track) => {
+            track.addEventListener("unmute", tryPlay);
+        });
+
+        const onUserInteraction = () => {
+            tryPlay();
+        };
+
+        window.addEventListener("click", onUserInteraction);
+        window.addEventListener("touchstart", onUserInteraction);
+        window.addEventListener("keydown", onUserInteraction);
+
+        return () => {
+            stream.removeEventListener("addtrack", onAddTrack);
+            stream.getAudioTracks().forEach((track) => {
+                track.removeEventListener("unmute", tryPlay);
+            });
+            window.removeEventListener("click", onUserInteraction);
+            window.removeEventListener("touchstart", onUserInteraction);
+            window.removeEventListener("keydown", onUserInteraction);
+        };
+    }, [stream, onAutoplayBlocked]);
+
+    return (
+        <audio
+            ref={audioRef}
+            autoPlay
+            playsInline
+            style={{ display: "none" }}
+        />
+    );
+}
+
 export default function MeetingRoom() {
     const { roomCode } = useParams();
     const navigate = useNavigate();
@@ -27,6 +87,7 @@ export default function MeetingRoom() {
     const [loading, setLoading] = useState(true);
     const [isMeetingEnded, setIsMeetingEnded] = useState(false);
     const [isHost, setIsHost] = useState(false);
+    const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
     // Media Hardware & Streams
     const [localStream, setLocalStream] = useState(null);
@@ -61,8 +122,14 @@ export default function MeetingRoom() {
     const [permissions, setPermissions] = useState({
         canShareScreen: true,
         canEditWhiteboard: true,
-        canChat: true
+        canChat: true,
+        canTurnOnVideo: true
     });
+
+    const permissionsRef = useRef(permissions);
+    useEffect(() => {
+        permissionsRef.current = permissions;
+    }, [permissions]);
 
     const localVideoRef = useRef(null);
     const screenVideoRef = useRef(null);
@@ -123,10 +190,17 @@ export default function MeetingRoom() {
             };
 
             pc.ontrack = (event) => {
-                const stream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
                 setRemoteStreams((prev) => {
+                    let stream = (event.streams && event.streams[0]) ? event.streams[0] : prev[targetSocketId];
+                    if (!stream) {
+                        stream = new MediaStream([event.track]);
+                    } else if (!stream.getTracks().some((t) => t.id === event.track.id)) {
+                        stream.addTrack(event.track);
+                    }
                     const next = { ...prev, [targetSocketId]: stream };
                     if (targetParticipant?.id) next[targetParticipant.id] = stream;
+                    if (targetParticipant?.socketId) next[targetParticipant.socketId] = stream;
+                    if (targetParticipant?.user_id) next[`user_${targetParticipant.user_id}`] = stream;
                     return next;
                 });
             };
@@ -137,6 +211,8 @@ export default function MeetingRoom() {
                         const next = { ...prev };
                         delete next[targetSocketId];
                         if (targetParticipant?.id) delete next[targetParticipant.id];
+                        if (targetParticipant?.socketId) delete next[targetParticipant.socketId];
+                        if (targetParticipant?.user_id) delete next[`user_${targetParticipant.user_id}`];
                         return next;
                     });
                 }
@@ -190,16 +266,9 @@ export default function MeetingRoom() {
                     const myUserId = user.id;
                     const myDisplayName = preJoinState.displayName || user.name || "Guest";
 
-                    // Separate admitted vs waiting participants, excluding self from remote tiles
-                    const allParts = res.data.participants || [];
-                    const remotes = allParts.filter((p) => {
-                        if (p.status !== "admitted") return false;
-                        if (myUserId && (p.user_id === myUserId || p.id === myUserId)) return false;
-                        if (p.guest_name && p.guest_name === myDisplayName && !p.user_id && !myUserId) return false;
-                        return true;
-                    });
-                    setParticipants(remotes);
-                    setWaitingParticipants(allParts.filter((p) => p.status === "waiting_room"));
+                    // Live video grid begins empty and is populated purely by active WebRTC/Socket peers
+                    setParticipants([]);
+                    setWaitingParticipants((res.data.participants || []).filter((p) => p.status === "waiting_room"));
                 } else {
                     toast.error("Meeting not found");
                     navigate("/meetings");
@@ -214,10 +283,41 @@ export default function MeetingRoom() {
                 const myDisplayName = preJoinState.displayName || user.name || "Guest";
                 const myUserId = user.id;
 
+                // Helper to check if a participant object is the local user
+                const isSelf = (p) => {
+                    if (!p) return false;
+                    if (socketRef.current && p.socketId && p.socketId === socketRef.current.id) return true;
+                    if (myIdentity && p.id && String(p.id) === String(myIdentity)) return true;
+
+                    const pUserId = p.user_id || (typeof p.id === "string" && p.id.startsWith("user_") ? p.id.replace("user_", "") : p.id);
+                    if (myUserId && pUserId && String(pUserId) === String(myUserId)) return true;
+
+                    const pName = p.name || p.display_name || p.guest_name;
+                    if (pName && myDisplayName && pName === myDisplayName && !pUserId && !myUserId) return true;
+
+                    return false;
+                };
+
+                // Helper to check if two participant entries correspond to the same human/peer
+                const isSamePeer = (p1, p2) => {
+                    if (!p1 || !p2) return false;
+                    if (p1.socketId && p2.socketId && p1.socketId === p2.socketId) return true;
+                    if (p1.id && p2.id && String(p1.id) === String(p2.id)) return true;
+
+                    const p1UserId = p1.user_id || (typeof p1.id === "string" && p1.id.startsWith("user_") ? p1.id.replace("user_", "") : null);
+                    const p2UserId = p2.user_id || (typeof p2.id === "string" && p2.id.startsWith("user_") ? p2.id.replace("user_", "") : null);
+                    if (p1UserId && p2UserId && String(p1UserId) === String(p2UserId)) return true;
+
+                    if (p1.role === "host" && p2.role === "host") return true;
+
+                    return false;
+                };
+
                 socket.emit("join_meeting_room", {
                     roomCode,
                     participant: {
                         id: myIdentity,
+                        user_id: myUserId,
                         name: myDisplayName,
                         role: user.id && user.id === res.data.meeting.host_id ? "host" : "participant"
                     }
@@ -231,9 +331,9 @@ export default function MeetingRoom() {
                         const next = [...prev];
                         peers.forEach(({ socketId, participant }) => {
                             const partWithSocket = { ...(participant || {}), socketId };
-                            const existingIdx = next.findIndex(
-                                (p) => p.socketId === socketId || (p.id && p.id === participant?.id)
-                            );
+                            if (isSelf(partWithSocket)) return;
+
+                            const existingIdx = next.findIndex((p) => isSamePeer(p, partWithSocket));
                             if (existingIdx >= 0) {
                                 next[existingIdx] = { ...next[existingIdx], ...partWithSocket };
                             } else {
@@ -245,7 +345,10 @@ export default function MeetingRoom() {
 
                     // Initiate WebRTC connection to each existing peer
                     peers.forEach(({ socketId, participant }) => {
-                        createPeerConnection(socketId, true, participant);
+                        const partWithSocket = { ...(participant || {}), socketId };
+                        if (!isSelf(partWithSocket)) {
+                            createPeerConnection(socketId, true, participant);
+                        }
                     });
                 });
 
@@ -263,6 +366,13 @@ export default function MeetingRoom() {
                                 }
                                 pc._pendingCandidates = [];
                             }
+
+                            // Ensure transceivers on answerer are set to sendrecv so host audio/video are always transmitted
+                            pc.getTransceivers().forEach((t) => {
+                                if (t.direction === "recvonly") {
+                                    t.direction = "sendrecv";
+                                }
+                            });
 
                             const answer = await pc.createAnswer();
                             await pc.setLocalDescription(answer);
@@ -302,17 +412,15 @@ export default function MeetingRoom() {
                 });
 
                 socket.on("peer_joined", ({ participant, socketId }) => {
+                    const partWithSocket = { ...(participant || {}), socketId };
                     // Ignore self
-                    if (socketId === socket.id || participant?.id === myIdentity || (myUserId && participant?.id === `user_${myUserId}`)) {
+                    if (isSelf(partWithSocket)) {
                         return;
                     }
                     const displayName = participant?.name || participant?.display_name || "A participant";
                     toast.success(`${displayName} joined the room`);
                     setParticipants((prev) => {
-                        const partWithSocket = { ...(participant || {}), socketId };
-                        const existingIdx = prev.findIndex(
-                            (p) => p.socketId === socketId || (p.id && p.id === participant?.id)
-                        );
+                        const existingIdx = prev.findIndex((p) => isSamePeer(p, partWithSocket));
                         if (existingIdx >= 0) {
                             const next = [...prev];
                             next[existingIdx] = { ...next[existingIdx], ...partWithSocket };
@@ -320,6 +428,15 @@ export default function MeetingRoom() {
                         }
                         return [...prev, partWithSocket];
                     });
+
+                    // Sync current room permissions to newcomer if this client is host
+                    if (userIsHost && socketRef.current) {
+                        socketRef.current.emit("host_control_action", {
+                            roomCode,
+                            action: "update_permissions",
+                            payload: permissionsRef.current
+                        });
+                    }
                 });
 
                 socket.on("peer_left", ({ socketId, participantId }) => {
@@ -403,6 +520,16 @@ export default function MeetingRoom() {
                     } else if (action === "kick_participant" && targetParticipantId === (user.id || myIdentity)) {
                         toast.error("You have been removed from the meeting.");
                         navigate("/meetings");
+                    } else if (action === "update_permissions" && payload) {
+                        setPermissions(payload);
+                        if (payload.canTurnOnVideo === false && !userIsHost) {
+                            const curStream = localStreamRef.current;
+                            if (curStream) {
+                                curStream.getVideoTracks().forEach((t) => (t.enabled = false));
+                            }
+                            setIsCamOff(true);
+                            toast("Host has disabled participant cameras.", { icon: "📹" });
+                        }
                     }
                 });
             } catch (err) {
@@ -439,10 +566,21 @@ export default function MeetingRoom() {
             let stream = null;
             let cameraBusy = false;
 
+            const audioConstraints = {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                ...(preJoinState.selectedAudioInputId ? { deviceId: { exact: preJoinState.selectedAudioInputId } } : {})
+            };
+
+            const videoConstraints = preJoinState.selectedVideoId
+                ? { deviceId: { exact: preJoinState.selectedVideoId } }
+                : true;
+
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: !preJoinState.initialCamOff,
-                    audio: true
+                    video: videoConstraints,
+                    audio: audioConstraints
                 });
             } catch (err) {
                 console.warn("Could not start local camera stream:", err.message);
@@ -450,7 +588,7 @@ export default function MeetingRoom() {
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: false,
-                        audio: true
+                        audio: audioConstraints
                     });
                     cameraBusy = true;
                     setIsCamOff(true);
@@ -466,15 +604,21 @@ export default function MeetingRoom() {
             }
 
             if (stream) {
+                localStreamRef.current = stream;
                 setLocalStream(stream);
 
                 // Apply initial state from Green Room
                 if (preJoinState.initialMicMuted) {
                     stream.getAudioTracks().forEach((t) => (t.enabled = false));
+                } else {
+                    stream.getAudioTracks().forEach((t) => (t.enabled = true));
                 }
                 if (preJoinState.initialCamOff || cameraBusy) {
                     stream.getVideoTracks().forEach((t) => (t.enabled = false));
                     setIsCamOff(true);
+                } else {
+                    stream.getVideoTracks().forEach((t) => (t.enabled = true));
+                    setIsCamOff(false);
                 }
 
                 if (localVideoRef.current && !cameraBusy) {
@@ -504,14 +648,23 @@ export default function MeetingRoom() {
         Object.values(peersRef.current).forEach((pc) => {
             try {
                 localStream.getTracks().forEach((track) => {
-                    const senders = pc.getSenders();
-                    const existingSender = senders.find(
-                        (s) => (s.track && s.track.kind === track.kind) || s.kind === track.kind
+                    const transceivers = pc.getTransceivers ? pc.getTransceivers() : [];
+                    const existingTransceiver = transceivers.find(
+                        (t) => t.sender?.track?.kind === track.kind || t.receiver?.track?.kind === track.kind
                     );
-                    if (existingSender) {
-                        existingSender.replaceTrack(track).catch(() => {});
+                    if (existingTransceiver && existingTransceiver.sender) {
+                        existingTransceiver.sender.replaceTrack(track).catch(() => {});
+                        if (existingTransceiver.direction === "recvonly") {
+                            existingTransceiver.direction = "sendrecv";
+                        }
                     } else {
-                        pc.addTrack(track, localStream);
+                        const senders = pc.getSenders();
+                        const existingSender = senders.find((s) => s.track && s.track.kind === track.kind);
+                        if (existingSender) {
+                            existingSender.replaceTrack(track).catch(() => {});
+                        } else {
+                            pc.addTrack(track, localStream);
+                        }
                     }
                 });
             } catch (err) {
@@ -532,8 +685,9 @@ export default function MeetingRoom() {
     };
 
     const handleMuteLocal = () => {
-        if (localStream) {
-            localStream.getAudioTracks().forEach((t) => {
+        const stream = localStreamRef.current || localStream;
+        if (stream) {
+            stream.getAudioTracks().forEach((t) => {
                 t.enabled = false;
             });
         }
@@ -542,22 +696,33 @@ export default function MeetingRoom() {
 
     // Toggle Camera
     const handleToggleCam = async () => {
-        if (!permissions.canTurnOnVideo && !isHost && isCamOff) {
+        if (permissions.canTurnOnVideo === false && !isHost && isCamOff) {
             toast.error("Host has disabled participant cameras.");
             return;
         }
 
-        if (localStream) {
-            const videoTracks = localStream.getVideoTracks();
-            if (videoTracks.length === 0) {
+        const stream = localStreamRef.current || localStream;
+        if (stream) {
+            const videoTracks = stream.getVideoTracks();
+            const activeVideoTracks = videoTracks.filter((t) => t.readyState !== "ended");
+            if (activeVideoTracks.length === 0) {
                 // If stream was audio-only (e.g. camera was locked upon join), try to acquire video track now
                 try {
-                    const vStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    const vStream = await navigator.mediaDevices.getUserMedia({
+                        video: preJoinState.selectedVideoId
+                            ? { deviceId: { exact: preJoinState.selectedVideoId } }
+                            : true
+                    });
                     const vTrack = vStream.getVideoTracks()[0];
                     if (vTrack) {
-                        localStream.addTrack(vTrack);
+                        stream.addTrack(vTrack);
+                        const updatedStream = new MediaStream(stream.getTracks());
+                        localStreamRef.current = updatedStream;
+                        setLocalStream(updatedStream);
+
                         if (localVideoRef.current) {
-                            localVideoRef.current.srcObject = localStream;
+                            localVideoRef.current.srcObject = updatedStream;
+                            localVideoRef.current.play().catch(() => {});
                         }
                         // Update peer connections with new video track
                         Object.values(peersRef.current).forEach((pc) => {
@@ -568,7 +733,7 @@ export default function MeetingRoom() {
                             if (existingSender) {
                                 existingSender.replaceTrack(vTrack).catch(() => {});
                             } else {
-                                pc.addTrack(vTrack, localStream);
+                                pc.addTrack(vTrack, updatedStream);
                             }
                         });
                         setIsCamOff(false);
@@ -580,16 +745,33 @@ export default function MeetingRoom() {
                 return;
             }
 
-            videoTracks.forEach((t) => {
-                t.enabled = isCamOff;
+            const nextCamState = !isCamOff;
+            activeVideoTracks.forEach((t) => {
+                t.enabled = isCamOff; // if currently off, enable track; if on, disable track
             });
-            setIsCamOff(!isCamOff);
+            setIsCamOff(nextCamState);
+        } else {
+            try {
+                const newStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: !isMicMuted
+                });
+                setLocalStream(newStream);
+                localStreamRef.current = newStream;
+                if (localVideoRef.current) {
+                    localVideoRef.current.srcObject = newStream;
+                }
+                setIsCamOff(false);
+                toast.success("Camera connected");
+            } catch (err) {
+                toast.error("Could not access camera.");
+            }
         }
     };
 
     // Toggle Screen Share
     const handleToggleScreenShare = async () => {
-        if (!permissions.canShareScreen && !isHost) {
+        if (permissions.canShareScreen === false && !isHost) {
             toast.error("Screen sharing has been disabled by the host.");
             return;
         }
@@ -662,6 +844,18 @@ export default function MeetingRoom() {
             targetParticipantId,
             payload
         });
+    };
+
+    // Host Permissions Updater
+    const handleUpdatePermissions = (newPermissions) => {
+        setPermissions(newPermissions);
+        if (socketRef.current && isHost) {
+            socketRef.current.emit("host_control_action", {
+                roomCode,
+                action: "update_permissions",
+                payload: newPermissions
+            });
+        }
     };
 
     // Start / Stop Recording
@@ -911,6 +1105,7 @@ export default function MeetingRoom() {
                                 ref={screenVideoRef}
                                 autoPlay
                                 playsInline
+                                muted={true}
                                 className="w-full h-full object-contain rounded-2xl"
                             />
                             <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white flex items-center gap-2 border border-white/10">
@@ -953,8 +1148,12 @@ export default function MeetingRoom() {
                                             if (el) {
                                                 el.muted = true;
                                                 el.defaultMuted = true;
-                                                if (localStream && el.srcObject !== localStream) {
-                                                    el.srcObject = localStream;
+                                                const curStream = localStreamRef.current || localStream;
+                                                if (curStream && el.srcObject !== curStream) {
+                                                    el.srcObject = curStream;
+                                                }
+                                                if (el.paused) {
+                                                    el.play().catch(() => {});
                                                 }
                                             }
                                         }}
@@ -994,8 +1193,15 @@ export default function MeetingRoom() {
                                 const pId = p.socketId || p.id || p.identity;
                                 const isRemoteHandRaised = raisedHands.has(pId) || (p.id && raisedHands.has(p.id));
                                 const displayName = p.display_name || p.user_name || p.name || p.guest_name || "Participant";
-                                const remoteStream = (p.socketId && remoteStreams[p.socketId]) || (p.id && remoteStreams[p.id]) || (p.identity && remoteStreams[p.identity]);
-                                const hasVideo = remoteStream && remoteStream.getVideoTracks().length > 0 && remoteStream.getVideoTracks().some((t) => t.enabled);
+                                const remoteStream =
+                                    (p.socketId && remoteStreams[p.socketId]) ||
+                                    (p.id && remoteStreams[p.id]) ||
+                                    (p.identity && remoteStreams[p.identity]) ||
+                                    (p.user_id && remoteStreams[`user_${p.user_id}`]);
+                                const hasVideo =
+                                    remoteStream &&
+                                    remoteStream.getVideoTracks().length > 0 &&
+                                    remoteStream.getVideoTracks().some((t) => t.enabled);
 
                                 return (
                                     <div
@@ -1005,12 +1211,17 @@ export default function MeetingRoom() {
                                         {hasVideo ? (
                                             <video
                                                 ref={(el) => {
-                                                    if (el && remoteStream && el.srcObject !== remoteStream) {
-                                                        el.srcObject = remoteStream;
+                                                    if (el) {
+                                                        el.muted = true;
+                                                        el.defaultMuted = true;
+                                                        if (remoteStream && el.srcObject !== remoteStream) {
+                                                            el.srcObject = remoteStream;
+                                                        }
                                                     }
                                                 }}
                                                 autoPlay
                                                 playsInline
+                                                muted={true}
                                                 className="w-full h-full object-cover"
                                             />
                                         ) : (
@@ -1022,19 +1233,6 @@ export default function MeetingRoom() {
                                                     {displayName}
                                                 </span>
                                             </div>
-                                        )}
-
-                                        {/* Remote Audio Track (always attached so participant is heard even if video is off) */}
-                                        {remoteStream && remoteStream.getAudioTracks().length > 0 && (
-                                            <audio
-                                                ref={(el) => {
-                                                    if (el && remoteStream && el.srcObject !== remoteStream) {
-                                                        el.srcObject = remoteStream;
-                                                        el.play().catch(() => {});
-                                                    }
-                                                }}
-                                                autoPlay
-                                            />
                                         )}
 
                                         <div className="absolute bottom-2.5 left-2.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 border border-white/10">
@@ -1058,6 +1256,36 @@ export default function MeetingRoom() {
                     )}
                 </div>
 
+                {/* Global Dedicated Remote Audio Sink: ensures all remote audio streams (host & participants) are decoded and played seamlessly, avoiding mute conflicts and tile unmount issues */}
+                {Object.entries(remoteStreams).reduce((acc, [, s]) => {
+                    if (s && s.getAudioTracks && s.getAudioTracks().length > 0 && !acc.some((item) => item.id === s.id)) {
+                        acc.push(s);
+                    }
+                    return acc;
+                }, []).map((stream) => (
+                    <RemoteParticipantAudio
+                        key={stream.id}
+                        stream={stream}
+                        onAutoplayBlocked={setIsAutoplayBlocked}
+                    />
+                ))}
+
+                {/* Autoplay Unlock Banner for participants whose browsers suspended unmuted audio */}
+                {isAutoplayBlocked && (
+                    <div
+                        onClick={() => {
+                            document.querySelectorAll("audio").forEach((el) => {
+                                el.play?.().catch(() => {});
+                            });
+                            setIsAutoplayBlocked(false);
+                        }}
+                        className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 cursor-pointer transition-all animate-pulse border border-amber-300"
+                    >
+                        <i className="fa-solid fa-volume-high"></i>
+                        <span>Click anywhere to enable meeting audio</span>
+                    </div>
+                )}
+
                 {/* Drawers */}
                 <HostControlsDrawer
                     isOpen={isHostDrawerOpen}
@@ -1080,7 +1308,7 @@ export default function MeetingRoom() {
                     }}
                     onHostAction={handleHostAction}
                     permissions={permissions}
-                    onUpdatePermissions={setPermissions}
+                    onUpdatePermissions={handleUpdatePermissions}
                 />
 
                 <MeetingChatDrawer
